@@ -6,8 +6,7 @@
 enum class CourseBarComponentType
 {
     Date,          // 日期
-    CourseView,    // 课程查看
-    Countdown      // 倒计时
+    CourseView     // 课程查看
 };
 
 struct CourseBarComponentConfig
@@ -21,8 +20,7 @@ struct CourseBarConfig
     int height = 49;
     QList<CourseBarComponentConfig> components{
         {CourseBarComponentType::Date, true},
-        {CourseBarComponentType::CourseView, true},
-        {CourseBarComponentType::Countdown, true}
+        {CourseBarComponentType::CourseView, true}
     };
 };
 #endif //CLASSTOPLAND_NEXT_COURSEBARCONFIG_H

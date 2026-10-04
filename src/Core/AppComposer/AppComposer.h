@@ -7,6 +7,9 @@
 #include"../../CourseBar/CourseBar.h"
 #include<QDir>
 #include<QMessageBox>
+#include <memory>
+
+class TaskbarTrayMenu;
 
 #define DATA_PATH (QDir::homePath()+"/ClassTopLand-Next_Data")
 #define CONFIG_FILE_PATH (DATA_PATH+"/MainConfig.json")
@@ -14,6 +17,7 @@
 #define GET_PROFILE_PATH(profileName) (PROFILES_PATH+"/"+profileName+".json")
 class AppComposer : public QObject
 {
+    Q_OBJECT
 public:
     AppComposer(QObject *parent = nullptr);
     ~AppComposer();
@@ -23,7 +27,8 @@ private:
     void dropInstances();
     void printLogo();
     bool initialized_ = false;
-    CourseBar* courseBar;
+    std::unique_ptr<CourseBar> courseBar;
+    std::unique_ptr<TaskbarTrayMenu> trayMenu_;
 };
 
 

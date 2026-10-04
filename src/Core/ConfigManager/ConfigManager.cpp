@@ -25,7 +25,6 @@ QString componentTypeText(CourseBarComponentType type)
     switch (type) {
     case CourseBarComponentType::Date: return QStringLiteral("date");
     case CourseBarComponentType::CourseView: return QStringLiteral("courseView");
-    case CourseBarComponentType::Countdown: return QStringLiteral("countdown");
     }
     return {};
 }
@@ -92,10 +91,16 @@ bool fromJson(const QJsonObject& root, Config& config, QString* error)
             const QJsonObject item = components.at(i).toObject();
             const QJsonValue type = item.value(QStringLiteral("type"));
             if (!type.isString()) return fail(error, path + QStringLiteral(".type must be a string"));
+            // Retired version-1 component: omit it from the next normal save.
+            if (type.toString() == QStringLiteral("countdown")) {
+                const QJsonValue enabled = item.value(QStringLiteral("enabled"));
+                if (!enabled.isUndefined() && !enabled.isBool())
+                    return fail(error, path + QStringLiteral(".enabled must be a boolean"));
+                continue;
+            }
             CourseBarComponentType parsedType;
             if (type.toString() == QStringLiteral("date")) parsedType = CourseBarComponentType::Date;
             else if (type.toString() == QStringLiteral("courseView")) parsedType = CourseBarComponentType::CourseView;
-            else if (type.toString() == QStringLiteral("countdown")) parsedType = CourseBarComponentType::Countdown;
             else return fail(error, path + QStringLiteral(".type is invalid"));
             CourseBarComponentConfig component{parsedType};
             const QJsonValue enabled = item.value(QStringLiteral("enabled"));

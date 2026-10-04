@@ -37,7 +37,14 @@ add_executable(ClassTopLand_Next main.cpp
         src/Utils/GlassHelper/GlassHelper.cpp
         src/Core/Model/CourseBarConfig.h
         src/CourseBar/CourseBar.cpp
-        src/CourseBar/CourseBar.h)
+        src/CourseBar/CourseBar.h
+        src/CourseBar/ICourseBarComponent.h
+        src/CourseBar/BuiltinComponents/Date/Date.cpp
+        src/CourseBar/BuiltinComponents/Date/Date.h
+        src/CourseBar/BuiltinComponents/CourseView/CourseView.cpp
+        src/CourseBar/BuiltinComponents/CourseView/CourseView.h
+        src/TaskbarTrayMenu/TaskbarTrayMenu.cpp
+        src/TaskbarTrayMenu/TaskbarTrayMenu.h)
 target_link_libraries(ClassTopLand_Next
         Qt::Core
         Qt::Gui
