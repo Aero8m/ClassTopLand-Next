@@ -1,0 +1,3 @@
+[submodule "third_party/ElaWidgetTools-Plus"]
+	path = third_party/ElaWidgetTools-Plus
+	url = https://github.com/Aero8m/ElaWidgetTools-Plus.git
