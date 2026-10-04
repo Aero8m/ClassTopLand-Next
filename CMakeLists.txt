@@ -44,7 +44,9 @@ add_executable(ClassTopLand_Next main.cpp
         src/CourseBar/BuiltinComponents/CourseView/CourseView.cpp
         src/CourseBar/BuiltinComponents/CourseView/CourseView.h
         src/TaskbarTrayMenu/TaskbarTrayMenu.cpp
-        src/TaskbarTrayMenu/TaskbarTrayMenu.h)
+        src/TaskbarTrayMenu/TaskbarTrayMenu.h
+        src/SettingsWindow/SettingsWindow.cpp
+        src/SettingsWindow/SettingsWindow.h)
 target_link_libraries(ClassTopLand_Next
         Qt::Core
         Qt::Gui
