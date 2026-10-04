@@ -22,11 +22,17 @@ public:
     AppComposer(QObject *parent = nullptr);
     ~AppComposer();
     bool startApp();
+    // Deterministic teardown: destroys the windows, saves config and profile, and
+    // drains pending deferred deletions. Called explicitly by main right after the
+    // event loop returns, so cleanup no longer depends on scope-exit timing.
+    // Safe to call more than once.
+    void shutdown();
 private:
     bool initInstances();
     void dropInstances();
     void printLogo();
     bool initialized_ = false;
+    bool shutdown_ = false;
     std::unique_ptr<CourseBar> courseBar;
     std::unique_ptr<TaskbarTrayMenu> trayMenu_;
 };

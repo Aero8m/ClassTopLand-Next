@@ -25,6 +25,11 @@ public slots:
     void showMenu();
     void hideMenu();
 
+    // The only way this window may end the application. Restart and quit both
+    // go through it, so both use the same already-proven exit mechanism, and a
+    // repeated signal can never exit twice. Hiding the panel is not an exit.
+    void requestExit(int exitCode);
+
 protected:
     bool event(QEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
@@ -43,6 +48,7 @@ private:
     QPropertyAnimation* opacityAnimation_ = nullptr;
     QPoint animationOffset_{0, 12};
     bool hiding_ = false;
+    bool exitRequested_ = false;
     quint64 presentationRevision_ = 0;
 };
 

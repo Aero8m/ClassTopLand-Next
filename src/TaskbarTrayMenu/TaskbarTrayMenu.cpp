@@ -173,10 +173,12 @@ void TaskbarTrayMenu::initUI()
     footerLayout->addWidget(restart);
     footerLayout->addWidget(quit);
     mainLayout->addWidget(footer_);
-    connect(restart, &ElaIconButton::clicked, this, [] {
-        QCoreApplication::exit(RestartExitCode);
+    connect(restart, &ElaIconButton::clicked, this, [this] {
+        requestExit(RestartExitCode);
     });
-    connect(quit, &ElaIconButton::clicked, qApp, &QApplication::quit);
+    connect(quit, &ElaIconButton::clicked, this, [this] {
+        requestExit(0);
+    });
     setFixedWidth(PanelWidth);
     adjustSize();
 }
@@ -234,6 +236,24 @@ void TaskbarTrayMenu::hideMenu()
     const QRect available = screen()->availableGeometry();
     const QPoint position = boundedPosition(pos() + animationOffset_, available, size());
     startTransition(position, 0.0, CloseDuration);
+}
+
+void TaskbarTrayMenu::requestExit(int exitCode)
+{
+    // A double click, a duplicated signal, or a queued repeat must not exit twice.
+    if (exitRequested_) return;
+    exitRequested_ = true;
+    // Written before the loop ends, so a failure later is distinguishable from
+    // the click never reaching the button at all.
+    Logger::instance().log(Logger::Level::Info,
+                           QStringLiteral("Exit requested: code=%1").arg(exitCode));
+    Logger::instance().flush();
+    // Let the click event and any queued dismissal or deactivation finish first:
+    // those paths must be unable to interrupt the exit instruction. `this` is the
+    // context object, so a destroyed panel cancels the pending exit.
+    QTimer::singleShot(0, this, [exitCode] {
+        QCoreApplication::exit(exitCode);
+    });
 }
 
 void TaskbarTrayMenu::startTransition(const QPoint& position, qreal opacity, int duration)

@@ -18,6 +18,9 @@ int main(int argc, char* argv[])
         AppComposer app;
         if (!app.startApp()) return 1;
         exitCode = QApplication::exec();
+        // Tear down windows and persist state while the application object is
+        // still alive, instead of relying on scope-exit destructor ordering.
+        app.shutdown();
     }
     if (exitCode == TaskbarTrayMenu::RestartExitCode) {
         QStringList arguments = QCoreApplication::arguments();

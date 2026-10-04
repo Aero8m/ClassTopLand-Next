@@ -21,7 +21,15 @@ AppComposer::AppComposer(QObject* parent) : QObject(parent)
 
 AppComposer::~AppComposer()
 {
+    shutdown();
+}
+
+void AppComposer::shutdown()
+{
     dropInstances();
+    // The tray icon and panel may have queued deferred deletions while hiding.
+    // Drain them here so the process is not left with a half-destroyed UI.
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 }
 
 bool AppComposer::initInstances()
@@ -68,6 +76,9 @@ bool AppComposer::initInstances()
 void AppComposer::dropInstances()
 {
     if (!initialized_) return;
+    initialized_ = false;
+    if (shutdown_) return;
+    shutdown_ = true;
     trayMenu_.reset();
     courseBar.reset();
     QString error;
@@ -77,7 +88,6 @@ void AppComposer::dropInstances()
         Logger::instance().log(Logger::Level::Error, QStringLiteral("档案保存失败：%1").arg(error));
     Logger::instance().log(Logger::Level::Info, "AppComposer dropped, Application will be stopped");
     Logger::instance().flush();
-    initialized_ = false;
 }
 
 bool AppComposer::startApp()
