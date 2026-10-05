@@ -8,9 +8,10 @@
 int main(int argc, char* argv[])
 {
     QApplication a(argc, argv);
-    QApplication::setApplicationName(QStringLiteral("ClassTopLand-Next"));
+    QApplication::setApplicationName(QStringLiteral("ClassTopLand Next"));
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/res/images/icon.png")));
     eApp->init();
+    eApp->setWindowDisplayMode(ElaApplicationType::Mica);
 
     const QString workingDirectory = QDir::currentPath();
     int exitCode;

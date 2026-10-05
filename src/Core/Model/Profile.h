@@ -12,5 +12,7 @@ struct Profile
     QList<Subject> subjects;
     QList<TimeLine> timeLines;
     QList<WeekSchedule> schedules;
+    // Empty means automatic date/week matching.
+    QString activeWeekScheduleId;
 };
 #endif //CLASSTOPLAND_NEXT_PROFILE_H

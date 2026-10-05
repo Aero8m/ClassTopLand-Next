@@ -9,6 +9,7 @@
 #include <QJsonParseError>
 #include <QSaveFile>
 #include <QSet>
+#include <QHash>
 
 #include <utility>
 
@@ -76,6 +77,24 @@ QString modeText(WeekScheduleMode mode)
     return {};
 }
 
+// Repair legacy/malformed identities only while loading. A duplicated ID must
+// never silently select the first of several schedules.
+void repairScheduleIds(Profile& profile)
+{
+    QHash<QString, int> counts;
+    for (const auto& week : profile.schedules) ++counts[week.id];
+    QSet<QString> used;
+    for (const auto& week : profile.schedules)
+        if (!week.id.trimmed().isEmpty()) used.insert(week.id);
+    if (counts.value(profile.activeWeekScheduleId) != 1 || profile.activeWeekScheduleId.trimmed().isEmpty())
+        profile.activeWeekScheduleId.clear();
+    for (auto& week : profile.schedules) {
+        if (!week.id.trimmed().isEmpty() && counts.value(week.id) == 1) continue;
+        do { week.id = QUuid::createUuid().toString(QUuid::WithoutBraces); } while (used.contains(week.id));
+        used.insert(week.id);
+    }
+}
+
 bool validate(const Profile& profile, QString* error)
 {
     for (const Subject& subject : profile.subjects) {
@@ -88,7 +107,11 @@ bool validate(const Profile& profile, QString* error)
                 return fail(error, QStringLiteral("TimeLine '%1' has an invalid time range").arg(line.name));
         }
     }
+    QSet<QString> ids;
     for (const WeekSchedule& week : profile.schedules) {
+        if (week.id.trimmed().isEmpty() || ids.contains(week.id))
+            return fail(error, QStringLiteral("WeekSchedule ID is empty or duplicated"));
+        ids.insert(week.id);
         if (modeText(week.mode).isEmpty())
             return fail(error, QStringLiteral("WeekSchedule '%1' has an invalid mode").arg(week.name));
         QSet<int> days;
@@ -104,6 +127,8 @@ bool validate(const Profile& profile, QString* error)
             }
         }
     }
+    if (!profile.activeWeekScheduleId.isEmpty() && !ids.contains(profile.activeWeekScheduleId))
+        return fail(error, QStringLiteral("Selected week schedule does not exist"));
     return true;
 }
 
@@ -117,6 +142,7 @@ QJsonObject toJson(const Profile& profile)
 {
     QJsonObject data;
     data.insert(QStringLiteral("name"), profile.name);
+    data.insert(QStringLiteral("activeWeekScheduleId"), profile.activeWeekScheduleId);
 
     QJsonArray subjects;
     for (const Subject& subject : profile.subjects) {
@@ -150,7 +176,8 @@ QJsonObject toJson(const Profile& profile)
                                     {QStringLiteral("enableDay"), day.enableDay},
                                     {QStringLiteral("classes"), classes}});
         }
-        schedules.append(QJsonObject{{QStringLiteral("name"), week.name},
+        schedules.append(QJsonObject{{QStringLiteral("id"), week.id},
+                                     {QStringLiteral("name"), week.name},
                                      {QStringLiteral("mode"), modeText(week.mode)},
                                      {QStringLiteral("daySchedules"), days}});
     }
@@ -167,6 +194,11 @@ bool fromJson(const QJsonObject& root, Profile& profile, QString* error)
     if (!profileValue.isObject()) return fail(error, QStringLiteral("profile must be an object"));
     const QJsonObject data = profileValue.toObject();
     if (!stringField(data, QStringLiteral("name"), profile.name, error, QStringLiteral("profile"))) return false;
+
+    const auto selection = data.value(QStringLiteral("activeWeekScheduleId"));
+    if (!selection.isUndefined() && !selection.isString())
+        return fail(error, QStringLiteral("profile.activeWeekScheduleId must be a string"));
+    profile.activeWeekScheduleId = selection.toString();
 
     QJsonArray subjects;
     if (!arrayField(data, QStringLiteral("subjects"), subjects, error, QStringLiteral("profile"))) return false;
@@ -220,6 +252,10 @@ bool fromJson(const QJsonObject& root, Profile& profile, QString* error)
         else if (mode == QStringLiteral("even")) parsedMode = WeekScheduleMode::Even;
         else return fail(error, path + QStringLiteral(".mode is invalid"));
         WeekSchedule week(name, parsedMode);
+        const auto id = item.value(QStringLiteral("id"));
+        if (!id.isUndefined() && !id.isString())
+            return fail(error, path + QStringLiteral(".id must be a string"));
+        if (id.isString()) week.id = id.toString();
         for (qsizetype j = 0; j < days.size(); ++j) {
             QJsonObject dayObject;
             const QString dayPath = path + QStringLiteral(".daySchedules[%1]").arg(j);
@@ -246,6 +282,7 @@ bool fromJson(const QJsonObject& root, Profile& profile, QString* error)
         }
         profile.schedules.append(week);
     }
+    repairScheduleIds(profile);
     return validate(profile, error);
 }
 } // namespace
@@ -285,15 +322,42 @@ bool ProfileManager::load(const QString& filePath, QString* error)
 
 bool ProfileManager::save(QString* error) const
 {
+    return writeProfile(profile_, error);
+}
+
+bool ProfileManager::commit(const Profile& candidate, QString* error)
+{
+    Profile committed = candidate;
+    if (!writeProfile(committed, error)) return false;
+    profile_ = std::move(committed);
+    return true;
+}
+
+bool ProfileManager::selectWeekSchedule(const QString& id, QString* error)
+{
+    if (error) error->clear();
+    if (!id.isEmpty()) {
+        bool found = false;
+        for (const auto& week : profile_.schedules) if (week.id == id) { found = true; break; }
+        if (!found) return fail(error, QStringLiteral("Selected week schedule does not exist"));
+    }
+    if (profile_.activeWeekScheduleId == id) return true;
+    Profile candidate = profile_;
+    candidate.activeWeekScheduleId = id;
+    return commit(candidate, error);
+}
+
+bool ProfileManager::writeProfile(const Profile& candidate, QString* error) const
+{
     if (error) error->clear();
     if (filePath_.isEmpty()) return fail(error, QStringLiteral("No profile file path has been loaded"));
-    if (!validate(profile_, error)) return false;
+    if (!validate(candidate, error)) return false;
     if (!QDir().mkpath(QFileInfo(filePath_).absolutePath()))
         return fail(error, QStringLiteral("Cannot create profile directory"));
 
     QSaveFile file(filePath_);
     if (!file.open(QIODevice::WriteOnly)) return fail(error, file.errorString());
-    const QByteArray contents = QJsonDocument(toJson(profile_)).toJson(QJsonDocument::Indented);
+    const QByteArray contents = QJsonDocument(toJson(candidate)).toJson(QJsonDocument::Indented);
     if (file.write(contents) != contents.size()) return fail(error, file.errorString());
     if (!file.commit()) return fail(error, file.errorString());
     return true;

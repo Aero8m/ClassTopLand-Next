@@ -148,6 +148,14 @@ CourseRefreshService::TableSnapshot CourseRefreshService::resolveTable(const QDa
         if (selected < -1 || selected >= profile.schedules.size())
             return fail(QStringLiteral("Week schedule index is out of range"));
 
+        if (selected == -1 && !profile.activeWeekScheduleId.isEmpty()) {
+            for (qsizetype i = 0; i < profile.schedules.size(); ++i) {
+                if (profile.schedules[i].id == profile.activeWeekScheduleId) {
+                    selected = static_cast<int>(i);
+                    break;
+                }
+            }
+        }
         if (selected == -1) {
             for (qsizetype i = 0; i < profile.schedules.size(); ++i) {
                 const WeekSchedule& week = profile.schedules[i];

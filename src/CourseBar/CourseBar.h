@@ -28,8 +28,14 @@ class CourseBar : public QWidget
 public:
     CourseBar(QWidget *parent = nullptr);
     ~CourseBar();
+    bool hasCourseViews() const;
+    QString scheduleStatus() const;
+
+signals:
+    void scheduleStatusChanged();
 
 public slots:
+    void reloadProfile();
     void showNotification(const QString& message);
     // The first alternative that fits is used, as in the original course bar.
     void showNotification(const QStringList& messages);

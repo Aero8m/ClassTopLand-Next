@@ -1,8 +1,8 @@
 #include "SettingsWindow.h"
 
-SettingsWindow::SettingsWindow(QWidget* parent)
+SettingsWindow::SettingsWindow(QWidget* parent) : ElaWindow(parent)
 {
-
+    initUI();
 }
 
 SettingsWindow::~SettingsWindow()
@@ -10,3 +10,11 @@ SettingsWindow::~SettingsWindow()
 
 }
 
+void SettingsWindow::initUI()
+{
+    setWindowTitle("设置");
+    setWindowButtonFlag(ElaAppBarType::StayTopButtonHint,false);
+    setWindowButtonFlag(ElaAppBarType::RouteBackButtonHint,false);
+    setWindowButtonFlag(ElaAppBarType::RouteForwardButtonHint,false);
+
+}

@@ -19,9 +19,14 @@ public:
     // The supplied path is retained only when loading succeeds.
     bool load(const QString& filePath, QString* error = nullptr);
     bool save(QString* error = nullptr) const;
+    // Write the candidate atomically before publishing it to readers.
+    bool commit(const Profile& candidate, QString* error = nullptr);
+    // Persist first; a failed write never changes the published selection.
+    bool selectWeekSchedule(const QString& id, QString* error = nullptr);
 
 private:
     ProfileManager() = default;
+    bool writeProfile(const Profile& candidate, QString* error) const;
 
     Profile profile_{};
     QString filePath_;

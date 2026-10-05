@@ -70,7 +70,8 @@ public:
     const State& state() const noexcept { return state_; }
     bool isRunning() const noexcept { return timer_->isActive(); }
 
-    // -1: automatic, unique matching schedule. An explicit index bypasses mode.
+    // -1: follow the profile selection (empty ID means automatic matching).
+    // An explicit index overrides the saved selection and bypasses week mode.
     void setWeekScheduleIndex(int index);
     // The containing Monday is week one. Invalid date clears the reference.
     void setWeekReferenceDate(const QDate& date);

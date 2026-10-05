@@ -1,6 +1,7 @@
 #ifndef CLASSTOPLAND_NEXT_SETTINGSWINDOW_H
 #define CLASSTOPLAND_NEXT_SETTINGSWINDOW_H
 #include"ElaWindow.h"
+#include"ElaApplication.h"
 
 class SettingsWindow : public ElaWindow
 {
@@ -8,6 +9,8 @@ class SettingsWindow : public ElaWindow
 public:
     SettingsWindow(QWidget *parent = nullptr);
     ~SettingsWindow();
+private:
+    void initUI();
 };
 
 

@@ -2,6 +2,7 @@
 #define CLASSTOPLAND_NEXT_SCHEDULE_H
 #include<QString>
 #include<QList>
+#include<QUuid>
 #include"Class.h"
 enum class WeekScheduleMode
 {
@@ -49,6 +50,8 @@ struct WeekSchedule
         return daySchedules[index];
     }
     QString name;
+    // Stable identity survives rename, reorder and serialization.
+    QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     WeekScheduleMode mode;
     QList<DaySchedule> daySchedules;
 };

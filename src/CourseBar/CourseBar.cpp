@@ -114,6 +114,7 @@ void CourseBar::initComponents()
                     this, &CourseBar::showCourseNotification);
             connect(service, &CourseRefreshService::tableChanged, this, [this, service] {
                 invalidateNotifications(service);
+                emit scheduleStatusChanged();
             });
             mainLayout->addWidget(newComponent);
             components.append(newComponent);
@@ -133,6 +134,43 @@ void CourseBar::resizeEvent(QResizeEvent* event)
     QWidget::resizeEvent(event);
     centerOnScreen();
     updateNotificationGeometry();
+}
+
+bool CourseBar::hasCourseViews() const
+{
+    for (const auto* component : components)
+        if (qobject_cast<const CourseView*>(component)) return true;
+    return false;
+}
+
+QString CourseBar::scheduleStatus() const
+{
+    for (auto* component : components) {
+        auto* view = qobject_cast<CourseView*>(component);
+        if (!view) continue;
+        const auto& table = view->refreshService()->table();
+        if (!table.valid) {
+            if (table.error == QStringLiteral("Multiple week schedules match; select an explicit index"))
+                return tr("多张课表匹配，请手动选择");
+            if (table.error == QStringLiteral("Odd/even schedules require a week reference date"))
+                return tr("单双周缺少第一周日期，请手动选择");
+            return tr("课表匹配失败：%1").arg(table.error);
+        }
+        if (table.name.isEmpty()) return tr("今日无匹配课表");
+        if (table.classes.isEmpty()) return tr("%1 · 今日无课程").arg(table.name);
+        return tr("%1 · 今日 %2 节").arg(table.name).arg(table.classes.size());
+    }
+    return tr("课程栏未启用");
+}
+
+void CourseBar::reloadProfile()
+{
+    profile = ProfileManager::instance().profile();
+    for (auto* component : components) {
+        if (auto* view = qobject_cast<CourseView*>(component)) view->refreshService()->reloadTable();
+    }
+    scheduleGeometryUpdate();
+    emit scheduleStatusChanged();
 }
 
 bool CourseBar::event(QEvent* event)
