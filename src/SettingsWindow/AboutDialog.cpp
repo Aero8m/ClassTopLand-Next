@@ -10,6 +10,8 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include "../VERSION.h"
+
 AboutDialog::AboutDialog(QWidget* parent) : ElaDialog(parent)
 {
     setWindowTitle(QStringLiteral("关于"));
@@ -45,7 +47,7 @@ AboutDialog::AboutDialog(QWidget* parent) : ElaDialog(parent)
     titleFont.setBold(true);
     title->setFont(titleFont);
     addText(QStringLiteral("基于 Qt6 和 ElaWidgetTools 的\n桌面课程显示组件"));
-    addText(QStringLiteral("开发实验阶段"));
+    addText(QStringLiteral("build ") + QString(APP_VERSION));
     addText(QStringLiteral("GNU General Public License v2"));
     addText(QStringLiteral("Qt 运行版本：%1").arg(QString::fromLatin1(qVersion())));
 

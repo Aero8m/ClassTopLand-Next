@@ -29,6 +29,7 @@ add_subdirectory(third_party/ElaWidgetTools-Plus/ElaWidgetTools)
 add_executable(ClassTopLand-Next
         main.cpp
         resourecs.qrc
+        src/VERSION.h
 
         src/Core/Model/AppearanceConfig.h
         src/Core/Model/Class.h
@@ -97,7 +98,8 @@ add_executable(ClassTopLand-Next
 
         src/Utils/GlassHelper/GlassHelper.cpp
         src/Utils/GlassHelper/GlassHelper.h
-        src/Utils/SupportFunctions.h)
+        src/Utils/SupportFunctions.h
+        src/VERSION.h)
 
 if (WIN32)
     set_target_properties(ClassTopLand-Next PROPERTIES

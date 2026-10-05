@@ -1,49 +1,39 @@
-#pragma code_page(65001)
-#include <windows.h>
+#include "winres.h"
+#include "src/VERSION.h"
 
-#ifndef CLASSTOPLAND_FILE_VERSION
-#define CLASSTOPLAND_FILE_VERSION 0,1,0,0
-#endif
+// 图标
+IDI_ICON1       ICON      PRODUCT_ICON
 
-#ifndef CLASSTOPLAND_VERSION_STRING
-#define CLASSTOPLAND_VERSION_STRING "0.1.0.0"
-#endif
-
-// Keep the application icon first so Windows uses it for the executable.
-1 ICON "icon.ico"
-
-LANGUAGE LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED
-
-1 VERSIONINFO
- FILEVERSION CLASSTOPLAND_FILE_VERSION
- PRODUCTVERSION CLASSTOPLAND_FILE_VERSION
- FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+// 版本信息
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION FILE_VERSION
+ PRODUCTVERSION PRODUCT_VERSION
+ FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
- FILEFLAGS VS_FF_DEBUG
+ FILEFLAGS 0x1L
 #else
  FILEFLAGS 0x0L
 #endif
- FILEOS VOS_NT_WINDOWS32
- FILETYPE VFT_APP
+ FILEOS 0x40004L
+ FILETYPE 0x1L
  FILESUBTYPE 0x0L
 BEGIN
     BLOCK "StringFileInfo"
     BEGIN
-        // Simplified Chinese (0804), Unicode (04B0).
-        BLOCK "080404B0"
+        BLOCK "080404b0"
         BEGIN
-            VALUE "CompanyName", "Aero8m\0"
-            VALUE "FileDescription", "ClassTopLand Next - 主程序\0"
-            VALUE "FileVersion", CLASSTOPLAND_VERSION_STRING "\0"
-            VALUE "InternalName", "ClassTopLand-Next\0"
-            VALUE "OriginalFilename", "ClassTopLand-Next.exe\0"
-            VALUE "ProductName", "ClassTopLand Next\0"
-            VALUE "ProductVersion", CLASSTOPLAND_VERSION_STRING "\0"
-            VALUE "Comments", "GNU General Public License v2\0"
+            VALUE "CompanyName", COMPANY_NAME
+            VALUE "FileDescription", FILE_DESCRIPTION
+            VALUE "FileVersion", FILE_VERSION_STR
+            VALUE "InternalName", INTERNAL_NAME
+            VALUE "LegalCopyright", LEGAL_COPYRIGHT
+            VALUE "OriginalFilename", ORIGINAL_FILE_NAME
+            VALUE "ProductName", PRODUCT_NAME
+            VALUE "ProductVersion", PRODUCT_VERSION_STR
         END
     END
     BLOCK "VarFileInfo"
     BEGIN
-        VALUE "Translation", 0x0804, 1200
+        VALUE "Translation", 0x804, 1200
     END
 END

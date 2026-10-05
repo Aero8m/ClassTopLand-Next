@@ -18,6 +18,8 @@ rules.ninja
 .ninja_deps
 .ninja_log
 CMakeUserPresets.json
+test
+moc-verify.log
 
 # Qt generated files and local Qt Creator settings
 *_autogen/
