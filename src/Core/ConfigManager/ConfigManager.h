@@ -16,7 +16,7 @@ public:
     const QString& filePath() const noexcept { return filePath_; }
 
     // A missing file means a new, default config. A malformed file is an error.
-    // Missing course bar settings use the defaults from the model.
+    // Missing course bar and appearance settings use the defaults from the model.
     // The supplied path is retained only when loading succeeds.
     bool load(const QString& filePath, QString* error = nullptr);
     bool save(QString* error = nullptr) const;

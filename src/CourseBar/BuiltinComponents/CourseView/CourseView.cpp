@@ -2,6 +2,7 @@
 
 #include "../../../Core/ConfigManager/ConfigManager.h"
 #include "../../../Core/Logger/Logger.h"
+#include "../../../Core/ThemeManager/ThemeManager.h"
 
 #include <QFontMetrics>
 #include <QHBoxLayout>
@@ -49,11 +50,16 @@ public:
         name_->setText(name);
         active_ = active;
         time_->setVisible(active);
-        underline_->setStyleSheet(active
-            ? QStringLiteral("background: #1191d3;")
-            : QStringLiteral("background: transparent;"));
+        refreshThemeColor();
         setProperty("active", active);
         updateWidth();
+    }
+
+    void refreshThemeColor()
+    {
+        underline_->setStyleSheet(active_
+            ? QStringLiteral("background: %1;").arg(ThemeManager::instance().themeColor().name(QColor::HexRgb))
+            : QStringLiteral("background: transparent;"));
     }
 
     void setRemaining(qint64 seconds)
@@ -179,6 +185,8 @@ CourseView::CourseView(CourseRefreshService::Clock clock, QWidget* parent)
     compactBlock_->setTrailing(true);
     pages_->addWidget(compactContent_);
     updateMetrics(componentHeight_);
+    connect(&ThemeManager::instance(), &ThemeManager::themeColorChanged,
+            this, &CourseView::refreshThemeColor);
 
     service_ = new CourseRefreshService(std::move(clock), this);
     connect(service_, &CourseRefreshService::tableChanged, this, &CourseView::applyTable);
@@ -190,6 +198,13 @@ CourseView::CourseView(CourseRefreshService::Clock clock, QWidget* parent)
 QSize CourseView::sizeHint() const
 {
     return QSize(preferredWidth_, componentHeight_);
+}
+
+void CourseView::refreshThemeColor()
+{
+    for (CourseBlock* block : blocks_) block->refreshThemeColor();
+    breakBlock_->refreshThemeColor();
+    compactBlock_->refreshThemeColor();
 }
 
 QSize CourseView::minimumSizeHint() const

@@ -36,6 +36,7 @@ void ProfileEditWindow::initUI()
     setWindowButtonFlag(ElaAppBarType::StayTopButtonHint, false);
     setWindowButtonFlag(ElaAppBarType::RouteBackButtonHint, false);
     setWindowButtonFlag(ElaAppBarType::RouteForwardButtonHint, false);
+    setWindowButtonFlag(ElaAppBarType::ThemeChangeButtonHint, false);
     setIsDefaultClosed(false);
     connect(this, &ElaWindow::closeButtonClicked, this, [this] { close(); });
     info_ = new ProfileInfoTab(session_, this);

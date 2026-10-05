@@ -3,6 +3,7 @@
 #include "../../SettingsWindow/SettingsWindow.h"
 #include "../../ProfileEditWindow/ProfileEditWindow.h"
 #include "../../ProfileEditWindow/ProfileEditSession.h"
+#include "../ThemeManager/ThemeManager.h"
 
 #include <QApplication>
 #include <QFileInfo>
@@ -61,6 +62,7 @@ bool AppComposer::initInstances()
     if (createConfig && !ConfigManager::instance().save(&error)) {
         return reportStartupError(QStringLiteral("默认配置保存失败：%1\n%2").arg(configPath, error));
     }
+    ThemeManager::instance().applyConfiguredTheme();
     // init profile manager
     const QString profilePath = QDir(dataDirectory_).filePath(
         QStringLiteral("profiles/%1.json").arg(ConfigManager::instance().config().profileName));
@@ -124,7 +126,7 @@ void AppComposer::dropInstances()
 bool AppComposer::startApp()
 {
     if (!initInstances()) return false;
-    courseBar->show();
+    courseBar->setVisible(ConfigManager::instance().config().courseBarConfig.enable);
     return initialized_;
 }
 
@@ -138,6 +140,8 @@ void AppComposer::showSettingsWindow()
                 this, &AppComposer::showProfileEditorWindow);
         connect(settingsWindow_.get(), &SettingsWindow::profileSwitchRequested,
                 this, &AppComposer::switchProfile);
+        connect(settingsWindow_.get(), &SettingsWindow::courseBarConfigChanged,
+                courseBar.get(), &CourseBar::reloadConfig);
     }
     settingsWindow_->refreshProfiles();
     if (!settingsWindowPositioned_) {

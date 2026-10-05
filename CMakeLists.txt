@@ -26,62 +26,77 @@ FetchContent_MakeAvailable(yaml-cpp)
 
 add_subdirectory(third_party/ElaWidgetTools-Plus/ElaWidgetTools)
 
-add_executable(ClassTopLand-Next main.cpp
+add_executable(ClassTopLand-Next
+        main.cpp
         resourecs.qrc
-        src/Core/Model/Subject.h
-        src/Core/Model/Schedule.h
+
+        src/Core/Model/AppearanceConfig.h
         src/Core/Model/Class.h
-        src/Core/Model/TimeLine.h
-        src/Utils/SupportFunctions.h
+        src/Core/Model/Config.h
+        src/Core/Model/CourseBarConfig.h
         src/Core/Model/Profile.h
-        src/Core/ProfileManager/ProfileManager.h
-        src/Core/ProfileManager/ProfileManager.cpp
-        src/Core/ProfileManager/ProfileExchange.cpp
-        src/Core/ProfileManager/ProfileExchange.h
-        src/Core/Logger/Logger.h
-        src/Core/Logger/Logger.cpp
+        src/Core/Model/Schedule.h
+        src/Core/Model/Subject.h
+        src/Core/Model/TimeLine.h
+
         src/Core/AppComposer/AppComposer.cpp
         src/Core/AppComposer/AppComposer.h
-        src/Core/Model/Config.h
-        src/Core/ConfigManager/ConfigManager.h
         src/Core/ConfigManager/ConfigManager.cpp
+        src/Core/ConfigManager/ConfigManager.h
         src/Core/CourseRefreshService/CourseRefreshService.cpp
         src/Core/CourseRefreshService/CourseRefreshService.h
-        src/Utils/GlassHelper/GlassHelper.cpp
-        src/Core/Model/CourseBarConfig.h
+        src/Core/Logger/Logger.cpp
+        src/Core/Logger/Logger.h
+        src/Core/ProfileManager/ProfileExchange.cpp
+        src/Core/ProfileManager/ProfileExchange.h
+        src/Core/ProfileManager/ProfileManager.cpp
+        src/Core/ProfileManager/ProfileManager.h
+        src/Core/ThemeManager/ThemeManager.cpp
+        src/Core/ThemeManager/ThemeManager.h
+
         src/CourseBar/CourseBar.cpp
         src/CourseBar/CourseBar.h
         src/CourseBar/ICourseBarComponent.h
-        src/CourseBar/BuiltinComponents/Date/Date.cpp
-        src/CourseBar/BuiltinComponents/Date/Date.h
         src/CourseBar/BuiltinComponents/CourseView/CourseView.cpp
         src/CourseBar/BuiltinComponents/CourseView/CourseView.h
-        src/TaskbarTrayMenu/TaskbarTrayMenu.cpp
-        src/TaskbarTrayMenu/TaskbarTrayMenu.h
-        src/SettingsWindow/SettingsWindow.cpp
-        src/SettingsWindow/SettingsWindow.h
+        src/CourseBar/BuiltinComponents/Date/Date.cpp
+        src/CourseBar/BuiltinComponents/Date/Date.h
+        src/CourseBar/BuiltinComponents/TextTip/TextTip.cpp
+        src/CourseBar/BuiltinComponents/TextTip/TextTip.h
+
+        src/ProfileEditWindow/ProfileEditSession.cpp
+        src/ProfileEditWindow/ProfileEditSession.h
+        src/ProfileEditWindow/ProfileEditWidgets.cpp
+        src/ProfileEditWindow/ProfileEditWidgets.h
         src/ProfileEditWindow/ProfileEditWindow.cpp
         src/ProfileEditWindow/ProfileEditWindow.h
+        src/ProfileEditWindow/tabs/ProfileInfoTab.cpp
+        src/ProfileEditWindow/tabs/ProfileInfoTab.h
+        src/ProfileEditWindow/tabs/SchedulesTab.cpp
+        src/ProfileEditWindow/tabs/SchedulesTab.h
+        src/ProfileEditWindow/tabs/SubjectsTab.cpp
+        src/ProfileEditWindow/tabs/SubjectsTab.h
+        src/ProfileEditWindow/tabs/TimeLinesTab.cpp
+        src/ProfileEditWindow/tabs/TimeLinesTab.h
+        src/ProfileEditWindow/widgets/TimeLineCanvas.cpp
+        src/ProfileEditWindow/widgets/TimeLineCanvas.h
+
+        src/SettingsWindow/SettingsWindow.cpp
+        src/SettingsWindow/SettingsWindow.h
+        src/SettingsWindow/tabs/AppearanceSettingsTab.cpp
+        src/SettingsWindow/tabs/AppearanceSettingsTab.h
+        src/SettingsWindow/tabs/CourseBarSettingsTab.cpp
+        src/SettingsWindow/tabs/CourseBarSettingsTab.h
         src/SettingsWindow/tabs/ProfileSettingsTab.cpp
         src/SettingsWindow/tabs/ProfileSettingsTab.h
-        src/SettingsWindow/tabs/AppearanceSettingsTab.cpp
-        src/SettingsWindow/tabs/AppearanceSettingsTab.h)
-set(PROFILE_EDITOR_SOURCES
-        src/ProfileEditWindow/ProfileEditSession.h
-        src/ProfileEditWindow/ProfileEditSession.cpp
-        src/ProfileEditWindow/ProfileEditWidgets.h
-        src/ProfileEditWindow/ProfileEditWidgets.cpp
-        src/ProfileEditWindow/widgets/TimeLineCanvas.h
-        src/ProfileEditWindow/widgets/TimeLineCanvas.cpp
-        src/ProfileEditWindow/tabs/ProfileInfoTab.h
-        src/ProfileEditWindow/tabs/ProfileInfoTab.cpp
-        src/ProfileEditWindow/tabs/SubjectsTab.h
-        src/ProfileEditWindow/tabs/SubjectsTab.cpp
-        src/ProfileEditWindow/tabs/TimeLinesTab.h
-        src/ProfileEditWindow/tabs/TimeLinesTab.cpp
-        src/ProfileEditWindow/tabs/SchedulesTab.h
-        src/ProfileEditWindow/tabs/SchedulesTab.cpp)
-target_sources(ClassTopLand-Next PRIVATE ${PROFILE_EDITOR_SOURCES})
+
+        src/TaskbarTrayMenu/TaskbarTrayMenu.cpp
+        src/TaskbarTrayMenu/TaskbarTrayMenu.h
+
+        src/Utils/GlassHelper/GlassHelper.cpp
+        src/Utils/GlassHelper/GlassHelper.h
+        src/Utils/SupportFunctions.h)
+
 target_link_libraries(ClassTopLand-Next
         Qt::Core
         Qt::Gui

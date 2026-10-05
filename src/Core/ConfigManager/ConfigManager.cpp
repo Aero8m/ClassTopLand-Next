@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QSaveFile>
+#include <QRegularExpression>
 
 #include <utility>
 
@@ -25,12 +26,28 @@ QString componentTypeText(CourseBarComponentType type)
     switch (type) {
     case CourseBarComponentType::Date: return QStringLiteral("date");
     case CourseBarComponentType::CourseView: return QStringLiteral("courseView");
+    case CourseBarComponentType::TextTip: return QStringLiteral("textTip");
+    }
+    return {};
+}
+
+QString themeModeText(AppearanceThemeMode mode)
+{
+    switch (mode) {
+    case AppearanceThemeMode::System: return QStringLiteral("system");
+    case AppearanceThemeMode::Light: return QStringLiteral("light");
+    case AppearanceThemeMode::Dark: return QStringLiteral("dark");
     }
     return {};
 }
 
 bool validate(const Config& config, QString* error)
 {
+    static const QRegularExpression hexColor(QStringLiteral("\\A#[0-9a-fA-F]{6}\\z"));
+    if (!hexColor.match(config.appearanceConfig.themeColor).hasMatch())
+        return fail(error, QStringLiteral("config.appearanceConfig.themeColor must be a #rrggbb hex color"));
+    if (themeModeText(config.appearanceConfig.themeMode).isEmpty())
+        return fail(error, QStringLiteral("config.appearanceConfig.themeMode must be system, light or dark"));
     if (config.courseBarConfig.height <= 0)
         return fail(error, QStringLiteral("config.courseBarConfig.height must be a positive integer"));
     for (qsizetype i = 0; i < config.courseBarConfig.components.size(); ++i) {
@@ -44,14 +61,21 @@ QJsonObject toJson(const Config& config)
 {
     QJsonArray components;
     for (const CourseBarComponentConfig& component : config.courseBarConfig.components) {
-        components.append(QJsonObject{{QStringLiteral("type"), componentTypeText(component.type)},
-                                      {QStringLiteral("enabled"), component.enabled}});
+        QJsonObject item{{QStringLiteral("type"), componentTypeText(component.type)},
+                         {QStringLiteral("enabled"), component.enabled}};
+        if (component.type == CourseBarComponentType::TextTip)
+            item.insert(QStringLiteral("text"), component.text);
+        components.append(item);
     }
-    const QJsonObject courseBar{{QStringLiteral("height"), config.courseBarConfig.height},
+    const QJsonObject courseBar{{QStringLiteral("enable"), config.courseBarConfig.enable},
+                                {QStringLiteral("height"), config.courseBarConfig.height},
                                 {QStringLiteral("components"), components}};
+    const QJsonObject appearance{{QStringLiteral("themeColor"), config.appearanceConfig.themeColor.toLower()},
+                                 {QStringLiteral("themeMode"), themeModeText(config.appearanceConfig.themeMode)}};
     return {{QStringLiteral("version"), kFormatVersion},
             {QStringLiteral("config"), QJsonObject{{QStringLiteral("profileName"), config.profileName},
-                                                   {QStringLiteral("courseBarConfig"), courseBar}}}};
+                                                   {QStringLiteral("courseBarConfig"), courseBar},
+                                                   {QStringLiteral("appearanceConfig"), appearance}}}};
 }
 
 bool fromJson(const QJsonObject& root, Config& config, QString* error)
@@ -65,12 +89,43 @@ bool fromJson(const QJsonObject& root, Config& config, QString* error)
     if (!profileName.isString()) return fail(error, QStringLiteral("config.profileName must be a string"));
     config.profileName = profileName.toString();
 
+    const QJsonValue appearanceValue = data.value(QStringLiteral("appearanceConfig"));
+    if (!appearanceValue.isUndefined()) {
+        if (!appearanceValue.isObject())
+            return fail(error, QStringLiteral("config.appearanceConfig must be an object"));
+        const QJsonObject appearance = appearanceValue.toObject();
+        const QJsonValue themeColor = appearance.value(QStringLiteral("themeColor"));
+        if (!themeColor.isUndefined()) {
+            if (!themeColor.isString())
+                return fail(error, QStringLiteral("config.appearanceConfig.themeColor must be a string"));
+            config.appearanceConfig.themeColor = themeColor.toString().toLower();
+        }
+        const QJsonValue themeMode = appearance.value(QStringLiteral("themeMode"));
+        if (!themeMode.isUndefined()) {
+            if (!themeMode.isString())
+                return fail(error, QStringLiteral("config.appearanceConfig.themeMode must be a string"));
+            if (themeMode.toString() == QStringLiteral("system"))
+                config.appearanceConfig.themeMode = AppearanceThemeMode::System;
+            else if (themeMode.toString() == QStringLiteral("light"))
+                config.appearanceConfig.themeMode = AppearanceThemeMode::Light;
+            else if (themeMode.toString() == QStringLiteral("dark"))
+                config.appearanceConfig.themeMode = AppearanceThemeMode::Dark;
+            else
+                return fail(error, QStringLiteral("config.appearanceConfig.themeMode must be system, light or dark"));
+        }
+    }
+
     // Version 1 configs written before course bar settings were added use model defaults.
     const QJsonValue courseBarValue = data.value(QStringLiteral("courseBarConfig"));
-    if (courseBarValue.isUndefined()) return true;
-    if (!courseBarValue.isObject())
+    if (!courseBarValue.isUndefined() && !courseBarValue.isObject())
         return fail(error, QStringLiteral("config.courseBarConfig must be an object"));
     const QJsonObject courseBar = courseBarValue.toObject();
+    const QJsonValue enable = courseBar.value(QStringLiteral("enable"));
+    if (!enable.isUndefined()) {
+        if (!enable.isBool())
+            return fail(error, QStringLiteral("config.courseBarConfig.enable must be a boolean"));
+        config.courseBarConfig.enable = enable.toBool();
+    }
     const QJsonValue height = courseBar.value(QStringLiteral("height"));
     if (!height.isUndefined()) {
         if (!height.isDouble() || height.toInt(-1) <= 0)
@@ -101,12 +156,20 @@ bool fromJson(const QJsonObject& root, Config& config, QString* error)
             CourseBarComponentType parsedType;
             if (type.toString() == QStringLiteral("date")) parsedType = CourseBarComponentType::Date;
             else if (type.toString() == QStringLiteral("courseView")) parsedType = CourseBarComponentType::CourseView;
+            else if (type.toString() == QStringLiteral("textTip")) parsedType = CourseBarComponentType::TextTip;
             else return fail(error, path + QStringLiteral(".type is invalid"));
             CourseBarComponentConfig component{parsedType};
             const QJsonValue enabled = item.value(QStringLiteral("enabled"));
             if (!enabled.isUndefined()) {
                 if (!enabled.isBool()) return fail(error, path + QStringLiteral(".enabled must be a boolean"));
                 component.enabled = enabled.toBool();
+            }
+            if (parsedType == CourseBarComponentType::TextTip) {
+                const QJsonValue text = item.value(QStringLiteral("text"));
+                if (!text.isUndefined()) {
+                    if (!text.isString()) return fail(error, path + QStringLiteral(".text must be a string"));
+                    component.text = text.toString();
+                }
             }
             config.courseBarConfig.components.append(component);
         }
@@ -157,6 +220,7 @@ bool ConfigManager::save(QString* error) const
 bool ConfigManager::commit(const Config& candidate, QString* error)
 {
     Config committed = candidate;
+    committed.appearanceConfig.themeColor = committed.appearanceConfig.themeColor.toLower();
     if (!writeConfig(committed, error)) return false;
     config_ = std::move(committed);
     return true;

@@ -1,6 +1,7 @@
 #include "CourseBar.h"
 
 #include "BuiltinComponents/CourseView/CourseView.h"
+#include "../Core/ThemeManager/ThemeManager.h"
 
 #include <QEvent>
 #include <QGuiApplication>
@@ -11,6 +12,7 @@
 #include <QResizeEvent>
 #include <QScreen>
 #include <QTimer>
+#include <utility>
 
 CourseBar::CourseBar(QWidget* parent) : QWidget(parent)
 {
@@ -22,7 +24,9 @@ CourseBar::CourseBar(QWidget* parent) : QWidget(parent)
 
     initUI();
     initNotifications();
-    initComponents();
+    connect(&ThemeManager::instance(), &ThemeManager::themeColorChanged,
+            this, &CourseBar::refreshThemeColor);
+    if (config.enable) initComponents();
     auto watchScreen = [this](QScreen* screen) {
         if (screen) {
             connect(screen, &QScreen::availableGeometryChanged,
@@ -120,11 +124,26 @@ void CourseBar::initComponents()
             components.append(newComponent);
             addedComponent = true;
         }
+        else if (component.type == CourseBarComponentType::TextTip)
+        {
+            auto* newComponent = new TextTip(this);
+            newComponent->setText(component.text);
+            mainLayout->addWidget(newComponent);
+            components.append(newComponent);
+            addedComponent = true;
+        }
         if (addedComponent)
         {
             Logger::instance().log(Logger::Level::Info,QString("Added a course bar component, name: %1").arg(components.last()->getName()));
             Logger::instance().flush();
         }
+    }
+    if (components.isEmpty())
+    {
+        auto* newComponent = new TextTip(this);
+        newComponent->setText("当前尚未添加组件");
+        mainLayout->addWidget(newComponent);
+        components.append(newComponent);
     }
 }
 
@@ -138,6 +157,7 @@ void CourseBar::resizeEvent(QResizeEvent* event)
 
 bool CourseBar::hasCourseViews() const
 {
+    if (!config.enable) return false;
     for (const auto* component : components)
         if (qobject_cast<const CourseView*>(component)) return true;
     return false;
@@ -145,6 +165,7 @@ bool CourseBar::hasCourseViews() const
 
 QString CourseBar::scheduleStatus() const
 {
+    if (!config.enable) return tr("课程条已关闭");
     for (auto* component : components) {
         auto* view = qobject_cast<CourseView*>(component);
         if (!view) continue;
@@ -161,6 +182,41 @@ QString CourseBar::scheduleStatus() const
         return tr("%1 · 今日 %2 节").arg(table.name).arg(table.classes.size());
     }
     return tr("课程栏未启用");
+}
+
+void CourseBar::reloadConfig()
+{
+    hideAnimation_->stop();
+    midpointTimer_->stop();
+    transitioning_ = false;
+    geometryUpdatePending_ = false;
+    notificationAnimation_->stop();
+    notificationTimer_->stop();
+    notificationLayer_->hide();
+    notificationPhase_ = NotificationPhase::Hidden;
+    currentNotification_.reset();
+    pendingNotifications_.clear();
+
+    for (auto* component : std::as_const(components)) {
+        mainLayout->removeWidget(component);
+        delete component;
+    }
+    components.clear();
+    config = ConfigManager::instance().config().courseBarConfig;
+    setFixedHeight(config.height);
+    hideButton->setFixedSize(19, config.height);
+    const int iconSize = qMax(1, qRound(config.height * 35.0 / 49.0));
+    notificationIcon_->setFixedSize(iconSize, iconSize);
+    const QPixmap bell(QStringLiteral(":/res/images/ring.png"));
+    notificationIcon_->setPixmap(bell.scaled(iconSize, iconSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    QFont font = notificationText_->font();
+    font.setPixelSize(qMax(1, qRound(config.height * 24.0 / 49.0)));
+    notificationText_->setFont(font);
+    // A disabled bar has no running component services or queued notifications.
+    if (config.enable) initComponents();
+    updateBarGeometry();
+    setVisible(config.enable);
+    emit scheduleStatusChanged();
 }
 
 void CourseBar::reloadProfile()
@@ -269,12 +325,18 @@ void CourseBar::toggleCollapsed()
     midpointTimer_->start();
 }
 
+void CourseBar::refreshThemeColor()
+{
+    notificationLayer_->setStyleSheet(QStringLiteral("QWidget#notificationLayer { background: %1; }")
+        .arg(ThemeManager::instance().themeColor().name(QColor::HexRgb)));
+}
+
 void CourseBar::initNotifications()
 {
     // This is a sibling of all components, deliberately outside mainLayout.
     notificationLayer_ = new QWidget(this);
     notificationLayer_->setObjectName(QStringLiteral("notificationLayer"));
-    notificationLayer_->setStyleSheet(QStringLiteral("QWidget#notificationLayer { background: #1191d3; }"));
+    refreshThemeColor();
     notificationLayer_->setFocusPolicy(Qt::NoFocus);
     notificationLayout_ = new QHBoxLayout(notificationLayer_);
     notificationLayout_->setSizeConstraint(QLayout::SetNoConstraint);
@@ -367,6 +429,7 @@ void CourseBar::showCourseNotification(const CourseRefreshService::Event& event)
 
 void CourseBar::enqueueNotification(const Notification& notification)
 {
+    if (!config.enable) return;
     // Multiple CourseView instances may publish the same course boundary.
     if (!notification.eventKey.isEmpty()) {
         if (currentNotification_ && currentNotification_->eventKey == notification.eventKey) return;

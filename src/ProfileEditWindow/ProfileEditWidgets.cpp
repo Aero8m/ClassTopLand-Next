@@ -1,4 +1,5 @@
 #include "ProfileEditWidgets.h"
+#include "../Core/ThemeManager/ThemeManager.h"
 #include <ElaLineEdit.h>
 #include <ElaComboBox.h>
 #include <ElaMessageBar.h>
@@ -72,6 +73,11 @@ QVBoxLayout* card(QVBoxLayout* layout, const QString& title)
 
 void primary(ElaPushButton* control)
 {
+    if (!control->property("themeColorBound").toBool()) {
+        control->setProperty("themeColorBound", true);
+        QObject::connect(&ThemeManager::instance(), &ThemeManager::themeColorChanged,
+                         control, [control] { primary(control); });
+    }
     control->setLightDefaultColor(ElaThemeColor(ElaThemeType::Light, PrimaryNormal));
     control->setLightHoverColor(ElaThemeColor(ElaThemeType::Light, PrimaryHover));
     control->setLightPressColor(ElaThemeColor(ElaThemeType::Light, PrimaryPress));
@@ -80,6 +86,7 @@ void primary(ElaPushButton* control)
     control->setDarkHoverColor(ElaThemeColor(ElaThemeType::Dark, PrimaryHover));
     control->setDarkPressColor(ElaThemeColor(ElaThemeType::Dark, PrimaryPress));
     control->setDarkTextColor(Qt::black);
+    control->update();
 }
 
 ElaPushButton* button(const QString& title, QWidget* parent, bool accent)

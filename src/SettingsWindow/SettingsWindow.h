@@ -15,6 +15,7 @@ public:
 signals:
     void profileEditorRequested();
     void profileSwitchRequested(const QString& id);
+    void courseBarConfigChanged();
 private:
     void initUI();
     ProfileSettingsTab* profileTab_;

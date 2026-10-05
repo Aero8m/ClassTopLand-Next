@@ -42,6 +42,7 @@ private:
     void updateMetrics(int height);
     void updateContentSize();
     void updateDisplayPage();
+    void refreshThemeColor();
 
     CourseRefreshService* service_;
     QStackedLayout* pages_;

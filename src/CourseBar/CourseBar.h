@@ -17,7 +17,7 @@
 #include"BuiltinComponents/Date/Date.h"
 #include "../Core/Logger/Logger.h"
 #include "../Core/CourseRefreshService/CourseRefreshService.h"
-
+#include"BuiltinComponents/TextTip/TextTip.h"
 class QLabel;
 class QPropertyAnimation;
 class QTimer;
@@ -35,6 +35,7 @@ signals:
     void scheduleStatusChanged();
 
 public slots:
+    void reloadConfig();
     void reloadProfile();
     void showNotification(const QString& message);
     // The first alternative that fits is used, as in the original course bar.
@@ -54,6 +55,7 @@ private:
     void initUI();
     void initComponents();
     void initNotifications();
+    void refreshThemeColor();
     void showCourseNotification(const CourseRefreshService::Event& event);
     void enqueueNotification(const Notification& notification);
     void showNextNotification();

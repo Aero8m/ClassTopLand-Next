@@ -1,4 +1,6 @@
 #include "SettingsWindow.h"
+#include "tabs/AppearanceSettingsTab.h"
+#include "tabs/CourseBarSettingsTab.h"
 
 SettingsWindow::SettingsWindow(QWidget* parent) : ElaWindow(parent)
 {
@@ -17,6 +19,7 @@ void SettingsWindow::initUI()
     setWindowButtonFlag(ElaAppBarType::StayTopButtonHint,false);
     setWindowButtonFlag(ElaAppBarType::RouteBackButtonHint,false);
     setWindowButtonFlag(ElaAppBarType::RouteForwardButtonHint,false);
+    setWindowButtonFlag(ElaAppBarType::ThemeChangeButtonHint, false);
 
     // init tabs
     setUserInfoCardVisible(false);
@@ -30,7 +33,11 @@ void SettingsWindow::initUI()
             this, &SettingsWindow::profileEditorRequested);
     connect(profileTab_, &ProfileSettingsTab::profileSwitchRequested,
             this, &SettingsWindow::profileSwitchRequested);
-
+    addPageNode(QStringLiteral("外观"), new AppearanceSettingsTab(this), ElaIconType::Palette);
+    auto* courseBarTab = new CourseBarSettingsTab(this);
+    addPageNode(QStringLiteral("课程条"), courseBarTab, ElaIconType::List);
+    connect(courseBarTab, &CourseBarSettingsTab::configChanged,
+            this, &SettingsWindow::courseBarConfigChanged);
 }
 
 void SettingsWindow::refreshProfiles()
