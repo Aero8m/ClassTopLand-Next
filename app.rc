@@ -1,0 +1,49 @@
+#pragma code_page(65001)
+#include <windows.h>
+
+#ifndef CLASSTOPLAND_FILE_VERSION
+#define CLASSTOPLAND_FILE_VERSION 0,1,0,0
+#endif
+
+#ifndef CLASSTOPLAND_VERSION_STRING
+#define CLASSTOPLAND_VERSION_STRING "0.1.0.0"
+#endif
+
+// Keep the application icon first so Windows uses it for the executable.
+1 ICON "icon.ico"
+
+LANGUAGE LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED
+
+1 VERSIONINFO
+ FILEVERSION CLASSTOPLAND_FILE_VERSION
+ PRODUCTVERSION CLASSTOPLAND_FILE_VERSION
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+ FILEFLAGS VS_FF_DEBUG
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        // Simplified Chinese (0804), Unicode (04B0).
+        BLOCK "080404B0"
+        BEGIN
+            VALUE "CompanyName", "Aero8m\0"
+            VALUE "FileDescription", "ClassTopLand Next - 主程序\0"
+            VALUE "FileVersion", CLASSTOPLAND_VERSION_STRING "\0"
+            VALUE "InternalName", "ClassTopLand-Next\0"
+            VALUE "OriginalFilename", "ClassTopLand-Next.exe\0"
+            VALUE "ProductName", "ClassTopLand Next\0"
+            VALUE "ProductVersion", CLASSTOPLAND_VERSION_STRING "\0"
+            VALUE "Comments", "GNU General Public License v2\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0804, 1200
+    END
+END

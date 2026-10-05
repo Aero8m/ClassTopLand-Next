@@ -13,16 +13,16 @@ find_package(Qt6 COMPONENTS
         Widgets
         REQUIRED)
 
-include(FetchContent)
+if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/yaml-cpp/CMakeLists.txt")
+    message(FATAL_ERROR "yaml-cpp submodule is missing. Run: git submodule update --init --recursive")
+endif ()
+
 set(YAML_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_INSTALL OFF CACHE BOOL "" FORCE)
 set(YAML_MSVC_SHARED_RT ON CACHE BOOL "" FORCE)
-FetchContent_Declare(yaml-cpp
-        GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-        GIT_TAG 56e3bb550c91fd7005566f19c079cb7a503223cf)
-FetchContent_MakeAvailable(yaml-cpp)
+add_subdirectory(third_party/yaml-cpp)
 
 add_subdirectory(third_party/ElaWidgetTools-Plus/ElaWidgetTools)
 
@@ -83,6 +83,8 @@ add_executable(ClassTopLand-Next
 
         src/SettingsWindow/SettingsWindow.cpp
         src/SettingsWindow/SettingsWindow.h
+        src/SettingsWindow/AboutDialog.cpp
+        src/SettingsWindow/AboutDialog.h
         src/SettingsWindow/tabs/AppearanceSettingsTab.cpp
         src/SettingsWindow/tabs/AppearanceSettingsTab.h
         src/SettingsWindow/tabs/CourseBarSettingsTab.cpp
@@ -96,6 +98,19 @@ add_executable(ClassTopLand-Next
         src/Utils/GlassHelper/GlassHelper.cpp
         src/Utils/GlassHelper/GlassHelper.h
         src/Utils/SupportFunctions.h)
+
+if (WIN32)
+    set_target_properties(ClassTopLand-Next PROPERTIES
+            WIN32_EXECUTABLE "$<CONFIG:Release>")
+    enable_language(RC)
+    target_sources(ClassTopLand-Next PRIVATE app.rc)
+    target_include_directories(ClassTopLand-Next PRIVATE
+            "$<$<COMPILE_LANGUAGE:RC>:${CMAKE_CURRENT_SOURCE_DIR}>")
+    set_source_files_properties(app.rc PROPERTIES OBJECT_DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/icon.ico")
+    target_compile_definitions(ClassTopLand-Next PRIVATE
+            "$<$<AND:$<COMPILE_LANGUAGE:RC>,$<CONFIG:Debug>>:_DEBUG>")
+endif ()
 
 target_link_libraries(ClassTopLand-Next
         Qt::Core

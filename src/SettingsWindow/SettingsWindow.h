@@ -4,6 +4,8 @@
 #include"ElaApplication.h"
 #include"tabs/ProfileSettingsTab.h"
 
+class AboutDialog;
+
 class SettingsWindow : public ElaWindow
 {
     Q_OBJECT
@@ -18,6 +20,9 @@ signals:
     void courseBarConfigChanged();
 private:
     void initUI();
+    void showAboutDialog();
+    QString aboutNodeKey_;
+    AboutDialog* aboutDialog_ = nullptr;
     ProfileSettingsTab* profileTab_;
 };
 

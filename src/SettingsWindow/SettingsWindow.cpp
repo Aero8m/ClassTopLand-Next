@@ -1,6 +1,9 @@
 #include "SettingsWindow.h"
+#include "AboutDialog.h"
 #include "tabs/AppearanceSettingsTab.h"
 #include "tabs/CourseBarSettingsTab.h"
+
+#include <QScreen>
 
 SettingsWindow::SettingsWindow(QWidget* parent) : ElaWindow(parent)
 {
@@ -38,6 +41,30 @@ void SettingsWindow::initUI()
     addPageNode(QStringLiteral("课程条"), courseBarTab, ElaIconType::List);
     connect(courseBarTab, &CourseBarSettingsTab::configChanged,
             this, &SettingsWindow::courseBarConfigChanged);
+
+    addFooterNode(QStringLiteral("关于"), aboutNodeKey_, 0, ElaIconType::CircleInfo);
+    connect(this, &ElaWindow::navigationNodeClicked, this,
+            [this](ElaNavigationType::NavigationNodeType, const QString& nodeKey) {
+        if (nodeKey == aboutNodeKey_) showAboutDialog();
+    });
+}
+
+void SettingsWindow::showAboutDialog()
+{
+    if (!aboutDialog_) aboutDialog_ = new AboutDialog(this);
+    if (!aboutDialog_->isVisible()) {
+        // Center on the settings window, keeping the dialog inside its screen.
+        const QRect available = screen()->availableGeometry();
+        QPoint position = frameGeometry().center() - aboutDialog_->rect().center();
+        position.setX(qBound(available.left(), position.x(),
+                            qMax(available.left(), available.right() - aboutDialog_->width() + 1)));
+        position.setY(qBound(available.top(), position.y(),
+                            qMax(available.top(), available.bottom() - aboutDialog_->height() + 1)));
+        aboutDialog_->move(position);
+    }
+    aboutDialog_->show();
+    aboutDialog_->raise();
+    aboutDialog_->activateWindow();
 }
 
 void SettingsWindow::refreshProfiles()

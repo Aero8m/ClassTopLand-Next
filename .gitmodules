@@ -1,3 +1,6 @@
 [submodule "third_party/ElaWidgetTools-Plus"]
 	path = third_party/ElaWidgetTools-Plus
 	url = https://github.com/Aero8m/ElaWidgetTools-Plus.git
+[submodule "third_party/yaml-cpp"]
+	path = third_party/yaml-cpp
+	url = https://github.com/jbeder/yaml-cpp.git
