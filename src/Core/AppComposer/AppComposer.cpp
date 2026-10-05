@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QScreen>
+#include <QScopedValueRollback>
 
 namespace {
 bool reportStartupError(const QString& message)
@@ -19,9 +20,13 @@ bool reportStartupError(const QString& message)
 }
 }
 
-AppComposer::AppComposer(QObject* parent) : QObject(parent)
+AppComposer::AppComposer(QObject* parent) : AppComposer(DATA_PATH, parent)
 {
+}
 
+AppComposer::AppComposer(const QString& dataDirectory, QObject* parent)
+    : QObject(parent), dataDirectory_(QDir(dataDirectory).absolutePath())
+{
 }
 
 AppComposer::~AppComposer()
@@ -48,7 +53,7 @@ bool AppComposer::initInstances()
 
     // init config manager
     QString error;
-    const QString configPath = CONFIG_FILE_PATH;
+    const QString configPath = QDir(dataDirectory_).filePath(QStringLiteral("MainConfig.json"));
     const bool createConfig = !QFileInfo::exists(configPath);
     if (!ConfigManager::instance().load(configPath, &error)) {
         return reportStartupError(QStringLiteral("配置加载失败：%1\n%2").arg(configPath, error));
@@ -57,7 +62,8 @@ bool AppComposer::initInstances()
         return reportStartupError(QStringLiteral("默认配置保存失败：%1\n%2").arg(configPath, error));
     }
     // init profile manager
-    const QString profilePath = GET_PROFILE_PATH(ConfigManager::instance().config().profileName);
+    const QString profilePath = QDir(dataDirectory_).filePath(
+        QStringLiteral("profiles/%1.json").arg(ConfigManager::instance().config().profileName));
     const bool createProfile = !QFileInfo::exists(profilePath);
     if (!ProfileManager::instance().load(profilePath, &error)) {
         return reportStartupError(QStringLiteral("档案加载失败：%1\n%2").arg(profilePath, error));
@@ -68,10 +74,12 @@ bool AppComposer::initInstances()
     // init course bar
     courseBar = std::make_unique<CourseBar>();
     trayMenu_ = std::make_unique<TaskbarTrayMenu>();
-    trayMenu_->setExitGuard([this] {
-        if (!profileEditorWindow_ || !profileEditorWindow_->session()->isDirty()) return true;
-        showProfileEditorWindow();
-        return profileEditorWindow_->prepareToClose();
+    trayMenu_->setExitGuard([this] { return prepareToExit(); });
+    connect(trayMenu_.get(), &TaskbarTrayMenu::exitAccepted, this, [this] {
+        // Do not allow queued settings actions to delete or change the selected
+        // target between acceptance and the deferred application exit.
+        if (settingsWindow_) settingsWindow_->setEnabled(false);
+        if (profileEditorWindow_) profileEditorWindow_->setEnabled(false);
     });
     connect(trayMenu_.get(), &TaskbarTrayMenu::settingsRequested,
             this, &AppComposer::showSettingsWindow);
@@ -124,7 +132,14 @@ void AppComposer::showSettingsWindow()
 {
     // A click queued by a panel that is already being torn down must not revive the window.
     if (!initialized_) return;
-    if (!settingsWindow_) settingsWindow_ = std::make_unique<SettingsWindow>();
+    if (!settingsWindow_) {
+        settingsWindow_ = std::make_unique<SettingsWindow>();
+        connect(settingsWindow_.get(), &SettingsWindow::profileEditorRequested,
+                this, &AppComposer::showProfileEditorWindow);
+        connect(settingsWindow_.get(), &SettingsWindow::profileSwitchRequested,
+                this, &AppComposer::switchProfile);
+    }
+    settingsWindow_->refreshProfiles();
     if (!settingsWindowPositioned_) {
         centerOnPanelScreen(settingsWindow_.get());
         settingsWindowPositioned_ = true;
@@ -141,6 +156,7 @@ void AppComposer::showProfileEditorWindow()
                 this, [this] {
             courseBar->reloadProfile();
             refreshScheduleMenu();
+            if (settingsWindow_) settingsWindow_->refreshProfiles();
         });
     }
     if (!profileEditorWindowPositioned_) {
@@ -171,6 +187,39 @@ void AppComposer::refreshScheduleMenu()
     }
     trayMenu_->setScheduleChoices(choices, profile.activeWeekScheduleId);
     trayMenu_->setScheduleStatus(courseBar->scheduleStatus(), courseBar->hasCourseViews());
+}
+
+void AppComposer::switchProfile(const QString& id)
+{
+    if (!initialized_ || !trayMenu_ || switchingProfile_ || id.isEmpty()) return;
+    if (id.compare(QFileInfo(ProfileManager::instance().filePath()).completeBaseName(), Qt::CaseInsensitive) == 0) return;
+    QScopedValueRollback<bool> switching(switchingProfile_, true);
+    QScopedValueRollback<QString> selection(pendingProfileId_, id);
+    // The shared exit guard resolves unsaved changes before committing selection.
+    // A rejected exit never publishes the requested profile in memory or on disk.
+    trayMenu_->requestExit(TaskbarTrayMenu::RestartExitCode);
+}
+
+bool AppComposer::prepareToExit()
+{
+    if (profileEditorWindow_ && profileEditorWindow_->session()->isDirty()) {
+        showProfileEditorWindow();
+        if (!profileEditorWindow_->prepareToClose()) return false;
+    }
+    if (pendingProfileId_.isEmpty()) return true;
+    QString error;
+    Profile target;
+    if (!ProfileManager::instance().readProfile(pendingProfileId_, target, &error)) {
+        if (settingsWindow_) settingsWindow_->showProfileError(tr("切换失败，目标档案无法读取：%1").arg(error));
+        return false;
+    }
+    Config candidate = ConfigManager::instance().config();
+    candidate.profileName = pendingProfileId_;
+    if (!ConfigManager::instance().commit(candidate, &error)) {
+        if (settingsWindow_) settingsWindow_->showProfileError(tr("切换失败，配置保存失败：%1").arg(error));
+        return false;
+    }
+    return true;
 }
 
 void AppComposer::selectWeekSchedule(const QString& id)

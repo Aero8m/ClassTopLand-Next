@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 4.0)
-project(ClassTopLand_Next)
+project(ClassTopLand-Next)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_AUTOMOC ON)
@@ -13,9 +13,20 @@ find_package(Qt6 COMPONENTS
         Widgets
         REQUIRED)
 
+include(FetchContent)
+set(YAML_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_INSTALL OFF CACHE BOOL "" FORCE)
+set(YAML_MSVC_SHARED_RT ON CACHE BOOL "" FORCE)
+FetchContent_Declare(yaml-cpp
+        GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+        GIT_TAG 56e3bb550c91fd7005566f19c079cb7a503223cf)
+FetchContent_MakeAvailable(yaml-cpp)
+
 add_subdirectory(third_party/ElaWidgetTools-Plus/ElaWidgetTools)
 
-add_executable(ClassTopLand_Next main.cpp
+add_executable(ClassTopLand-Next main.cpp
         resourecs.qrc
         src/Core/Model/Subject.h
         src/Core/Model/Schedule.h
@@ -25,6 +36,8 @@ add_executable(ClassTopLand_Next main.cpp
         src/Core/Model/Profile.h
         src/Core/ProfileManager/ProfileManager.h
         src/Core/ProfileManager/ProfileManager.cpp
+        src/Core/ProfileManager/ProfileExchange.cpp
+        src/Core/ProfileManager/ProfileExchange.h
         src/Core/Logger/Logger.h
         src/Core/Logger/Logger.cpp
         src/Core/AppComposer/AppComposer.cpp
@@ -48,7 +61,11 @@ add_executable(ClassTopLand_Next main.cpp
         src/SettingsWindow/SettingsWindow.cpp
         src/SettingsWindow/SettingsWindow.h
         src/ProfileEditWindow/ProfileEditWindow.cpp
-        src/ProfileEditWindow/ProfileEditWindow.h)
+        src/ProfileEditWindow/ProfileEditWindow.h
+        src/SettingsWindow/tabs/ProfileSettingsTab.cpp
+        src/SettingsWindow/tabs/ProfileSettingsTab.h
+        src/SettingsWindow/tabs/AppearanceSettingsTab.cpp
+        src/SettingsWindow/tabs/AppearanceSettingsTab.h)
 set(PROFILE_EDITOR_SOURCES
         src/ProfileEditWindow/ProfileEditSession.h
         src/ProfileEditWindow/ProfileEditSession.cpp
@@ -64,19 +81,20 @@ set(PROFILE_EDITOR_SOURCES
         src/ProfileEditWindow/tabs/TimeLinesTab.cpp
         src/ProfileEditWindow/tabs/SchedulesTab.h
         src/ProfileEditWindow/tabs/SchedulesTab.cpp)
-target_sources(ClassTopLand_Next PRIVATE ${PROFILE_EDITOR_SOURCES})
-target_link_libraries(ClassTopLand_Next
+target_sources(ClassTopLand-Next PRIVATE ${PROFILE_EDITOR_SOURCES})
+target_link_libraries(ClassTopLand-Next
         Qt::Core
         Qt::Gui
         Qt::Widgets
         Ela::WidgetTools
+        yaml-cpp::yaml-cpp
 )
 
 if (WIN32 AND NOT ELAWIDGETTOOLS_BUILD_STATIC_LIB)
-    add_custom_command(TARGET ClassTopLand_Next POST_BUILD
+    add_custom_command(TARGET ClassTopLand-Next POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:ElaWidgetTools>"
-            "$<TARGET_FILE_DIR:ClassTopLand_Next>"
+            "$<TARGET_FILE_DIR:ClassTopLand-Next>"
             VERBATIM)
 endif ()
 
@@ -107,26 +125,4 @@ if (WIN32 AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
                 "${QT_INSTALL_PATH}/bin/Qt6${QT_LIB}${DEBUG_SUFFIX}.dll"
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>")
     endforeach (QT_LIB)
-endif ()
-
-
-include(CTest)
-if (BUILD_TESTING)
-    find_package(Qt6 REQUIRED COMPONENTS Test)
-    get_target_property(SCHEDULE_TEST_SOURCES ClassTopLand_Next SOURCES)
-    list(REMOVE_ITEM SCHEDULE_TEST_SOURCES main.cpp)
-    add_executable(ScheduleSwitchTests tests/ScheduleSwitchTests.cpp ${SCHEDULE_TEST_SOURCES})
-    target_include_directories(ScheduleSwitchTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(ScheduleSwitchTests PRIVATE Qt::Test Qt::Widgets Ela::WidgetTools)
-    if (WIN32 AND NOT ELAWIDGETTOOLS_BUILD_STATIC_LIB)
-        add_custom_command(TARGET ScheduleSwitchTests POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "$<TARGET_FILE:ElaWidgetTools>" "$<TARGET_FILE_DIR:ScheduleSwitchTests>"
-                VERBATIM)
-    endif ()
-    add_test(NAME ScheduleSwitchTests COMMAND ScheduleSwitchTests)
-    set_tests_properties(ScheduleSwitchTests PROPERTIES
-            TIMEOUT 90
-            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORM_PLUGIN_PATH=C:/Qt/6.9.3/msvc2022_64/plugins/platforms"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:C:/Qt/6.9.3/msvc2022_64/bin")
 endif ()

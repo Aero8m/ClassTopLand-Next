@@ -24,9 +24,29 @@ public:
     // Persist first; a failed write never changes the published selection.
     bool selectWeekSchedule(const QString& id, QString* error = nullptr);
 
+    struct Entry {
+        QString id; // File stem, independent of the editable display name.
+        QString name;
+        QString filePath;
+        QString error;
+        bool current = false;
+        bool isValid() const { return error.isEmpty(); }
+    };
+    QString profilesDirectory() const;
+    QList<Entry> listProfiles(QString* error = nullptr) const;
+    // These operations never replace the running profile. Missing files are errors.
+    bool readProfile(const QString& id, Profile& result, QString* error = nullptr) const;
+    bool createProfile(const QString& name, bool copyCurrent, QString& createdId,
+                       QString* error = nullptr) const;
+    bool createProfile(const Profile& candidate, QString& createdId,
+                       QString* error = nullptr) const;
+    bool isManagedExportPath(const QString& path) const;
+    bool removeProfile(const QString& id, QString* error = nullptr) const;
+
 private:
     ProfileManager() = default;
     bool writeProfile(const Profile& candidate, QString* error) const;
+    QString managedPath(const QString& id, QString* error) const;
 
     Profile profile_{};
     QString filePath_;

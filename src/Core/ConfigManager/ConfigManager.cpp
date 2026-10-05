@@ -151,15 +151,28 @@ bool ConfigManager::load(const QString& filePath, QString* error)
 
 bool ConfigManager::save(QString* error) const
 {
+    return writeConfig(config_, error);
+}
+
+bool ConfigManager::commit(const Config& candidate, QString* error)
+{
+    Config committed = candidate;
+    if (!writeConfig(committed, error)) return false;
+    config_ = std::move(committed);
+    return true;
+}
+
+bool ConfigManager::writeConfig(const Config& candidate, QString* error) const
+{
     if (error) error->clear();
     if (filePath_.isEmpty()) return fail(error, QStringLiteral("No config file path has been loaded"));
-    if (!validate(config_, error)) return false;
+    if (!validate(candidate, error)) return false;
     if (!QDir().mkpath(QFileInfo(filePath_).absolutePath()))
         return fail(error, QStringLiteral("Cannot create config directory"));
 
     QSaveFile file(filePath_);
     if (!file.open(QIODevice::WriteOnly)) return fail(error, file.errorString());
-    const QByteArray contents = QJsonDocument(toJson(config_)).toJson(QJsonDocument::Indented);
+    const QByteArray contents = QJsonDocument(toJson(candidate)).toJson(QJsonDocument::Indented);
     if (file.write(contents) != contents.size()) return fail(error, file.errorString());
     if (!file.commit()) return fail(error, file.errorString());
     return true;

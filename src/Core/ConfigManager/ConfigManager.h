@@ -20,9 +20,11 @@ public:
     // The supplied path is retained only when loading succeeds.
     bool load(const QString& filePath, QString* error = nullptr);
     bool save(QString* error = nullptr) const;
+    bool commit(const Config& candidate, QString* error = nullptr);
 
 private:
     ConfigManager() = default;
+    bool writeConfig(const Config& candidate, QString* error) const;
 
     Config config_{};
     QString filePath_;

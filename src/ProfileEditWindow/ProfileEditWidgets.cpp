@@ -45,8 +45,8 @@ QVBoxLayout* page(ElaScrollPage* view, const QString& title)
     auto* layout = new QVBoxLayout(content);
     layout->setContentsMargins(32, 28, 32, 28);
     layout->setSpacing(20);
-    auto* heading = text(title, content, 30);
-    QFont font = heading->font(); font.setBold(true); heading->setFont(font);
+    auto* heading = text(title, content, 28);
+    QFont font = heading->font(); font.setWeight(QFont::Medium); heading->setFont(font);
     layout->addWidget(heading);
     view->addCentralWidget(content, true, false);
     return layout;

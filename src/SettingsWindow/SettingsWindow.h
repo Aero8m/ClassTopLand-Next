@@ -2,6 +2,7 @@
 #define CLASSTOPLAND_NEXT_SETTINGSWINDOW_H
 #include"ElaWindow.h"
 #include"ElaApplication.h"
+#include"tabs/ProfileSettingsTab.h"
 
 class SettingsWindow : public ElaWindow
 {
@@ -9,8 +10,14 @@ class SettingsWindow : public ElaWindow
 public:
     SettingsWindow(QWidget *parent = nullptr);
     ~SettingsWindow();
+    void refreshProfiles();
+    void showProfileError(const QString& message);
+signals:
+    void profileEditorRequested();
+    void profileSwitchRequested(const QString& id);
 private:
     void initUI();
+    ProfileSettingsTab* profileTab_;
 };
 
 

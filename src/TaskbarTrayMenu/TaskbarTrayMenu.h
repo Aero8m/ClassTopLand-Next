@@ -46,6 +46,7 @@ public slots:
     void requestExit(int exitCode);
 
 Q_SIGNALS:
+    void exitAccepted(int exitCode);
     // The user asked for one of the AppComposer-owned windows. The panel never creates
     // or owns them, so it stays a pure presentation layer.
     void settingsRequested();

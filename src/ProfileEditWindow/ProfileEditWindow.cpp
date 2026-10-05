@@ -6,6 +6,7 @@
 #include "tabs/TimeLinesTab.h"
 #include "tabs/SchedulesTab.h"
 #include "../Core/ProfileManager/ProfileManager.h"
+#include <ElaApplication.h>
 #include <ElaMessageBar.h>
 #include <ElaPushButton.h>
 #include <ElaStatusBar.h>
@@ -13,6 +14,7 @@
 #include <QCloseEvent>
 #include <QScopedValueRollback>
 #include <QShortcut>
+#include <QShowEvent>
 
 ProfileEditWindow::ProfileEditWindow(QWidget* parent) : ElaWindow(parent)
 {
@@ -121,4 +123,18 @@ void ProfileEditWindow::closeEvent(QCloseEvent* event)
 {
     if (prepareToClose()) ElaWindow::closeEvent(event);
     else event->ignore();
+}
+
+void ProfileEditWindow::showEvent(QShowEvent* event)
+{
+    ElaWindow::showEvent(event);
+#ifdef Q_OS_WIN
+    const auto mode = eApp->getWindowDisplayMode();
+    if (mode != ElaApplicationType::Normal && mode != ElaApplicationType::ElaMica) {
+        // Qt can reset the native theme on reopening. Reapply both the backdrop
+        // and its theme through Ela's public API without changing the app theme.
+        eApp->syncWindowDisplayMode(this, false);
+        eApp->syncWindowDisplayMode(this, true);
+    }
+#endif
 }

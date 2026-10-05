@@ -579,6 +579,7 @@ void TaskbarTrayMenu::requestExit(int exitCode)
     checkingExit_ = false;
     if (!allowed) return;
     exitRequested_ = true;
+    emit exitAccepted(exitCode);
     // Written before the loop ends, so a failure later is distinguishable from
     // the click never reaching the button at all.
     Logger::instance().log(Logger::Level::Info,

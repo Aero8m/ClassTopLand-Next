@@ -10,6 +10,7 @@ class SchedulesTab;
 class ElaText;
 class ElaPushButton;
 class QCloseEvent;
+class QShowEvent;
 
 class ProfileEditWindow : public ElaWindow
 {
@@ -24,6 +25,7 @@ signals:
     void profileSaved();
 protected:
     void closeEvent(QCloseEvent* event) override;
+    void showEvent(QShowEvent* event) override;
 private:
     void initUI();
     void updateState();

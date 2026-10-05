@@ -22,6 +22,7 @@ class AppComposer : public QObject
     Q_OBJECT
 public:
     AppComposer(QObject *parent = nullptr);
+    explicit AppComposer(const QString& dataDirectory, QObject* parent = nullptr);
     ~AppComposer();
     bool startApp();
     // Deterministic teardown: destroys the windows, saves config and profile, and
@@ -36,6 +37,7 @@ private slots:
     void showProfileEditorWindow();
     void refreshScheduleMenu();
     void selectWeekSchedule(const QString& id);
+    void switchProfile(const QString& id);
 
 private:
     bool initInstances();
@@ -45,6 +47,10 @@ private:
     void centerOnPanelScreen(QWidget* window);
     // Hides the panel and brings an already created window to the front.
     void presentWindow(QWidget* window);
+    bool prepareToExit();
+    QString dataDirectory_;
+    QString pendingProfileId_;
+    bool switchingProfile_ = false;
     bool initialized_ = false;
     bool shutdown_ = false;
     std::unique_ptr<CourseBar> courseBar;
