@@ -17,6 +17,8 @@ if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/yaml-cpp/CMakeLists.txt"
     message(FATAL_ERROR "yaml-cpp submodule is missing. Run: git submodule update --init --recursive")
 endif ()
 
+# AUTO INSERT THE MSVC PROPERTIES
+
 set(YAML_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
