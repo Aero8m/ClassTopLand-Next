@@ -41,9 +41,9 @@ void GlassHelper::enableBlurBehind(QWidget *widget,int alpha) {
     enableBlurBehindX11(widget);
     auto *filter = new BackgroundEventFilter(widget);
     widget->installEventFilter(filter);
-#elifdef _WIN32
+#elif defined(_WIN32)
     enableBlurBehindWin32(widget,alpha);
-#elifdef __APPLE__
+#elif defined(__APPLE__)
     widget->setStyleSheet(QString("%1 {background-color: rgba(255,255,255,0.7);}").arg(widget->metaObject()->className()));
 #endif
 
