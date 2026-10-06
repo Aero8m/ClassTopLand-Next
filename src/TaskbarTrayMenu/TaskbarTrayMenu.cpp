@@ -206,6 +206,7 @@ TaskbarTrayMenu::TaskbarTrayMenu(QWidget* parent)
     });
 
     connect(this, &ElaWidget::closeButtonClicked, this, &TaskbarTrayMenu::hideMenu);
+    connect(qApp, &QGuiApplication::focusWindowChanged, this, [this] { scheduleDismissal(); });
     auto* escape = new QShortcut(QKeySequence(Qt::Key_Escape), this);
     connect(escape, &QShortcut::activated, this, &TaskbarTrayMenu::hideMenu);
 
@@ -272,10 +273,13 @@ void TaskbarTrayMenu::initUI()
     heading->setTextPixelSize(16);
     shortcuts->addWidget(heading);
 
-    auto* cards = new QHBoxLayout;
-    cards->setSpacing(8);
-    auto addShortcut = [this, cards](ElaIconType::IconName icon, const QString& text,
-                                     const QString& objectName) -> ElaIconButton* {
+    auto* cards = new QGridLayout;
+    cards->setHorizontalSpacing(8);
+    cards->setVerticalSpacing(12);
+    cards->setColumnStretch(0, 1);
+    cards->setColumnStretch(1, 1);
+    auto addShortcut = [this, cards, index = 0](ElaIconType::IconName icon, const QString& text,
+                                     const QString& objectName) mutable -> ElaIconButton* {
         auto* column = new QVBoxLayout;
         column->setSpacing(6);
         auto* card = new ElaScrollPageArea(this);
@@ -294,7 +298,8 @@ void TaskbarTrayMenu::initUI()
         label->setAlignment(Qt::AlignCenter);
         column->addWidget(card);
         column->addWidget(label);
-        cards->addLayout(column, 1);
+        cards->addLayout(column, index / 2, index % 2);
+        ++index;
         return button;
     };
     auto* settingsButton = addShortcut(ElaIconType::Gear, tr("设置"), QStringLiteral("settingsButton"));
@@ -306,6 +311,10 @@ void TaskbarTrayMenu::initUI()
     connect(settingsButton, &ElaIconButton::clicked, this, &TaskbarTrayMenu::settingsRequested);
     connect(profileEditorButton, &ElaIconButton::clicked, this,
             &TaskbarTrayMenu::profileEditorRequested);
+    auto* reschedule = addShortcut(ElaIconType::CalendarDays, tr("调休"), QStringLiteral("rescheduleButton"));
+    auto* swap = addShortcut(ElaIconType::ArrowRightArrowLeft, tr("换课"), QStringLiteral("swapClassesButton"));
+    connect(reschedule, &ElaIconButton::clicked, this, &TaskbarTrayMenu::rescheduleWindowRequested);
+    connect(swap, &ElaIconButton::clicked, this, &TaskbarTrayMenu::swapWindowRequested);
     shortcuts->addLayout(cards);
     bodyLayout->addLayout(shortcuts);
 
@@ -608,14 +617,20 @@ void TaskbarTrayMenu::startTransition(const QPoint& position, qreal opacity, int
     visibilityAnimation_->start();
 }
 
+void TaskbarTrayMenu::scheduleDismissal()
+{
+    if (!isVisible()) return;
+    const quint64 revision = presentationRevision_;
+    QTimer::singleShot(0, this, [this, revision] {
+        if (revision == presentationRevision_ && isVisible() && !isActiveWindow()) hideMenu();
+    });
+}
+
 bool TaskbarTrayMenu::event(QEvent* event)
 {
     const bool result = ElaWidget::event(event);
     if (event->type() == QEvent::WindowDeactivate) {
-        const quint64 revision = presentationRevision_;
-        QTimer::singleShot(0, this, [this, revision] {
-            if (revision == presentationRevision_ && isVisible() && !isActiveWindow()) hideMenu();
-        });
+        scheduleDismissal();
     } else if (event->type() == QEvent::DevicePixelRatioChange && applicationIcon_) {
         applicationIcon_->setPixmap(windowIcon().pixmap(applicationIcon_->size(), devicePixelRatioF()));
     }

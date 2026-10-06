@@ -12,6 +12,9 @@
 class TaskbarTrayMenu;
 class SettingsWindow;
 class ProfileEditWindow;
+class SwapClassesWindow;
+class RescheduleWindow;
+class QTimer;
 
 #define DATA_PATH (QDir::homePath()+"/ClassTopLand-Next_Data")
 #define CONFIG_FILE_PATH (DATA_PATH+"/MainConfig.json")
@@ -38,6 +41,9 @@ private slots:
     void refreshScheduleMenu();
     void selectWeekSchedule(const QString& id);
     void switchProfile(const QString& id);
+    void showSwapWindow();
+    void showRescheduleWindow();
+    void cleanupDateOverrides();
 
 private:
     bool initInstances();
@@ -48,6 +54,7 @@ private:
     // Hides the panel and brings an already created window to the front.
     void presentWindow(QWidget* window);
     bool prepareToExit();
+    void syncDateAdjustments();
     QString dataDirectory_;
     QString pendingProfileId_;
     bool switchingProfile_ = false;
@@ -57,6 +64,13 @@ private:
     std::unique_ptr<TaskbarTrayMenu> trayMenu_;
     std::unique_ptr<SettingsWindow> settingsWindow_;
     std::unique_ptr<ProfileEditWindow> profileEditorWindow_;
+    std::unique_ptr<SwapClassesWindow> swapWindow_;
+    std::unique_ptr<RescheduleWindow> rescheduleWindow_;
+    QTimer* dateCleanupTimer_ = nullptr;
+    QString lastCleanupError_;
+    QDate lastCleanupDate_;
+    bool swapWindowPositioned_ = false;
+    bool rescheduleWindowPositioned_ = false;
     // Only the first opening is positioned; later openings keep the user's placement.
     bool settingsWindowPositioned_ = false;
     bool profileEditorWindowPositioned_ = false;

@@ -53,6 +53,8 @@ Q_SIGNALS:
     void profileEditorRequested();
     void weekScheduleRequested(const QString& id);
     void scheduleListRefreshRequested();
+    void swapWindowRequested();
+    void rescheduleWindowRequested();
 
 protected:
     bool event(QEvent* event) override;
@@ -63,6 +65,7 @@ protected:
 
 private:
     void initUI();
+    void scheduleDismissal();
     void resizeToAvailableScreen();
     void updateAutomaticCard();
     void requestWeekSchedule(const QString& id);

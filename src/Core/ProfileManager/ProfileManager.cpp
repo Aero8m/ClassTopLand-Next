@@ -1,11 +1,13 @@
 #include "ProfileManager.h"
 #include "ProfileExchange.h"
+#include "../DateSchedule/DateSchedule.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 
 #include <utility>
+#include <algorithm>
 
 namespace {
 bool fail(QString* error, const QString& message)
@@ -57,11 +59,94 @@ bool ProfileManager::save(QString* error) const
     return writeProfile(profile_, error);
 }
 
-bool ProfileManager::commit(const Profile& candidate, QString* error)
+bool ProfileManager::commit(const Profile& candidate, QString* error, QList<QDate>* canceledDates)
 {
+    if (error) error->clear();
+    if (canceledDates) canceledDates->clear();
+    if (!DateSchedule::validateOverrides(candidate.dateOverrides, error)) return false;
     Profile committed = candidate;
+    QList<QDate> canceled;
+    for (qsizetype i = committed.dateOverrides.size(); i-- > 0;) {
+        const auto& record = committed.dateOverrides[i];
+        if (record.date.isValid() && record.date < QDate::currentDate()) {
+            committed.dateOverrides.removeAt(i);
+        } else if (record.date.isValid() && !DateSchedule::sourceMatches(committed, record)) {
+            canceled.append(record.date);
+            committed.dateOverrides.removeAt(i);
+        }
+    }
     if (!writeProfile(committed, error)) return false;
     profile_ = std::move(committed);
+    std::sort(canceled.begin(), canceled.end());
+    if (canceledDates) *canceledDates = canceled;
+    return true;
+}
+
+bool ProfileManager::setDateReschedule(const QDate& date, const QString& weekId, int weekday, QString* error)
+{
+    if (!date.isValid() || date < QDate::currentDate()) return fail(error, QStringLiteral("请选择今天或未来日期"));
+    const auto* day = DateSchedule::sourceDay(profile_, weekId, weekday);
+    if (!day) return fail(error, QStringLiteral("请选择有效的来源课表和星期"));
+    if (!DateSchedule::validateClasses(day->classes, error)) return false;
+    Profile candidate = profile_;
+    for (qsizetype i = candidate.dateOverrides.size(); i-- > 0;)
+        if (candidate.dateOverrides[i].date == date) candidate.dateOverrides.removeAt(i);
+    const auto courses = DateSchedule::sorted(day->classes);
+    candidate.dateOverrides.append({date, weekId, weekday, courses, courses});
+    return commit(candidate, error);
+}
+
+bool ProfileManager::swapDateClasses(const QDate& date, const QString& weekId, int first, int second, QString* error)
+{
+    if (!date.isValid() || date < QDate::currentDate()) return fail(error, QStringLiteral("请选择今天或未来日期"));
+    auto table = DateSchedule::resolve(profile_, date, weekId);
+    if (!table.valid) return fail(error, table.error);
+    if (first < 0 || second < 0 || first == second || first >= table.classes.size() || second >= table.classes.size())
+        return fail(error, QStringLiteral("请选择两节不同的课程"));
+    if (table.classes[first].subject == table.classes[second].subject)
+        return fail(error, QStringLiteral("两节课的科目相同，无需交换"));
+    const auto* day = DateSchedule::sourceDay(profile_, table.sourceWeekScheduleId, table.sourceWeekday);
+    if (!day) return fail(error, QStringLiteral("来源日课表不存在"));
+    DateScheduleOverride record{date, table.sourceWeekScheduleId, table.sourceWeekday,
+                               DateSchedule::sorted(day->classes), table.classes};
+    std::swap(record.classes[first].subject, record.classes[second].subject);
+    Profile candidate = profile_;
+    for (qsizetype i = candidate.dateOverrides.size(); i-- > 0;)
+        if (candidate.dateOverrides[i].date == date) candidate.dateOverrides.removeAt(i);
+    candidate.dateOverrides.append(record);
+    return commit(candidate, error);
+}
+
+bool ProfileManager::restoreDate(const QDate& date, QString* error)
+{
+    if (error) error->clear();
+    if (!DateSchedule::find(profile_, date)) return true;
+    Profile candidate = profile_;
+    for (qsizetype i = candidate.dateOverrides.size(); i-- > 0;)
+        if (candidate.dateOverrides[i].date == date) candidate.dateOverrides.removeAt(i);
+    return commit(candidate, error);
+}
+
+bool ProfileManager::cleanPastDateOverrides(const QDate& today, QString* error, QList<QDate>* canceledDates)
+{
+    if (error) error->clear();
+    if (canceledDates) canceledDates->clear();
+    if (!today.isValid()) return fail(error, QStringLiteral("清理日期无效"));
+    Profile candidate = profile_;
+    QList<QDate> canceled;
+    for (qsizetype i = candidate.dateOverrides.size(); i-- > 0;) {
+        const auto& record = candidate.dateOverrides[i];
+        if (record.date < today || !DateSchedule::sourceMatches(candidate, record)) {
+            if (record.date >= today) canceled.append(record.date);
+            candidate.dateOverrides.removeAt(i);
+        }
+    }
+    if (candidate.dateOverrides.size() == profile_.dateOverrides.size()) return true;
+    // Do not call commit: its wall-clock filter would defeat the injected date.
+    if (!writeProfile(candidate, error)) return false;
+    profile_ = std::move(candidate);
+    std::sort(canceled.begin(), canceled.end());
+    if (canceledDates) *canceledDates = canceled;
     return true;
 }
 

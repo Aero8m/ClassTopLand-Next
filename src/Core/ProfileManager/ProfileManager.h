@@ -20,9 +20,16 @@ public:
     bool load(const QString& filePath, QString* error = nullptr);
     bool save(QString* error = nullptr) const;
     // Write the candidate atomically before publishing it to readers.
-    bool commit(const Profile& candidate, QString* error = nullptr);
+    bool commit(const Profile& candidate, QString* error = nullptr, QList<QDate>* canceledDates = nullptr);
     // Persist first; a failed write never changes the published selection.
     bool selectWeekSchedule(const QString& id, QString* error = nullptr);
+    bool setDateReschedule(const QDate& date, const QString& weekId, int weekday, QString* error = nullptr);
+    bool swapDateClasses(const QDate& date, const QString& weekId, int first, int second,
+                         QString* error = nullptr);
+    bool restoreDate(const QDate& date, QString* error = nullptr);
+    // Explicit date keeps cleanup deterministic in tests. No write when unchanged.
+    bool cleanPastDateOverrides(const QDate& today, QString* error = nullptr,
+                                QList<QDate>* canceledDates = nullptr);
 
     struct Entry {
         QString id; // File stem, independent of the editable display name.

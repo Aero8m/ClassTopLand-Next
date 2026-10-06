@@ -1,5 +1,6 @@
 #include "CourseRefreshService.h"
 #include "../ProfileManager/ProfileManager.h"
+#include "../DateSchedule/DateSchedule.h"
 
 #include <QThread>
 #include <QTimeZone>
@@ -141,67 +142,16 @@ CourseRefreshService::TableSnapshot CourseRefreshService::resolveTable(const QDa
 
     if (temporarySchedule_) {
         result.name = temporarySchedule_->name;
-        result.classes = temporarySchedule_->classes;
+        result.classes = DateSchedule::sorted(temporarySchedule_->classes);
+        QString error;
+        if (!DateSchedule::validateClasses(result.classes, &error)) return fail(error);
     } else {
-        const int weekday = temporaryWeekday_ ? temporaryWeekday_ : date.dayOfWeek();
-        int selected = weekScheduleIndex_;
-        if (selected < -1 || selected >= profile.schedules.size())
-            return fail(QStringLiteral("Week schedule index is out of range"));
-
-        if (selected == -1 && !profile.activeWeekScheduleId.isEmpty()) {
-            for (qsizetype i = 0; i < profile.schedules.size(); ++i) {
-                if (profile.schedules[i].id == profile.activeWeekScheduleId) {
-                    selected = static_cast<int>(i);
-                    break;
-                }
-            }
-        }
-        if (selected == -1) {
-            for (qsizetype i = 0; i < profile.schedules.size(); ++i) {
-                const WeekSchedule& week = profile.schedules[i];
-                const bool hasDay = std::any_of(week.daySchedules.cbegin(), week.daySchedules.cend(),
-                    [weekday](const DaySchedule& day) { return day.enableDay == weekday; });
-                if (!hasDay) continue;
-                if (week.mode != WeekScheduleMode::All) {
-                    if (week.mode != WeekScheduleMode::Odd && week.mode != WeekScheduleMode::Even)
-                        return fail(QStringLiteral("Week schedule has an invalid mode"));
-                    if (!weekOneMonday_.isValid())
-                        return fail(QStringLiteral("Odd/even schedules require a week reference date"));
-                    const QDate monday = date.addDays(1 - date.dayOfWeek());
-                    const qint64 weekNumber = weekOneMonday_.daysTo(monday) / 7 + 1;
-                    const bool odd = weekNumber % 2 != 0;
-                    if ((week.mode == WeekScheduleMode::Odd) != odd) continue;
-                }
-                if (selected != -1)
-                    return fail(QStringLiteral("Multiple week schedules match; select an explicit index"));
-                selected = static_cast<int>(i);
-            }
-        }
-
-        if (selected != -1) {
-            const WeekSchedule& week = profile.schedules[selected];
-            result.weekScheduleIndex = selected;
-            result.name = week.name;
-            QSet<int> days;
-            for (const DaySchedule& day : week.daySchedules) {
-                if (day.enableDay < 1 || day.enableDay > 7 || days.contains(day.enableDay))
-                    return fail(QStringLiteral("Week schedule has an invalid or duplicate weekday"));
-                days.insert(day.enableDay);
-                if (day.enableDay == weekday) result.classes = day.classes;
-            }
-        }
-    }
-
-    for (const Class& course : result.classes) {
-        if (course.subject.trimmed().isEmpty() || !course.startTime.isValid() ||
-            !course.endTime.isValid() || course.startTime >= course.endTime)
-            return fail(QStringLiteral("Course has an empty subject or invalid time range"));
-    }
-    std::stable_sort(result.classes.begin(), result.classes.end(),
-        [](const Class& left, const Class& right) { return left.startTime < right.startTime; });
-    for (qsizetype i = 1; i < result.classes.size(); ++i) {
-        if (result.classes[i].startTime < result.classes[i - 1].endTime)
-            return fail(QStringLiteral("Course time ranges overlap"));
+        const auto resolved = DateSchedule::resolve(profile, date, {}, temporaryWeekday_,
+                                                   weekScheduleIndex_, weekOneMonday_);
+        if (!resolved.valid) return fail(resolved.error);
+        result.name = resolved.name;
+        result.weekScheduleIndex = resolved.weekScheduleIndex;
+        result.classes = resolved.classes;
     }
     return result;
 }

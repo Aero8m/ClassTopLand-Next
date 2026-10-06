@@ -6,6 +6,7 @@
 #include <ElaLineEdit.h>
 #include <ElaMessageBar.h>
 #include <ElaPushButton.h>
+#include <ElaScrollArea.h>
 #include <ElaTableView.h>
 #include <ElaText.h>
 #include <QFileInfo>
@@ -13,6 +14,7 @@
 #include <QDir>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QHash>
 #include <QPainter>
 #include <QScopedValueRollback>
 #include <QShowEvent>
@@ -71,7 +73,7 @@ ProfileSettingsTab::ProfileSettingsTab(QWidget* parent) : ElaScrollPage(parent)
     exchangeActions->addWidget(export_);
     exchangeActions->addStretch();
     controls->addLayout(exchangeActions);
-    controls->addWidget(text(tr("支持 JSON 完整档案和 CSES 课表。导入会创建新档案；导出仅包含选中档案的已保存内容。")));
+    controls->addWidget(text(tr("支持原生 JSON 完整档案、ClassTopLand tables.json 常规课表和 CSES 课表。导入会创建新档案；导出使用选中档案的已保存内容。")));
     table_ = table(layout, {tr("档案名称"), tr("文件名"), tr("状态")}, model_);
     table_->setObjectName(QStringLiteral("profileList"));
     table_->setItemDelegate(new ProfileItemDelegate(table_));
@@ -221,25 +223,28 @@ void ProfileSettingsTab::importProfile()
             QFileDialog picker(this, tr("导入档案"));
             picker.setObjectName(QStringLiteral("importProfileFile"));
             picker.setFileMode(QFileDialog::ExistingFile);
-            picker.setNameFilters({tr("档案文件 (*.json *.yaml *.yml)"), tr("JSON 档案 (*.json)"), tr("CSES 课表 (*.yaml *.yml)")});
+            picker.setNameFilters({tr("档案文件 (*.json *.yaml *.yml)"), tr("JSON 档案或 ClassTopLand 课表 (*.json)"), tr("CSES 课表 (*.yaml *.yml)")});
             if (picker.exec() != QDialog::Accepted) return;
             const QString path = picker.selectedFiles().value(0);
             const QString suffix = QFileInfo(path).suffix().toLower();
             if (suffix != QStringLiteral("json") && suffix != QStringLiteral("yaml") && suffix != QStringLiteral("yml")) {
                 showError(tr("请选择 JSON 或 YAML 文件。")); return;
             }
-            const auto format = suffix == QStringLiteral("json") ? ProfileExchange::Format::NativeJson : ProfileExchange::Format::CsesYaml;
+            ProfileExchange::Format format = ProfileExchange::Format::NativeJson;
             Profile candidate;
             QStringList warnings;
             QString error;
-            if (!ProfileExchange::readFile(path, format, candidate, &warnings, &error) ||
-                !ProfileExchange::validateTransfer(candidate, &error)) {
+            if (!ProfileExchange::readImportFile(path, candidate, format, &warnings, &error)) {
                 showError(tr("导入失败：%1").arg(error)); return;
             }
             auto* dialog = new ProfileEditUi::FormDialog(this, tr("导入档案"), tr("导入"));
             auto* name = dialog->line(tr("档案名称"), candidate.name);
             name->setObjectName(QStringLiteral("importProfileName"));
-            QString message = tr("导入后创建新档案，不会自动切换或覆盖已有档案。");
+            const QString formatName = format == ProfileExchange::Format::NativeJson ? tr("原生 JSON 完整档案")
+                : format == ProfileExchange::Format::ClassTopLandTablesJson ? tr("ClassTopLand tables.json 常规课表") : tr("CSES 课表");
+            QString message = tr("识别格式：%1。\n导入后创建新档案，不会自动切换或覆盖已有档案。").arg(formatName);
+            if (format == ProfileExchange::Format::ClassTopLandTablesJson)
+                message += tr("\n常规课表按全部周次导入；缺失星期补为空课表，科目自动生成，教师为空，不生成时间线。暂不支持非空附加课表。");
             if (format == ProfileExchange::Format::CsesYaml) message += tr("\nCSES 教室字段将被忽略。");
             if (!warnings.isEmpty()) message += QLatin1Char('\n') + warnings.join(QLatin1Char('\n'));
             dialog->message(message);
@@ -278,11 +283,13 @@ void ProfileSettingsTab::exportProfile()
             picker.setFileMode(QFileDialog::AnyFile);
             const QString jsonFilter = tr("JSON 档案 (*.json)");
             const QString csesFilter = tr("CSES 课表 (*.yaml *.yml)");
-            picker.setNameFilters({jsonFilter, csesFilter});
+            const QString tablesFilter = tr("ClassTopLand 课表 (*.json)");
+            picker.setNameFilters({jsonFilter, tablesFilter, csesFilter});
             picker.setDefaultSuffix(QStringLiteral("json"));
             picker.selectFile(entry.id + QStringLiteral(".json"));
-            connect(&picker, &QFileDialog::filterSelected, &picker, [&picker, csesFilter](const QString& filter) {
+            connect(&picker, &QFileDialog::filterSelected, &picker, [&picker, csesFilter, tablesFilter](const QString& filter) {
                 picker.setDefaultSuffix(filter == csesFilter ? QStringLiteral("yaml") : QStringLiteral("json"));
+                if (filter == tablesFilter) { picker.selectFile(picker.directory().filePath(QStringLiteral("tables.json"))); return; }
                 const auto files = picker.selectedFiles();
                 if (!files.isEmpty()) {
                     const QFileInfo file(files.first());
@@ -292,6 +299,7 @@ void ProfileSettingsTab::exportProfile()
             if (picker.exec() != QDialog::Accepted) return;
             QString path = picker.selectedFiles().value(0);
             const bool cses = picker.selectedNameFilter() == csesFilter;
+            const bool tables = picker.selectedNameFilter() == tablesFilter;
             if (QFileInfo(path).suffix().isEmpty()) path += cses ? QStringLiteral(".yaml") : QStringLiteral(".json");
             const QString suffix = QFileInfo(path).suffix().toLower();
             if ((!cses && suffix != QStringLiteral("json")) ||
@@ -306,13 +314,60 @@ void ProfileSettingsTab::exportProfile()
             QByteArray contents;
             QStringList warnings;
             QString error;
-            const auto format = cses ? ProfileExchange::Format::CsesYaml : ProfileExchange::Format::NativeJson;
+            const auto format = tables ? ProfileExchange::Format::ClassTopLandTablesJson
+                : cses ? ProfileExchange::Format::CsesYaml : ProfileExchange::Format::NativeJson;
             if (!manager.readProfile(entry.id, candidate, &error) ||
-                !ProfileExchange::validateTransfer(candidate, &error) ||
-                !ProfileExchange::serialize(candidate, format, contents, &warnings, &error)) {
+                !ProfileExchange::validateTransfer(candidate, &error)) {
                 showError(tr("导出失败：%1").arg(error)); return;
             }
-            if (cses) {
+            if (tables) {
+                if (candidate.schedules.isEmpty()) { showError(tr("没有可导出的周课表。")); return; }
+                auto* dialog = new ProfileEditUi::FormDialog(this, tr("导出 ClassTopLand 课表"), tr("导出"));
+                auto* weeks = new ElaComboBox(dialog);
+                weeks->setObjectName(QStringLiteral("exportTablesWeekSchedule"));
+                QHash<QString, int> nameCounts;
+                for (const auto& week : candidate.schedules) ++nameCounts[week.name];
+                int defaultIndex = 0;
+                for (int i = 0; i < candidate.schedules.size(); ++i) {
+                    const auto& week = candidate.schedules[i];
+                    const QString label = nameCounts.value(week.name) > 1 ? tr("%1（第 %2 项）").arg(week.name).arg(i + 1) : week.name;
+                    weeks->addItem(label, week.id);
+                    weeks->setItemData(i, week.id, Qt::ToolTipRole);
+                    if (week.id == candidate.activeWeekScheduleId) defaultIndex = i;
+                }
+                weeks->setCurrentIndex(defaultIndex);
+                dialog->field(tr("周课表"), weeks);
+                auto* details = new ElaScrollArea(dialog);
+                details->setWidgetResizable(true);
+                details->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+                details->viewport()->setAutoFillBackground(false);
+                auto* notice = ProfileEditUi::text({}, details);
+                notice->setObjectName(QStringLiteral("exportTablesWarnings"));
+                notice->setMargin(8);
+                notice->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+                details->setWidget(notice);
+                notice->setAutoFillBackground(false);
+                dialog->field(tr("转换说明"), details);
+                details->setFixedSize(440, 220);
+                QString conversionError;
+                auto preview = [&] {
+                    const bool valid = ProfileExchange::serialize(candidate, format, contents, &warnings, &conversionError,
+                                                                   weeks->currentData().toString());
+                    notice->setText(valid ? warnings.join(QLatin1Char('\n')) : tr("无法导出：%1").arg(conversionError));
+                    for (auto* action : dialog->findChildren<ElaPushButton*>())
+                        if (action->text() == tr("导出")) action->setEnabled(valid);
+                    details->ensureVisible(0, 0);
+                };
+                const auto previewConnection = connect(weeks, qOverload<int>(&ElaComboBox::currentIndexChanged), dialog, preview);
+                preview();
+                dialog->submit = [&] { return conversionError; };
+                const bool confirmed = ProfileEditUi::run(dialog);
+                dialog->submit = {};
+                disconnect(previewConnection);
+                if (!confirmed) return;
+            } else if (!ProfileExchange::serialize(candidate, format, contents, &warnings, &error)) {
+                showError(tr("导出失败：%1").arg(error)); return;
+            } else if (cses) {
                 QString message = tr("将导出整个档案的科目与日课表。\nCSES 不保存档案名称、周课表分组名称和 ID、时间线及当前周课表选择。完整备份请使用 JSON。");
                 if (!warnings.isEmpty()) message += QLatin1Char('\n') + warnings.join(QLatin1Char('\n'));
                 if (!ProfileEditUi::confirm(this, tr("导出 CSES 课表"), message)) return;

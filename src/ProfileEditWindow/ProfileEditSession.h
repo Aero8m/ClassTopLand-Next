@@ -28,6 +28,7 @@ public:
     void discard();
     // Apply a separately persisted tray selection without resetting draft edits.
     void syncActiveWeekSchedule(const QString& id);
+    void syncDateOverrides(const QList<DateScheduleOverride>& records);
     bool updateSubject(int index, const Subject& subject, QString* error = nullptr);
     bool removeSubject(int index, QString* error = nullptr);
     bool replaceTimePoints(int lineIndex, const QList<TimeLinePoint>& points, QString* error = nullptr);

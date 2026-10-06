@@ -98,12 +98,18 @@ bool ProfileEditWindow::saveProfile()
         return false;
     }
     QString error;
-    if (!ProfileManager::instance().commit(session_->draft(), &error)) {
+    QList<QDate> canceled;
+    if (!ProfileManager::instance().commit(session_->draft(), &error, &canceled)) {
         ProfileEditUi::error(this, tr("保存失败：%1").arg(error)); return false;
     }
-    session_->markSaved();
+    session_->reset(ProfileManager::instance().profile());
     emit profileSaved();
-    const auto warnings = session_->warnings();
+    auto warnings = session_->warnings();
+    if (!canceled.isEmpty()) {
+        QStringList dates;
+        for (const auto& date : canceled) dates.append(date.toString(Qt::ISODate));
+        warnings.append(tr("来源日课程已变化，已取消以下日期的调休和换课：%1").arg(dates.join(QStringLiteral("、"))));
+    }
     if (warnings.isEmpty()) ElaMessageBar::success(ElaMessageBarType::TopRight, tr("保存成功"), {}, 2500, this);
     else ElaMessageBar::warning(ElaMessageBarType::TopRight, tr("已保存"), warnings.join(QLatin1Char('\n')), 8000, this);
     return true;

@@ -3,6 +3,7 @@
 #include "../../SettingsWindow/SettingsWindow.h"
 #include "../../ProfileEditWindow/ProfileEditWindow.h"
 #include "../../ProfileEditWindow/ProfileEditSession.h"
+#include "../../ScheduleAdjustments/DateScheduleWidgets.h"
 #include "../ThemeManager/ThemeManager.h"
 
 #include <QApplication>
@@ -10,6 +11,7 @@
 #include <QGuiApplication>
 #include <QScreen>
 #include <QScopedValueRollback>
+#include <QTimer>
 
 namespace {
 bool reportStartupError(const QString& message)
@@ -82,6 +84,8 @@ bool AppComposer::initInstances()
         // target between acceptance and the deferred application exit.
         if (settingsWindow_) settingsWindow_->setEnabled(false);
         if (profileEditorWindow_) profileEditorWindow_->setEnabled(false);
+        if (swapWindow_) swapWindow_->setEnabled(false);
+        if (rescheduleWindow_) rescheduleWindow_->setEnabled(false);
     });
     connect(trayMenu_.get(), &TaskbarTrayMenu::settingsRequested,
             this, &AppComposer::showSettingsWindow);
@@ -91,12 +95,21 @@ bool AppComposer::initInstances()
             this, &AppComposer::selectWeekSchedule);
     connect(trayMenu_.get(), &TaskbarTrayMenu::scheduleListRefreshRequested,
             this, &AppComposer::refreshScheduleMenu);
+    connect(trayMenu_.get(), &TaskbarTrayMenu::swapWindowRequested, this, &AppComposer::showSwapWindow);
+    connect(trayMenu_.get(), &TaskbarTrayMenu::rescheduleWindowRequested,
+            this, &AppComposer::showRescheduleWindow);
     connect(courseBar.get(), &CourseBar::scheduleStatusChanged,
             this, &AppComposer::refreshScheduleMenu);
     refreshScheduleMenu();
     QApplication::setQuitOnLastWindowClosed(false);
 
     initialized_ = true;
+    cleanupDateOverrides();
+    dateCleanupTimer_ = new QTimer(this);
+    dateCleanupTimer_->setObjectName(QStringLiteral("dateScheduleCleanupTimer"));
+    dateCleanupTimer_->setInterval(60000);
+    connect(dateCleanupTimer_, &QTimer::timeout, this, &AppComposer::cleanupDateOverrides);
+    dateCleanupTimer_->start();
     Logger::instance().log(Logger::Level::Info,
                            QStringLiteral("AppComposer initialized. Config: %1; Profile: %2")
                                .arg(configPath, profilePath));
@@ -110,6 +123,9 @@ void AppComposer::dropInstances()
     initialized_ = false;
     if (shutdown_) return;
     shutdown_ = true;
+    if (dateCleanupTimer_) dateCleanupTimer_->stop();
+    swapWindow_.reset();
+    rescheduleWindow_.reset();
     settingsWindow_.reset();
     profileEditorWindow_.reset();
     trayMenu_.reset();
@@ -160,6 +176,8 @@ void AppComposer::showProfileEditorWindow()
                 this, [this] {
             courseBar->reloadProfile();
             refreshScheduleMenu();
+            if (swapWindow_) swapWindow_->refreshProfile(ProfileManager::instance().profile());
+            if (rescheduleWindow_) rescheduleWindow_->refreshProfile(ProfileManager::instance().profile());
             if (settingsWindow_) settingsWindow_->refreshProfiles();
         });
     }
@@ -191,6 +209,114 @@ void AppComposer::refreshScheduleMenu()
     }
     trayMenu_->setScheduleChoices(choices, profile.activeWeekScheduleId);
     trayMenu_->setScheduleStatus(courseBar->scheduleStatus(), courseBar->hasCourseViews());
+}
+
+void AppComposer::showRescheduleWindow()
+{
+    if (!initialized_) return;
+    if (!rescheduleWindow_) {
+        rescheduleWindow_ = std::make_unique<RescheduleWindow>();
+        connect(rescheduleWindow_.get(), &RescheduleWindow::rescheduleRequested, this,
+                [this](const QDate& date, const QString& id, int weekday) {
+            if (!initialized_) return;
+            QString error;
+            if (!ProfileManager::instance().setDateReschedule(date, id, weekday, &error)) {
+                rescheduleWindow_->showError(tr("调休保存失败：%1").arg(error)); return;
+            }
+            rescheduleWindow_->close();
+            syncDateAdjustments();
+        });
+        connect(rescheduleWindow_.get(), &RescheduleWindow::restoreRequested, this, [this](const QDate& date) {
+            if (!initialized_) return;
+            QString error;
+            if (!ProfileManager::instance().restoreDate(date, &error)) {
+                rescheduleWindow_->showError(tr("恢复失败：%1").arg(error)); return;
+            }
+            syncDateAdjustments();
+        });
+    }
+    rescheduleWindow_->refreshProfile(ProfileManager::instance().profile());
+    if (!rescheduleWindowPositioned_) {
+        auto* screen = trayMenu_ ? trayMenu_->screen() : QGuiApplication::primaryScreen();
+        if (screen) {
+            const auto available = screen->availableGeometry().size();
+            rescheduleWindow_->setMinimumSize(qMin(360, available.width()), qMin(320, available.height()));
+            rescheduleWindow_->resize(qMin(460, available.width()), qMin(400, available.height()));
+        }
+        centerOnPanelScreen(rescheduleWindow_.get()); rescheduleWindowPositioned_ = true;
+    }
+    presentWindow(rescheduleWindow_.get());
+}
+
+void AppComposer::showSwapWindow()
+{
+    if (!initialized_) return;
+    if (!swapWindow_) {
+        swapWindow_ = std::make_unique<SwapClassesWindow>();
+        connect(swapWindow_.get(), &SwapClassesWindow::swapRequested, this,
+                [this](const QDate& date, const QString& id, int first, int second) {
+            if (!initialized_) return;
+            QString error;
+            if (!ProfileManager::instance().swapDateClasses(date, id, first, second, &error)) {
+                swapWindow_->showError(tr("换课保存失败：%1").arg(error)); return;
+            }
+            syncDateAdjustments();
+        });
+        connect(swapWindow_.get(), &SwapClassesWindow::restoreRequested, this, [this](const QDate& date) {
+            if (!initialized_) return;
+            QString error;
+            if (!ProfileManager::instance().restoreDate(date, &error)) {
+                swapWindow_->showError(tr("恢复失败：%1").arg(error)); return;
+            }
+            syncDateAdjustments();
+        });
+    }
+    swapWindow_->refreshProfile(ProfileManager::instance().profile());
+    if (!swapWindowPositioned_) {
+        auto* screen = trayMenu_ ? trayMenu_->screen() : QGuiApplication::primaryScreen();
+        if (screen) {
+            const auto available = screen->availableGeometry().size();
+            swapWindow_->setMinimumSize(qMin(430, available.width()), qMin(380, available.height()));
+            swapWindow_->resize(qMin(620, available.width()), qMin(560, available.height()));
+        }
+        centerOnPanelScreen(swapWindow_.get()); swapWindowPositioned_ = true;
+    }
+    presentWindow(swapWindow_.get());
+}
+
+void AppComposer::syncDateAdjustments()
+{
+    const auto& profile = std::as_const(ProfileManager::instance()).profile();
+    if (profileEditorWindow_) profileEditorWindow_->session()->syncDateOverrides(profile.dateOverrides);
+    if (courseBar) courseBar->reloadProfile();
+    refreshScheduleMenu();
+    if (swapWindow_) swapWindow_->refreshProfile(profile);
+    if (rescheduleWindow_) rescheduleWindow_->refreshProfile(profile);
+}
+
+void AppComposer::cleanupDateOverrides()
+{
+    if (!initialized_ || shutdown_) return;
+    auto& manager = ProfileManager::instance();
+    const auto previousCount = manager.profile().dateOverrides.size();
+    const auto today = QDate::currentDate();
+    QString error;
+    QList<QDate> canceled;
+    if (!manager.cleanPastDateOverrides(today, &error, &canceled)) {
+        if (error != lastCleanupError_) {
+            Logger::instance().log(Logger::Level::Warning, tr("日期安排清理失败，将重试：%1").arg(error));
+            Logger::instance().flush(); lastCleanupError_ = error;
+        }
+        return;
+    }
+    lastCleanupError_.clear();
+    if (previousCount != manager.profile().dateOverrides.size() || lastCleanupDate_ != today) syncDateAdjustments();
+    lastCleanupDate_ = today;
+    if (!canceled.isEmpty() && trayMenu_) {
+        QStringList dates;
+        for (const auto& date : canceled) dates.append(date.toString(Qt::ISODate));
+        trayMenu_->showScheduleError(tr("来源日课程已变化，已取消调休和换课：%1").arg(dates.join(QStringLiteral("、"))));
+    }
 }
 
 void AppComposer::switchProfile(const QString& id)
@@ -237,8 +363,7 @@ void AppComposer::selectWeekSchedule(const QString& id)
         return;
     }
     if (profileEditorWindow_) profileEditorWindow_->session()->syncActiveWeekSchedule(id);
-    courseBar->reloadProfile();
-    refreshScheduleMenu();
+    syncDateAdjustments();
 }
 
 void AppComposer::centerOnPanelScreen(QWidget* window)

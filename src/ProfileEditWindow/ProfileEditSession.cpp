@@ -1,4 +1,5 @@
 #include "ProfileEditSession.h"
+#include "../Core/DateSchedule/DateSchedule.h"
 #include <QSet>
 #include <algorithm>
 
@@ -12,7 +13,14 @@ bool fail(QString* error, const QString& text)
 bool equal(const Profile& a, const Profile& b)
 {
     if (a.name != b.name || a.activeWeekScheduleId != b.activeWeekScheduleId || a.subjects.size() != b.subjects.size() ||
-        a.timeLines.size() != b.timeLines.size() || a.schedules.size() != b.schedules.size()) return false;
+        a.timeLines.size() != b.timeLines.size() || a.schedules.size() != b.schedules.size() ||
+        a.dateOverrides.size() != b.dateOverrides.size()) return false;
+    for (qsizetype i = 0; i < a.dateOverrides.size(); ++i) {
+        const auto& x = a.dateOverrides[i]; const auto& y = b.dateOverrides[i];
+        if (x.date != y.date || x.sourceWeekScheduleId != y.sourceWeekScheduleId || x.sourceWeekday != y.sourceWeekday ||
+            !DateSchedule::sameClasses(x.sourceClasses, y.sourceClasses) || !DateSchedule::sameClasses(x.classes, y.classes))
+            return false;
+    }
     for (qsizetype i = 0; i < a.subjects.size(); ++i) {
         const auto& x = a.subjects[i]; const auto& y = b.subjects[i];
         if (x.name != y.name || x.simplifiedName != y.simplifiedName || x.teacher != y.teacher) return false;
@@ -66,6 +74,13 @@ void ProfileEditSession::syncActiveWeekSchedule(const QString& id)
 {
     saved_.activeWeekScheduleId = id;
     draft_.activeWeekScheduleId = id;
+    notifyChanged();
+}
+
+void ProfileEditSession::syncDateOverrides(const QList<DateScheduleOverride>& records)
+{
+    saved_.dateOverrides = records;
+    draft_.dateOverrides = records;
     notifyChanged();
 }
 

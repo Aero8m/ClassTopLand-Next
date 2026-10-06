@@ -188,7 +188,7 @@ void SchedulesTab::editCourse(int index)
     Class value({}, QTime(8, 0), QTime(8, 45));
     if (index >= 0) value = courses[index];
     auto* dialog = new FormDialog(this, index < 0 ? tr("新增课程") : tr("编辑课程"));
-    auto* subject = new ElaComboBox; subject->setEditable(true);
+    auto* subject = new ElaComboBox; subject->setEditable(false);
     for (const auto& item : session_->draft().subjects) subject->addItem(item.name);
     subject->setCurrentText(value.subject); dialog->field(tr("科目"), subject);
     auto* from = new TimePicker(value.startTime); auto* to = new TimePicker(value.endTime);
