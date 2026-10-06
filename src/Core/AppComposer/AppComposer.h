@@ -8,6 +8,8 @@
 #include<QDir>
 #include<QMessageBox>
 #include <memory>
+#include <functional>
+#include <optional>
 
 class TaskbarTrayMenu;
 class SettingsWindow;
@@ -28,6 +30,13 @@ public:
     explicit AppComposer(const QString& dataDirectory, QObject* parent = nullptr);
     ~AppComposer();
     bool startApp();
+    // Keep the runtime fallback even if its disk commit was denied. The normal
+    // startup reload must not restore a UIAccess request that already failed.
+    void setStartupUiAccessOverride(bool enabled) { startupUiAccessOverride_ = enabled; }
+    // Production supplies the process launcher; tests can reject a launch
+    // without requesting UAC or spawning another copy of the test executable.
+    void setRestartHandler(std::function<bool(const Config&, const QString&, QString*)> prepare,
+                           std::function<void()> cancel);
     // Deterministic teardown: destroys the windows, saves config and profile, and
     // drains pending deferred deletions. Called explicitly by main right after the
     // event loop returns, so cleanup no longer depends on scope-exit timing.
@@ -41,6 +50,7 @@ private slots:
     void refreshScheduleMenu();
     void selectWeekSchedule(const QString& id);
     void switchProfile(const QString& id);
+    void changeUiAccess(bool enabled);
     void showSwapWindow();
     void showRescheduleWindow();
     void cleanupDateOverrides();
@@ -53,10 +63,16 @@ private:
     void centerOnPanelScreen(QWidget* window);
     // Hides the panel and brings an already created window to the front.
     void presentWindow(QWidget* window);
-    bool prepareToExit();
+    bool prepareToExit(int exitCode);
     void syncDateAdjustments();
     QString dataDirectory_;
     QString pendingProfileId_;
+    std::optional<bool> pendingUiAccess_;
+    std::optional<bool> startupUiAccessOverride_;
+    std::function<bool(const Config&, const QString&, QString*)> prepareRestart_;
+    std::function<void()> cancelRestart_;
+    bool restartPreparing_ = false;
+    bool restartAccepted_ = false;
     bool switchingProfile_ = false;
     bool initialized_ = false;
     bool shutdown_ = false;

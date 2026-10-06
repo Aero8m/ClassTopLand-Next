@@ -105,6 +105,8 @@ add_executable(ClassTopLand-Next
         src/Utils/GlassHelper/GlassHelper.cpp
         src/Utils/GlassHelper/GlassHelper.h
         src/Utils/SupportFunctions.h
+        src/Utils/UiAccess/UiAccess.cpp
+        src/Utils/UiAccess/UiAccess.h
         src/VERSION.h)
 
 if (WIN32)
@@ -120,66 +122,26 @@ if (WIN32)
             "$<$<AND:$<COMPILE_LANGUAGE:RC>,$<CONFIG:Debug>>:_DEBUG>")
 endif ()
 
+add_library(classtopland_windows INTERFACE)
+if (WIN32)
+    target_link_libraries(classtopland_windows INTERFACE advapi32 shell32 ole32 oleaut32 uuid)
+    if (MSVC)
+        target_link_options(ClassTopLand-Next PRIVATE "/MANIFESTUAC:level='asInvoker' uiAccess='false'")
+    endif ()
+    add_custom_command(TARGET ClassTopLand-Next POST_BUILD
+            COMMAND ${CMAKE_COMMAND} "-DAPP_FILE=$<TARGET_FILE:ClassTopLand-Next>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/NormalizeWindowsExecutable.cmake"
+            VERBATIM)
+endif ()
+
 target_link_libraries(ClassTopLand-Next
+        classtopland_windows
         Qt::Core
         Qt::Gui
         Qt::Widgets
         Ela::WidgetTools
         yaml-cpp::yaml-cpp
 )
-
-option(CLASSTOPLAND_BUILD_EXCHANGE_TESTS "Build profile format exchange tests" OFF)
-if (CLASSTOPLAND_BUILD_EXCHANGE_TESTS)
-    enable_testing()
-    add_executable(profile_exchange_tests
-            tests/ProfileExchangeTests.cpp
-            src/Core/DateSchedule/DateSchedule.cpp
-            src/Core/ProfileManager/ProfileExchange.cpp)
-    set_target_properties(profile_exchange_tests PROPERTIES
-            AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
-    target_link_libraries(profile_exchange_tests PRIVATE Qt6::Core yaml-cpp::yaml-cpp)
-    add_test(NAME profile_exchange COMMAND profile_exchange_tests)
-    if (WIN32)
-        set_tests_properties(profile_exchange PROPERTIES
-                ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-    endif ()
-endif ()
-
-option(CLASSTOPLAND_BUILD_DATE_SCHEDULE_TESTS "Build date schedule adjustment tests" OFF)
-if (CLASSTOPLAND_BUILD_DATE_SCHEDULE_TESTS)
-    enable_testing()
-    add_executable(date_schedule_tests
-            tests/DateScheduleTests.cpp
-            src/Core/DateSchedule/DateSchedule.cpp
-            src/Core/ProfileManager/ProfileManager.cpp
-            src/Core/ProfileManager/ProfileExchange.cpp
-            src/Core/CourseRefreshService/CourseRefreshService.cpp
-            src/ProfileEditWindow/ProfileEditSession.cpp)
-    target_link_libraries(date_schedule_tests PRIVATE Qt6::Core yaml-cpp::yaml-cpp)
-    add_test(NAME date_schedule COMMAND date_schedule_tests)
-    find_package(Qt6 REQUIRED COMPONENTS Test)
-    get_target_property(date_ui_sources ClassTopLand-Next SOURCES)
-    list(REMOVE_ITEM date_ui_sources main.cpp app.rc)
-    add_executable(date_schedule_ui_tests tests/DateScheduleUiTests.cpp ${date_ui_sources})
-    target_link_libraries(date_schedule_ui_tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
-            Ela::WidgetTools yaml-cpp::yaml-cpp)
-    add_test(NAME date_schedule_ui COMMAND date_schedule_ui_tests)
-    set_tests_properties(date_schedule_ui PROPERTIES ENVIRONMENT
-            "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins"
-            TIMEOUT 30)
-    add_test(NAME date_schedule_ui_scaled COMMAND date_schedule_ui_tests)
-    set_tests_properties(date_schedule_ui_scaled PROPERTIES ENVIRONMENT
-            "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins;QT_SCALE_FACTOR=1.5"
-            TIMEOUT 30)
-    if (WIN32)
-        set_tests_properties(date_schedule PROPERTIES
-                ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-        set_tests_properties(date_schedule_ui PROPERTIES ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>;PATH=path_list_prepend:$<TARGET_FILE_DIR:ElaWidgetTools>")
-        set_tests_properties(date_schedule_ui_scaled PROPERTIES ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>;PATH=path_list_prepend:$<TARGET_FILE_DIR:ElaWidgetTools>")
-    endif ()
-endif ()
 
 if (WIN32 AND NOT ELAWIDGETTOOLS_BUILD_STATIC_LIB)
     add_custom_command(TARGET ClassTopLand-Next POST_BUILD

@@ -20,6 +20,7 @@ struct CourseBarComponentConfig
 struct CourseBarConfig
 {
     bool enable = true;
+    bool uiAccessEnabled = false;
     int height = 49;
     QList<CourseBarComponentConfig> components{
         {CourseBarComponentType::Date, true},

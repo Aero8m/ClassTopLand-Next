@@ -5,6 +5,7 @@
 #include "../../ProfileEditWindow/ProfileEditSession.h"
 #include "../../ScheduleAdjustments/DateScheduleWidgets.h"
 #include "../ThemeManager/ThemeManager.h"
+#include "../../Utils/UiAccess/UiAccess.h"
 
 #include <QApplication>
 #include <QFileInfo>
@@ -61,6 +62,8 @@ bool AppComposer::initInstances()
     if (!ConfigManager::instance().load(configPath, &error)) {
         return reportStartupError(QStringLiteral("配置加载失败：%1\n%2").arg(configPath, error));
     }
+    if (startupUiAccessOverride_)
+        ConfigManager::instance().config().courseBarConfig.uiAccessEnabled = *startupUiAccessOverride_;
     if (createConfig && !ConfigManager::instance().save(&error)) {
         return reportStartupError(QStringLiteral("默认配置保存失败：%1\n%2").arg(configPath, error));
     }
@@ -78,7 +81,7 @@ bool AppComposer::initInstances()
     // init course bar
     courseBar = std::make_unique<CourseBar>();
     trayMenu_ = std::make_unique<TaskbarTrayMenu>();
-    trayMenu_->setExitGuard([this] { return prepareToExit(); });
+    trayMenu_->setExitGuard([this](int exitCode) { return prepareToExit(exitCode); });
     connect(trayMenu_.get(), &TaskbarTrayMenu::exitAccepted, this, [this] {
         // Do not allow queued settings actions to delete or change the selected
         // target between acceptance and the deferred application exit.
@@ -158,6 +161,8 @@ void AppComposer::showSettingsWindow()
                 this, &AppComposer::switchProfile);
         connect(settingsWindow_.get(), &SettingsWindow::courseBarConfigChanged,
                 courseBar.get(), &CourseBar::reloadConfig);
+        connect(settingsWindow_.get(), &SettingsWindow::uiAccessChangeRequested,
+                this, &AppComposer::changeUiAccess);
     }
     settingsWindow_->refreshProfiles();
     if (!settingsWindowPositioned_) {
@@ -330,25 +335,73 @@ void AppComposer::switchProfile(const QString& id)
     trayMenu_->requestExit(TaskbarTrayMenu::RestartExitCode);
 }
 
-bool AppComposer::prepareToExit()
+void AppComposer::setRestartHandler(std::function<bool(const Config&, const QString&, QString*)> prepare,
+                                   std::function<void()> cancel)
 {
+    prepareRestart_ = std::move(prepare);
+    cancelRestart_ = std::move(cancel);
+}
+
+void AppComposer::changeUiAccess(bool enabled)
+{
+    if (!initialized_ || !trayMenu_ || restartPreparing_ || restartAccepted_) return;
+    if (!UiAccess::supported() || !prepareRestart_) {
+        if (settingsWindow_) settingsWindow_->setUiAccessSwitching(false);
+        return;
+    }
+    QScopedValueRollback<std::optional<bool>> request(pendingUiAccess_, enabled);
+    trayMenu_->requestExit(TaskbarTrayMenu::RestartExitCode);
+    if (!restartAccepted_ && settingsWindow_) settingsWindow_->setUiAccessSwitching(false);
+}
+
+bool AppComposer::prepareToExit(int exitCode)
+{
+    if (restartPreparing_ || restartAccepted_) return false;
+    QScopedValueRollback<bool> preparing(restartPreparing_, true);
     if (profileEditorWindow_ && profileEditorWindow_->session()->isDirty()) {
         showProfileEditorWindow();
         if (!profileEditorWindow_->prepareToClose()) return false;
     }
-    if (pendingProfileId_.isEmpty()) return true;
+    const bool restarting = exitCode == TaskbarTrayMenu::RestartExitCode;
+    if (pendingProfileId_.isEmpty() && !pendingUiAccess_ && (!restarting || !prepareRestart_)) return true;
     QString error;
-    Profile target;
-    if (!ProfileManager::instance().readProfile(pendingProfileId_, target, &error)) {
-        if (settingsWindow_) settingsWindow_->showProfileError(tr("切换失败，目标档案无法读取：%1").arg(error));
-        return false;
-    }
+    auto report = [this](const QString& message) {
+        Logger::instance().log(Logger::Level::Error, message);
+        if (pendingUiAccess_) QMessageBox::warning(settingsWindow_.get(), tr("增强置顶切换失败"), message);
+        else if (settingsWindow_) settingsWindow_->showProfileError(message);
+        else if (trayMenu_) trayMenu_->showScheduleError(message);
+    };
     Config candidate = ConfigManager::instance().config();
-    candidate.profileName = pendingProfileId_;
+    if (!pendingProfileId_.isEmpty()) {
+        Profile target;
+        if (!ProfileManager::instance().readProfile(pendingProfileId_, target, &error)) {
+            report(tr("切换失败，目标档案无法读取：%1").arg(error));
+            return false;
+        }
+        candidate.profileName = pendingProfileId_;
+    }
+    if (pendingUiAccess_) {
+        if (settingsWindow_ && settingsWindow_->courseBarDefaultsResetPending())
+            candidate.courseBarConfig = CourseBarConfig{};
+        candidate.courseBarConfig.uiAccessEnabled = *pendingUiAccess_;
+    }
+    if (restarting && prepareRestart_) {
+        if (!ProfileManager::instance().save(&error)) {
+            report(tr("重启失败，档案保存失败：%1").arg(error));
+            return false;
+        }
+        if (!prepareRestart_(candidate, dataDirectory_, &error)) {
+            if (cancelRestart_) cancelRestart_();
+            report(error);
+            return false;
+        }
+    }
     if (!ConfigManager::instance().commit(candidate, &error)) {
-        if (settingsWindow_) settingsWindow_->showProfileError(tr("切换失败，配置保存失败：%1").arg(error));
+        if (cancelRestart_) cancelRestart_();
+        report(tr("切换失败，配置保存失败：%1").arg(error));
         return false;
     }
+    restartAccepted_ = restarting && bool(prepareRestart_);
     return true;
 }
 

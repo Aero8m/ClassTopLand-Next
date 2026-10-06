@@ -25,7 +25,10 @@ public:
 
     explicit TaskbarTrayMenu(QWidget* parent = nullptr);
     ~TaskbarTrayMenu() override;
-    void setExitGuard(std::function<bool()> guard) { exitGuard_ = std::move(guard); }
+    void setExitGuard(std::function<bool()> guard) {
+        exitGuard_ = [guard = std::move(guard)](int) { return !guard || guard(); };
+    }
+    void setExitGuard(std::function<bool(int)> guard) { exitGuard_ = std::move(guard); }
     struct ScheduleChoice {
         QString id;
         QString name;
@@ -93,7 +96,7 @@ private:
     bool hiding_ = false;
     bool exitRequested_ = false;
     bool checkingExit_ = false;
-    std::function<bool()> exitGuard_;
+    std::function<bool(int)> exitGuard_;
     quint64 presentationRevision_ = 0;
 };
 

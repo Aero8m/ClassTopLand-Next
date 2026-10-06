@@ -5,6 +5,7 @@
 #include"tabs/ProfileSettingsTab.h"
 
 class AboutDialog;
+class CourseBarSettingsTab;
 
 class SettingsWindow : public ElaWindow
 {
@@ -14,16 +15,20 @@ public:
     ~SettingsWindow();
     void refreshProfiles();
     void showProfileError(const QString& message);
+    void setUiAccessSwitching(bool switching);
+    bool courseBarDefaultsResetPending() const;
 signals:
     void profileEditorRequested();
     void profileSwitchRequested(const QString& id);
     void courseBarConfigChanged();
+    void uiAccessChangeRequested(bool enabled);
 private:
     void initUI();
     void showAboutDialog();
     QString aboutNodeKey_;
     AboutDialog* aboutDialog_ = nullptr;
     ProfileSettingsTab* profileTab_;
+    CourseBarSettingsTab* courseBarTab_ = nullptr;
 };
 
 

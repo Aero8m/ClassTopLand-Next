@@ -584,7 +584,7 @@ void TaskbarTrayMenu::requestExit(int exitCode)
     // A double click, a duplicated signal, or a queued repeat must not exit twice.
     if (exitRequested_ || checkingExit_) return;
     checkingExit_ = true;
-    const bool allowed = !exitGuard_ || exitGuard_();
+    const bool allowed = !exitGuard_ || exitGuard_(exitCode);
     checkingExit_ = false;
     if (!allowed) return;
     exitRequested_ = true;

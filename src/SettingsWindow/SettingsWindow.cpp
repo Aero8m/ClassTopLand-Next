@@ -37,10 +37,12 @@ void SettingsWindow::initUI()
     connect(profileTab_, &ProfileSettingsTab::profileSwitchRequested,
             this, &SettingsWindow::profileSwitchRequested);
     addPageNode(QStringLiteral("外观"), new AppearanceSettingsTab(this), ElaIconType::Palette);
-    auto* courseBarTab = new CourseBarSettingsTab(this);
-    addPageNode(QStringLiteral("课程条"), courseBarTab, ElaIconType::List);
-    connect(courseBarTab, &CourseBarSettingsTab::configChanged,
+    courseBarTab_ = new CourseBarSettingsTab(this);
+    addPageNode(QStringLiteral("课程条"), courseBarTab_, ElaIconType::List);
+    connect(courseBarTab_, &CourseBarSettingsTab::configChanged,
             this, &SettingsWindow::courseBarConfigChanged);
+    connect(courseBarTab_, &CourseBarSettingsTab::uiAccessChangeRequested,
+            this, &SettingsWindow::uiAccessChangeRequested);
 
     addFooterNode(QStringLiteral("关于"), aboutNodeKey_, 0, ElaIconType::CircleInfo);
     connect(this, &ElaWindow::navigationNodeClicked, this,
@@ -75,4 +77,14 @@ void SettingsWindow::refreshProfiles()
 void SettingsWindow::showProfileError(const QString& message)
 {
     profileTab_->showError(message);
+}
+
+void SettingsWindow::setUiAccessSwitching(bool switching)
+{
+    courseBarTab_->setUiAccessSwitching(switching);
+}
+
+bool SettingsWindow::courseBarDefaultsResetPending() const
+{
+    return courseBarTab_->defaultsResetPending();
 }

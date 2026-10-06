@@ -2,6 +2,7 @@
 
 #include "../../Core/ConfigManager/ConfigManager.h"
 #include "../../Core/ThemeManager/ThemeManager.h"
+#include "../../Utils/UiAccess/UiAccess.h"
 #include "../../ProfileEditWindow/ProfileEditWidgets.h"
 #include <ElaComboBox.h>
 #include <ElaLineEdit.h>
@@ -181,7 +182,7 @@ CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent) : ElaScrollPage(pare
     using namespace ProfileEditUi;
     setObjectName(QStringLiteral("courseBarSettingsTab"));
     auto* layout = page(this, tr("课程条"));
-    layout->addWidget(text(tr("配置课程条的显示、组件和排列顺序，修改后自动保存并立即生效。"), this));
+    layout->addWidget(text(tr("配置课程条的显示、组件和排列顺序；增强置顶切换后重启，其余修改立即生效。"), this));
 
     auto* basics = card(layout, tr("基本设置"));
     auto* enableRow = new QHBoxLayout;
@@ -192,6 +193,18 @@ CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent) : ElaScrollPage(pare
     enableSwitch_->setAccessibleName(tr("启用课程条"));
     enableRow->addWidget(enableSwitch_);
     basics->addLayout(enableRow);
+    auto* uiAccessRow = new QHBoxLayout;
+    uiAccessRow->addWidget(text(tr("UIAccess 增强置顶"), this, 16));
+    uiAccessRow->addStretch();
+    uiAccessSwitch_ = new ElaToggleSwitch(this);
+    uiAccessSwitch_->setObjectName(QStringLiteral("courseBarUiAccessSwitch"));
+    uiAccessSwitch_->setAccessibleName(tr("UIAccess 增强置顶"));
+    uiAccessRow->addWidget(uiAccessSwitch_);
+    basics->addLayout(uiAccessRow);
+    basics->addWidget(text(tr("切换后自动重启；开启时需要管理员授权。"), this));
+    uiAccessStatus_ = text({}, this);
+    uiAccessStatus_->setObjectName(QStringLiteral("courseBarUiAccessStatus"));
+    basics->addWidget(uiAccessStatus_);
     auto* heightRow = new QHBoxLayout;
     heightRow->addWidget(text(tr("课程条高度"), this, 16));
     heightRow->addStretch();
@@ -259,6 +272,12 @@ CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent) : ElaScrollPage(pare
         if (enabled == config_.enable) return;
         auto candidate = config_; candidate.enable = enabled; save(candidate, selected_);
     });
+    connect(uiAccessSwitch_, &ElaToggleSwitch::toggled, this, [this](bool enabled) {
+        if (uiAccessSwitching_ || !UiAccess::supported()) return;
+        if (enabled == config_.uiAccessEnabled && enabled == UiAccess::enabled()) return;
+        setUiAccessSwitching(true);
+        emit uiAccessChangeRequested(enabled);
+    });
     connect(heightSpin_, &ElaSpinBox::valueChanged, this, [this](int height) {
         if (height == config_.height) return;
         auto candidate = config_; candidate.height = height; save(candidate, selected_);
@@ -268,7 +287,18 @@ CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent) : ElaScrollPage(pare
         candidate.components.append({static_cast<CourseBarComponentType>(typeCombo_->currentData().toInt()), true});
         save(candidate, candidate.components.size() - 1);
     });
-    connect(reset, &ElaPushButton::clicked, this, [this] { save(CourseBarConfig{}, 0); });
+    connect(reset, &ElaPushButton::clicked, this, [this] {
+        if (uiAccessSwitching_) return;
+        if (UiAccess::supported() && (config_.uiAccessEnabled || UiAccess::enabled())) {
+            resetPending_ = true;
+            setUiAccessSwitching(true);
+            emit uiAccessChangeRequested(false);
+            // Apply the remaining defaults only after the permission transition
+            // has been accepted; a canceled exit must preserve all settings.
+            return;
+        }
+        save(CourseBarConfig{}, 0);
+    });
     connect(preview_, &QListWidget::currentItemChanged, this, [this](QListWidgetItem* item) {
         if (item) selectComponent(item->data(Qt::UserRole).toInt());
     });
@@ -294,6 +324,11 @@ void CourseBarSettingsTab::refresh()
     const QSignalBlocker enableBlock(enableSwitch_), heightBlock(heightSpin_);
     const QSignalBlocker previewBlock(preview_), listBlock(components_);
     enableSwitch_->setIsToggled(config_.enable);
+    const QSignalBlocker uiAccessBlock(uiAccessSwitch_);
+    uiAccessSwitch_->setIsToggled(config_.uiAccessEnabled);
+    uiAccessSwitch_->setEnabled(UiAccess::supported() && !uiAccessSwitching_);
+    uiAccessStatus_->setText(!UiAccess::supported() ? tr("仅支持 Windows")
+        : uiAccessSwitching_ ? tr("切换中…") : UiAccess::enabled() ? tr("增强置顶") : tr("普通置顶"));
     heightSpin_->setValue(config_.height);
     preview_->clear();
     components_->clear();
@@ -383,6 +418,13 @@ void CourseBarSettingsTab::refresh()
     selected_ = config_.components.isEmpty() ? -1 : qBound(0, selected_, static_cast<int>(config_.components.size()) - 1);
     selectComponent(selected_);
     refreshTheme();
+}
+
+void CourseBarSettingsTab::setUiAccessSwitching(bool switching)
+{
+    uiAccessSwitching_ = switching;
+    if (!switching) resetPending_ = false;
+    refresh();
 }
 
 void CourseBarSettingsTab::refreshTheme()

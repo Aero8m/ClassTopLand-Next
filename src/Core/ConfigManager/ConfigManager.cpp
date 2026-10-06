@@ -68,6 +68,7 @@ QJsonObject toJson(const Config& config)
         components.append(item);
     }
     const QJsonObject courseBar{{QStringLiteral("enable"), config.courseBarConfig.enable},
+                                {QStringLiteral("uiAccessEnabled"), config.courseBarConfig.uiAccessEnabled},
                                 {QStringLiteral("height"), config.courseBarConfig.height},
                                 {QStringLiteral("components"), components}};
     const QJsonObject appearance{{QStringLiteral("themeColor"), config.appearanceConfig.themeColor.toLower()},
@@ -120,6 +121,12 @@ bool fromJson(const QJsonObject& root, Config& config, QString* error)
     if (!courseBarValue.isUndefined() && !courseBarValue.isObject())
         return fail(error, QStringLiteral("config.courseBarConfig must be an object"));
     const QJsonObject courseBar = courseBarValue.toObject();
+    const QJsonValue uiAccess = courseBar.value(QStringLiteral("uiAccessEnabled"));
+    if (!uiAccess.isUndefined()) {
+        if (!uiAccess.isBool())
+            return fail(error, QStringLiteral("config.courseBarConfig.uiAccessEnabled must be a boolean"));
+        config.courseBarConfig.uiAccessEnabled = uiAccess.toBool();
+    }
     const QJsonValue enable = courseBar.value(QStringLiteral("enable"));
     if (!enable.isUndefined()) {
         if (!enable.isBool())

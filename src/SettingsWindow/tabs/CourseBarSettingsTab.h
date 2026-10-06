@@ -15,8 +15,11 @@ class CourseBarSettingsTab final : public ElaScrollPage
     Q_OBJECT
 public:
     explicit CourseBarSettingsTab(QWidget* parent = nullptr);
+    void setUiAccessSwitching(bool switching);
+    bool defaultsResetPending() const { return resetPending_; }
 signals:
     void configChanged();
+    void uiAccessChangeRequested(bool enabled);
 protected:
     void showEvent(QShowEvent* event) override;
 private:
@@ -29,7 +32,11 @@ private:
     CourseBarConfig config_;
     int selected_ = -1;
     bool refreshPending_ = false;
+    bool uiAccessSwitching_ = false;
+    bool resetPending_ = false;
     ElaToggleSwitch* enableSwitch_;
+    ElaToggleSwitch* uiAccessSwitch_;
+    ElaText* uiAccessStatus_;
     ElaSpinBox* heightSpin_;
     ElaComboBox* typeCombo_;
     ElaText* previewStatus_;

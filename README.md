@@ -40,6 +40,7 @@ ClassTopLand Next 将当天课程、上下课倒计时和日期显示在桌面�
 | 功能 | 说明 |
 | --- | --- |
 | 桌面课程条 | 置顶显示，支持展开与收起，收起后以紧凑形式显示课程状态 |
+| UIAccess 增强置顶 | Windows 下可在课程条设置中开关，切换后自动重启，开启时请求管理员授权 |
 | 课程状态与倒计时 | 显示上课前、上课中、课间、今日课程结束及无课程等状态 |
 | 上下课提醒 | 在上课前 2 分钟、上课和下课时显示课程条内提醒 |
 | 组件布局 | 添加、移除、启用或停用日期、课程查看和文本提示组件；调整顺序、课程条高度并预览布局 |
@@ -73,6 +74,14 @@ ClassTopLand Next 将当天课程、上下课倒计时和日期显示在桌面�
 也可以在「设置 → 档案管理 → 导入档案」中导入 [示例档案](./examples/profiles/Test.json)，再选中它并点击「切换并重启」。示例包含多种科目与课程时段，可用于体验课程显示。
 
 关闭设置或编辑窗口后，程序仍在托盘中运行。需要结束程序时，请使用快捷面板底部的退出按钮；切换档案会重启程序，并先处理编辑窗口中的未保存更改。
+
+### UIAccess 增强置顶（Windows）
+
+在「设置 → 课程条 → 基本设置」中开启「UIAccess 增强置顶」，程序会请求当前用户的管理员授权，并在新实例初始化成功后自动重启。关闭开关也会自动重启，撤销 UIAccess 并恢复普通置顶。未保存的档案编辑会先提示处理；取消退出、取消授权或权限获取失败时保留原实例和原设置。
+
+开关默认关闭，并保存在 `MainConfig.json` 的 `courseBarConfig.uiAccessEnabled` 中。开启后，从桌面快捷方式重新启动通常仍需 UAC 授权；已取得 UIAccess 时，托盘重启和切换档案会复用权限。冷启动获取权限失败时回退为普通置顶并保存关闭状态；如果配置只读，则仅本次运行采用回退状态，并说明磁盘配置未改变。
+
+实现参考 [killtimer0/uiaccess](https://github.com/killtimer0/uiaccess) 的令牌获取思路，无需代码签名或固定安装目录。该模式的最终实例保留当前用户的管理员权限，要求同一用户授权，不支持改用另一个管理员账户。关闭时通过 Windows 桌面 Shell 启动普通实例；系统策略或桌面 Shell 不可用时会提示切换失败。此功能不保证覆盖独占全屏程序或 UAC 安全桌面。非 Windows 平台禁用该开关。
 
 ## 从源码构建
 
@@ -125,6 +134,8 @@ cmake --build build --parallel
 可执行文件位于 `build/ClassTopLand-Next.exe`。调试构建可以另用 `build-debug` 目录，并将 `CMAKE_BUILD_TYPE` 改为 `Debug`。
 
 这里使用单配置的 Ninja 生成器，因为当前 Windows DLL 复制逻辑依据 `CMAKE_BUILD_TYPE` 判断 Debug / Release。更换编译器、生成器或 Qt 套件时，请使用新的构建目录。
+
+Windows 构建应在正常桌面权限的 IDE 或开发者终端中进行。沙箱生成的构建目录可能继承 Low（低完整性）标签，使 EXE 从 CLion 或资源管理器启动后仍处于低权限，导致配置写入被拒绝、托盘异常和 UIAccess 交接失败。构建后会自动把本项目 EXE 的完整性标签设为 Medium，并保留其原有访问权限；无法完成时构建报错，避免把受限产物当作可运行版本。无需始终以管理员身份运行程序；只有启用增强置顶时才请求提权。
 
 ### 4. 部署与运行
 
@@ -180,28 +191,6 @@ JSON 导入按内容区分原生档案与旧版课表，文件不必命名为 `t
 
 导出仅包含所选周课表，固定输出七个星期键和空的 `appendixTables`。不保留其他周课表、单双周规则、档案名称、周课表及日课表名称、ID、科目简称与教师、未使用科目、时间线或当前课表选择。非零秒会直接截去，确认窗口会列出受影响课程；截去秒后起止时间落在同一分钟的课程无法导出。需要完整备份时请使用原生 JSON。
 
-### 交换层测试
-
-测试默认关闭，仅依赖已有的 Qt Core 和 yaml-cpp。在已配置好工具链的构建环境中运行：
-
-```powershell
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCLASSTOPLAND_BUILD_EXCHANGE_TESTS=ON
-cmake --build build --target profile_exchange_tests --parallel
-ctest --test-dir build --output-on-failure -R profile_exchange
-```
-
-测试使用临时目录，不读取或覆盖真实档案。
-
-### 日期安排测试
-
-开启 `CLASSTOPLAND_BUILD_DATE_SCHEDULE_TESTS` 可运行调休、换课、原子保存失败、来源变化取消、自动清理与编辑草稿同步测试，以及明暗主题和 150% 缩放下的界面检查。界面测试还需要 Qt Test。
-
-```powershell
-cmake -S . -B build -DCLASSTOPLAND_BUILD_DATE_SCHEDULE_TESTS=ON
-cmake --build build --target date_schedule_tests date_schedule_ui_tests
-ctest --test-dir build --output-on-failure -R date_schedule
-```
-
 ## 常见问题
 
 - **找不到 Qt / WidgetsPrivate**：确认 Qt 套件安装完整，私有开发文件与 Qt 版本一致，并检查 `CMakeLists.txt` 中的路径及编译器架构。
@@ -236,7 +225,7 @@ ClassTopLand-Next/
 
 欢迎通过 [Issues](https://github.com/Aero8m/ClassTopLand-Next/issues) 报告问题或提出建议，通过 [Pull Requests](https://github.com/Aero8m/ClassTopLand-Next/pulls) 提交改进。
 
-报告问题时，请说明系统版本、Qt / 编译器版本、使用的提交或发布版本、复现步骤和预期结果；界面问题可附截图，启动或构建问题可附控制台输出。提交代码前，请确认应用能构建并验证涉及的功能；可按上方说明开启交换层与日期安排测试。
+报告问题时，请说明系统版本、Qt / 编译器版本、使用的提交或发布版本、复现步骤和预期结果；界面问题可附截图，启动或构建问题可附控制台输出。提交代码前，请确认应用能构建并验证涉及的功能。
 
 ## 致谢
 
