@@ -38,7 +38,6 @@ int main(int argc, char* argv[])
     QApplication::setApplicationName(QStringLiteral("ClassTopLand Next"));
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/res/images/icon.png")));
     eApp->init();
-    eApp->setWindowDisplayMode(ElaApplicationType::Mica);
     QString handoffError;
     if (!UiAccess::finishStartup(startup, &handoffError)) return 1;
 

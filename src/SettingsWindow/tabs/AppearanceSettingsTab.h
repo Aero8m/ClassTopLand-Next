@@ -5,6 +5,7 @@
 
 class ElaPushButton;
 class ElaComboBox;
+class ElaText;
 
 class AppearanceSettingsTab final : public ElaScrollPage
 {
@@ -18,8 +19,12 @@ private:
     void refreshColor();
     void refreshMode();
     void changeMode();
+    void refreshWindowEffect();
+    void changeWindowEffect();
     ElaPushButton* colorButton_;
     ElaComboBox* modeCombo_;
+    ElaComboBox* windowEffectCombo_;
+    ElaText* windowEffectDescription_;
 };
 
 

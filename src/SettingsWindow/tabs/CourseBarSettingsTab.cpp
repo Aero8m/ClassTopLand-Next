@@ -314,6 +314,8 @@ CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent) : ElaScrollPage(pare
 void CourseBarSettingsTab::showEvent(QShowEvent* event)
 {
     ElaScrollPage::showEvent(event);
+    // Skip only animation restoration; ordinary activation still reloads config.
+    if (property("ElaPageTransitionRestore").toBool()) return;
     refresh();
 }
 

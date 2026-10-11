@@ -10,6 +10,7 @@
 #include <QGuiApplication>
 #include <QPalette>
 #include <QSignalBlocker>
+#include <QStandardItemModel>
 #include <QVBoxLayout>
 
 AppearanceSettingsTab::AppearanceSettingsTab(QWidget* parent) : ElaScrollPage(parent)
@@ -57,6 +58,37 @@ AppearanceSettingsTab::AppearanceSettingsTab(QWidget* parent) : ElaScrollPage(pa
     modeCombo_->addItem(tr("深色"), static_cast<int>(AppearanceThemeMode::Dark));
     modeRow->addWidget(modeCombo_, 0, Qt::AlignVCenter);
     modeBody->addLayout(modeRow);
+
+    auto* effectBody = card(layout);
+    auto* effectRow = new QHBoxLayout;
+    effectRow->setSpacing(20);
+    auto* effectDescription = new QVBoxLayout;
+    effectDescription->setSpacing(6);
+    effectDescription->addWidget(text(tr("窗口效果"), this, 18));
+    windowEffectDescription_ = text({}, this);
+    windowEffectDescription_->setObjectName(QStringLiteral("windowEffectDescription"));
+    effectDescription->addWidget(windowEffectDescription_);
+    effectRow->addLayout(effectDescription, 1);
+    windowEffectCombo_ = new ElaComboBox(this);
+    windowEffectCombo_->setObjectName(QStringLiteral("windowEffectCombo"));
+    windowEffectCombo_->setAccessibleName(tr("窗口效果"));
+    windowEffectCombo_->setFixedWidth(180);
+    windowEffectCombo_->setMaxVisibleItems(6);
+    windowEffectCombo_->addItem(QStringLiteral("Normal"), static_cast<int>(AppearanceWindowEffect::Normal));
+    windowEffectCombo_->addItem(QStringLiteral("ElaMica"), static_cast<int>(AppearanceWindowEffect::ElaMica));
+    windowEffectCombo_->addItem(QStringLiteral("Mica"), static_cast<int>(AppearanceWindowEffect::Mica));
+    windowEffectCombo_->addItem(QStringLiteral("Mica-Alt"), static_cast<int>(AppearanceWindowEffect::MicaAlt));
+    windowEffectCombo_->addItem(QStringLiteral("Acrylic"), static_cast<int>(AppearanceWindowEffect::Acrylic));
+    windowEffectCombo_->addItem(QStringLiteral("Dwm-Blur"), static_cast<int>(AppearanceWindowEffect::DwmBlur));
+    auto* effectModel = qobject_cast<QStandardItemModel*>(windowEffectCombo_->model());
+    for (int i = 0; i < windowEffectCombo_->count(); ++i) {
+        const auto effect = static_cast<AppearanceWindowEffect>(windowEffectCombo_->itemData(i).toInt());
+        const QString reason = ThemeManager::instance().windowEffectUnavailableReason(effect);
+        windowEffectCombo_->setItemData(i, reason, Qt::ToolTipRole);
+        if (effectModel && !reason.isEmpty()) effectModel->item(i)->setEnabled(false);
+    }
+    effectRow->addWidget(windowEffectCombo_, 0, Qt::AlignVCenter);
+    effectBody->addLayout(effectRow);
     layout->addStretch();
 
     connect(colorButton_, &ElaPushButton::clicked, this, &AppearanceSettingsTab::chooseColor);
@@ -66,8 +98,13 @@ AppearanceSettingsTab::AppearanceSettingsTab(QWidget* parent) : ElaScrollPage(pa
     connect(modeCombo_, &ElaComboBox::currentIndexChanged, this, &AppearanceSettingsTab::changeMode);
     connect(&ThemeManager::instance(), &ThemeManager::themeModeChanged,
             this, &AppearanceSettingsTab::refreshMode);
+    connect(windowEffectCombo_, &ElaComboBox::currentIndexChanged,
+            this, &AppearanceSettingsTab::changeWindowEffect);
+    connect(&ThemeManager::instance(), &ThemeManager::windowEffectChanged,
+            this, &AppearanceSettingsTab::refreshWindowEffect);
     refreshColor();
     refreshMode();
+    refreshWindowEffect();
 }
 
 void AppearanceSettingsTab::refreshColor()
@@ -121,5 +158,31 @@ void AppearanceSettingsTab::changeMode()
     if (!ThemeManager::instance().setThemeMode(mode, &error)) {
         refreshMode();
         ProfileEditUi::error(this, tr("深浅模式保存失败：%1").arg(error));
+    }
+}
+
+void AppearanceSettingsTab::refreshWindowEffect()
+{
+    const auto& manager = ThemeManager::instance();
+    const QSignalBlocker blocker(windowEffectCombo_);
+    windowEffectCombo_->setCurrentIndex(windowEffectCombo_->findData(static_cast<int>(manager.windowEffect())));
+    const QString reason = manager.windowEffectUnavailableReason(manager.windowEffect());
+    QString description = tr("设置应用窗口的背景效果，修改后立即生效并保存。");
+#ifdef Q_OS_WIN
+    if (manager.windowEffect() == AppearanceWindowEffect::ElaMica)
+        description = tr("使用当前桌面壁纸生成模糊背景，壁纸更换后自动刷新。读取失败时使用默认背景。");
+#endif
+    windowEffectDescription_->setText(reason.isEmpty()
+        ? description : tr("%1 当前系统不支持已保存的效果，本次运行使用 Normal。").arg(reason));
+    windowEffectCombo_->setToolTip(reason);
+}
+
+void AppearanceSettingsTab::changeWindowEffect()
+{
+    const auto effect = static_cast<AppearanceWindowEffect>(windowEffectCombo_->currentData().toInt());
+    QString error;
+    if (!ThemeManager::instance().setWindowEffect(effect, &error)) {
+        refreshWindowEffect();
+        ProfileEditUi::error(this, tr("窗口效果设置失败：%1").arg(error));
     }
 }

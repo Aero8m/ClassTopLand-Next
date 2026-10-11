@@ -41,6 +41,19 @@ QString themeModeText(AppearanceThemeMode mode)
     return {};
 }
 
+QString windowEffectText(AppearanceWindowEffect effect)
+{
+    switch (effect) {
+    case AppearanceWindowEffect::Normal: return QStringLiteral("normal");
+    case AppearanceWindowEffect::ElaMica: return QStringLiteral("elaMica");
+    case AppearanceWindowEffect::Mica: return QStringLiteral("mica");
+    case AppearanceWindowEffect::MicaAlt: return QStringLiteral("micaAlt");
+    case AppearanceWindowEffect::Acrylic: return QStringLiteral("acrylic");
+    case AppearanceWindowEffect::DwmBlur: return QStringLiteral("dwmBlur");
+    }
+    return {};
+}
+
 bool validate(const Config& config, QString* error)
 {
     static const QRegularExpression hexColor(QStringLiteral("\\A#[0-9a-fA-F]{6}\\z"));
@@ -48,6 +61,8 @@ bool validate(const Config& config, QString* error)
         return fail(error, QStringLiteral("config.appearanceConfig.themeColor must be a #rrggbb hex color"));
     if (themeModeText(config.appearanceConfig.themeMode).isEmpty())
         return fail(error, QStringLiteral("config.appearanceConfig.themeMode must be system, light or dark"));
+    if (windowEffectText(config.appearanceConfig.windowEffect).isEmpty())
+        return fail(error, QStringLiteral("config.appearanceConfig.windowEffect must be normal, elaMica, mica, micaAlt, acrylic or dwmBlur"));
     if (config.courseBarConfig.height <= 0)
         return fail(error, QStringLiteral("config.courseBarConfig.height must be a positive integer"));
     for (qsizetype i = 0; i < config.courseBarConfig.components.size(); ++i) {
@@ -72,7 +87,8 @@ QJsonObject toJson(const Config& config)
                                 {QStringLiteral("height"), config.courseBarConfig.height},
                                 {QStringLiteral("components"), components}};
     const QJsonObject appearance{{QStringLiteral("themeColor"), config.appearanceConfig.themeColor.toLower()},
-                                 {QStringLiteral("themeMode"), themeModeText(config.appearanceConfig.themeMode)}};
+                                 {QStringLiteral("themeMode"), themeModeText(config.appearanceConfig.themeMode)},
+                                 {QStringLiteral("windowEffect"), windowEffectText(config.appearanceConfig.windowEffect)}};
     return {{QStringLiteral("version"), kFormatVersion},
             {QStringLiteral("config"), QJsonObject{{QStringLiteral("profileName"), config.profileName},
                                                    {QStringLiteral("courseBarConfig"), courseBar},
@@ -113,6 +129,23 @@ bool fromJson(const QJsonObject& root, Config& config, QString* error)
                 config.appearanceConfig.themeMode = AppearanceThemeMode::Dark;
             else
                 return fail(error, QStringLiteral("config.appearanceConfig.themeMode must be system, light or dark"));
+        }
+        const QJsonValue windowEffect = appearance.value(QStringLiteral("windowEffect"));
+        if (!windowEffect.isUndefined()) {
+            if (!windowEffect.isString())
+                return fail(error, QStringLiteral("config.appearanceConfig.windowEffect must be a string"));
+            bool found = false;
+            for (const auto effect : {AppearanceWindowEffect::Normal, AppearanceWindowEffect::ElaMica,
+                                      AppearanceWindowEffect::Mica, AppearanceWindowEffect::MicaAlt,
+                                      AppearanceWindowEffect::Acrylic, AppearanceWindowEffect::DwmBlur}) {
+                if (windowEffect.toString() == windowEffectText(effect)) {
+                    config.appearanceConfig.windowEffect = effect;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+                return fail(error, QStringLiteral("config.appearanceConfig.windowEffect must be normal, elaMica, mica, micaAlt, acrylic or dwmBlur"));
         }
     }
 

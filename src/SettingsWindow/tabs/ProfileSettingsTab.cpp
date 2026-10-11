@@ -132,6 +132,8 @@ void ProfileSettingsTab::refreshProfiles(const QString& selectedId)
 void ProfileSettingsTab::showEvent(QShowEvent* event)
 {
     ElaScrollPage::showEvent(event);
+    // Ela's Popup animation restores the same page after displaying its snapshot.
+    if (property("ElaPageTransitionRestore").toBool()) return;
     refreshProfiles();
 }
 
