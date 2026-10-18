@@ -64,5 +64,5 @@ private:
 bool run(FormDialog* dialog);
 bool confirm(QWidget* parent, const QString& title, const QString& message);
 enum class UnsavedChoice { Cancel, Discard, Save };
-UnsavedChoice unsaved(QWidget* parent);
+UnsavedChoice unsaved(QWidget* parent, const QString& message = QStringLiteral("档案有未保存的更改"));
 }

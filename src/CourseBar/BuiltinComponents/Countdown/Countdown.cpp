@@ -12,7 +12,9 @@ Countdown::Countdown(QWidget* parent) : Countdown(CourseRefreshService::Clock{},
 {
 }
 
-Countdown::Countdown(CourseRefreshService::Clock clock, QWidget* parent)
+Countdown::Countdown(CourseRefreshService::Clock clock, QWidget* parent) : Countdown(std::move(clock), nullptr, parent) {}
+Countdown::Countdown(CourseRefreshService* service, QWidget* parent) : Countdown(CourseRefreshService::Clock{}, service, parent) {}
+Countdown::Countdown(CourseRefreshService::Clock clock, CourseRefreshService* service, QWidget* parent)
     : ICourseBarComponent(parent)
 {
     setObjectName(QStringLiteral("countdown"));
@@ -28,13 +30,14 @@ Countdown::Countdown(CourseRefreshService::Clock clock, QWidget* parent)
     layout->addWidget(label_);
     updateMetrics();
 
-    service_ = new CourseRefreshService(std::move(clock), this);
+    service_ = service ? service : new CourseRefreshService(std::move(clock), this);
     connect(service_, &CourseRefreshService::stateChanged, this, &Countdown::applyState);
     connect(service_, &CourseRefreshService::errorOccurred, this, [](const QString& message) {
         Logger::instance().log(Logger::Level::Error, QStringLiteral("Countdown: %1").arg(message));
         Logger::instance().flush();
     });
-    service_->start();
+    if (service_->isRunning()) { applyState(service_->state()); }
+    else service_->start();
 }
 
 QSize Countdown::sizeHint() const

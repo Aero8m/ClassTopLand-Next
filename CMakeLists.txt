@@ -11,6 +11,8 @@ find_package(Qt6 COMPONENTS
         Core
         Gui
         Widgets
+        Qml
+        Network
         REQUIRED)
 
 if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/yaml-cpp/CMakeLists.txt")
@@ -32,6 +34,32 @@ add_subdirectory(third_party/ElaWidgetTools-Plus/ElaWidgetTools)
 
 add_executable(ClassTopLand-Next
         main.cpp
+        src/Core/Plugins/PluginIo.cpp
+        src/Core/Plugins/PluginIo.h
+        src/Core/Plugins/PluginManager.cpp
+        src/Core/Plugins/PluginManager.h
+        src/Core/Plugins/PluginManifest.cpp
+        src/Core/Plugins/PluginManifest.h
+        src/Core/Plugins/PluginRuntime.cpp
+        src/Core/Plugins/PluginRuntime.h
+        src/Core/Plugins/ProfileMutationService.cpp
+        src/Core/Plugins/ProfileMutationService.h
+        src/Core/ProfileValidation/ProfileOperations.cpp
+        src/Core/ProfileValidation/ProfileOperations.h
+        src/Core/ProfileValidation/ProfileValidation.cpp
+        src/Core/ProfileValidation/ProfileValidation.h
+        src/Ui/Plugins/PluginSettingsDialog.cpp
+        src/Ui/Plugins/PluginSettingsDialog.h
+        src/Ui/Plugins/PluginUiHost.cpp
+        src/Ui/Plugins/PluginUiHost.h
+        src/Ui/Plugins/PluginView.cpp
+        src/Ui/Plugins/PluginView.h
+        src/Core/Model/PluginConfig.h
+        src/CourseBar/CourseBarComponentRegistry.h
+        src/CourseBar/CourseBarComponentRegistry.cpp
+        src/SettingsWindow/tabs/PluginSettingsTab.h
+        src/SettingsWindow/tabs/PluginSettingsTab.cpp
+
         resourecs.qrc
         src/VERSION.h
 
@@ -127,6 +155,10 @@ add_executable(ClassTopLand-Next
         src/Utils/UiAccess/UiAccess.h
         src/VERSION.h)
 
+if (MSVC)
+    target_compile_options(ClassTopLand-Next PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:/utf-8>")
+endif ()
+
 if (WIN32)
     set_target_properties(ClassTopLand-Next PROPERTIES
             WIN32_EXECUTABLE "$<CONFIG:Release>")
@@ -157,6 +189,8 @@ target_link_libraries(ClassTopLand-Next
         Qt::Core
         Qt::Gui
         Qt::Widgets
+        Qt::Qml
+        Qt::Network
         Ela::WidgetTools
         yaml-cpp::yaml-cpp
 )
@@ -198,10 +232,17 @@ if (WIN32 AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
                 "${QT_INSTALL_PATH}/plugins/imageformats/qjpeg${DEBUG_SUFFIX}.dll"
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>/plugins/imageformats/")
     endif ()
-    foreach (QT_LIB Core Gui Widgets)
+    foreach (QT_LIB Core Gui Widgets Qml QmlModels Network)
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy
                 "${QT_INSTALL_PATH}/bin/Qt6${QT_LIB}${DEBUG_SUFFIX}.dll"
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>")
     endforeach (QT_LIB)
+endif ()
+
+# Deploy the matching Qt tools, TLS backends and compiler runtime.
+if (WIN32)
+    add_custom_command(TARGET ClassTopLand-Next POST_BUILD
+        COMMAND "$<TARGET_FILE:Qt6::windeployqt>" --no-translations --no-system-d3d-compiler --no-opengl-sw "$<TARGET_FILE:ClassTopLand-Next>"
+        VERBATIM)
 endif ()

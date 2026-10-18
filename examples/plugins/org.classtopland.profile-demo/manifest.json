@@ -1,0 +1,11 @@
+{
+  "manifestVersion": 1,
+  "id": "org.classtopland.profile-demo",
+  "name": "插件示例：受控档案写入",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "main.mjs",
+  "description": "仅在用户点击按钮后，向活动档案添加一个示例科目。",
+  "permissions": { "profiles": "write-current" },
+  "contributions": { "settingsPages": [{ "id": "profile", "name": "写入演示" }] }
+}

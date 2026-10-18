@@ -469,21 +469,21 @@ bool confirm(QWidget* parent, const QString& title, const QString& message)
 
 class UnsavedDialog final : public ElaContentDialog {
 public:
-    explicit UnsavedDialog(QWidget* parent) : ElaContentDialog(parent->window()) {
+    UnsavedDialog(QWidget* parent, const QString& message) : ElaContentDialog(parent->window()) {
         setLeftButtonText(QStringLiteral("取消")); setMiddleButtonText(QStringLiteral("放弃")); setRightButtonText(QStringLiteral("保存"));
         for (auto* control : findChildren<ElaPushButton*>()) sizeActionButton(control);
         auto* body = new QWidget(this);
         auto* layout = new QVBoxLayout(body); layout->setContentsMargins(28, 24, 28, 24);
-        layout->addWidget(text(QStringLiteral("档案有未保存的更改"), body, 22));
+        layout->addWidget(text(message, body, 22));
         setCentralWidget(body);
     }
     void onMiddleButtonClicked() override { choice = UnsavedChoice::Discard; close(); }
     void onRightButtonClicked() override { choice = UnsavedChoice::Save; }
     UnsavedChoice choice = UnsavedChoice::Cancel;
 };
-UnsavedChoice unsaved(QWidget* parent)
+UnsavedChoice unsaved(QWidget* parent, const QString& message)
 {
-    auto* dialog = new UnsavedDialog(parent);
+    auto* dialog = new UnsavedDialog(parent, message);
     dialog->exec();
     const auto choice = dialog->choice;
     QTimer::singleShot(0, dialog, &QObject::deleteLater);

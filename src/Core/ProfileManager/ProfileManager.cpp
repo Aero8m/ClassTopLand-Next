@@ -1,4 +1,5 @@
 #include "ProfileManager.h"
+#include "../ProfileValidation/ProfileOperations.h"
 #include "ProfileExchange.h"
 #include "../DateSchedule/DateSchedule.h"
 
@@ -44,6 +45,7 @@ bool ProfileManager::load(const QString& filePath, QString* error)
     if (!QFileInfo::exists(path)) {
         profile_ = Profile{};
         filePath_ = path;
+        emit committed(++revision_);
         return true;
     }
 
@@ -51,6 +53,7 @@ bool ProfileManager::load(const QString& filePath, QString* error)
     if (!readProfileFile(path, loaded, error)) return false;
     profile_ = std::move(loaded);
     filePath_ = path;
+    emit committed(++revision_);
     return true;
 }
 
@@ -77,6 +80,7 @@ bool ProfileManager::commit(const Profile& candidate, QString* error, QList<QDat
     }
     if (!writeProfile(committed, error)) return false;
     profile_ = std::move(committed);
+    emit this->committed(++revision_);
     std::sort(canceled.begin(), canceled.end());
     if (canceledDates) *canceledDates = canceled;
     return true;
@@ -84,15 +88,8 @@ bool ProfileManager::commit(const Profile& candidate, QString* error, QList<QDat
 
 bool ProfileManager::setDateReschedule(const QDate& date, const QString& weekId, int weekday, QString* error)
 {
-    if (!date.isValid() || date < QDate::currentDate()) return fail(error, QStringLiteral("请选择今天或未来日期"));
-    const auto* day = DateSchedule::sourceDay(profile_, weekId, weekday);
-    if (!day) return fail(error, QStringLiteral("请选择有效的来源课表和星期"));
-    if (!DateSchedule::validateClasses(day->classes, error)) return false;
     Profile candidate = profile_;
-    for (qsizetype i = candidate.dateOverrides.size(); i-- > 0;)
-        if (candidate.dateOverrides[i].date == date) candidate.dateOverrides.removeAt(i);
-    const auto courses = DateSchedule::sorted(day->classes);
-    candidate.dateOverrides.append({date, weekId, weekday, courses, courses});
+    if (!ProfileOperations::reschedule(candidate, date, weekId, weekday, error)) return false;
     return commit(candidate, error);
 }
 
@@ -104,52 +101,18 @@ bool ProfileManager::swapDateClasses(const QDate& date, const QString& weekId, i
 bool ProfileManager::swapDateClasses(const QDate& firstDate, const QString& firstWeekId, int first,
                                     const QDate& secondDate, const QString& secondWeekId, int second, QString* error)
 {
-    if (error) error->clear();
-    const auto today = QDate::currentDate();
-    if (!firstDate.isValid() || !secondDate.isValid() || firstDate < today || secondDate < today)
-        return fail(error, QStringLiteral("请选择今天或未来日期"));
-    auto left = DateSchedule::resolve(profile_, firstDate, firstWeekId);
-    auto right = DateSchedule::resolve(profile_, secondDate, secondWeekId);
-    if (!left.valid) return fail(error, left.error);
-    if (!right.valid) return fail(error, right.error);
-    const bool sameDate = firstDate == secondDate;
-    if (sameDate && (left.sourceWeekScheduleId != right.sourceWeekScheduleId ||
-                     left.sourceWeekday != right.sourceWeekday))
-        return fail(error, QStringLiteral("同一日期必须使用相同的来源课表"));
-    if (first < 0 || second < 0 || first >= left.classes.size() || second >= right.classes.size() ||
-        (sameDate && first == second))
-        return fail(error, QStringLiteral("请选择两节不同的课程"));
-    if (left.classes[first].subject == right.classes[second].subject)
-        return fail(error, QStringLiteral("两节课的科目相同，无需交换"));
-    const auto* leftDay = DateSchedule::sourceDay(profile_, left.sourceWeekScheduleId, left.sourceWeekday);
-    const auto* rightDay = DateSchedule::sourceDay(profile_, right.sourceWeekScheduleId, right.sourceWeekday);
-    if (!leftDay || !rightDay) return fail(error, QStringLiteral("来源日课表不存在"));
-    if (sameDate) std::swap(left.classes[first].subject, left.classes[second].subject);
-    else std::swap(left.classes[first].subject, right.classes[second].subject);
-
     Profile candidate = profile_;
-    auto replace = [&](const QDate& date, const DateSchedule::Result& table, const DaySchedule& day) {
-        // Keep an existing source snapshot; only the effective subjects change.
-        const auto* existing = DateSchedule::find(profile_, date);
-        DateScheduleOverride record{date, table.sourceWeekScheduleId, table.sourceWeekday,
-            existing && table.special ? existing->sourceClasses : DateSchedule::sorted(day.classes), table.classes};
-        for (qsizetype i = candidate.dateOverrides.size(); i-- > 0;)
-            if (candidate.dateOverrides[i].date == date) candidate.dateOverrides.removeAt(i);
-        candidate.dateOverrides.append(record);
-    };
-    replace(firstDate, left, *leftDay);
-    if (!sameDate) replace(secondDate, right, *rightDay);
-    // Both endpoints are published only after the single atomic write succeeds.
+    if (!ProfileOperations::swap(candidate, firstDate, firstWeekId, first, secondDate, secondWeekId, second, error)) return false;
     return commit(candidate, error);
 }
 
 bool ProfileManager::restoreDate(const QDate& date, QString* error)
 {
     if (error) error->clear();
+    if (!date.isValid()) return fail(error, QStringLiteral("恢复日期无效"));
     if (!DateSchedule::find(profile_, date)) return true;
     Profile candidate = profile_;
-    for (qsizetype i = candidate.dateOverrides.size(); i-- > 0;)
-        if (candidate.dateOverrides[i].date == date) candidate.dateOverrides.removeAt(i);
+    if (!ProfileOperations::restore(candidate, date, error)) return false;
     return commit(candidate, error);
 }
 
@@ -171,6 +134,7 @@ bool ProfileManager::cleanPastDateOverrides(const QDate& today, QString* error, 
     // Do not call commit: its wall-clock filter would defeat the injected date.
     if (!writeProfile(candidate, error)) return false;
     profile_ = std::move(candidate);
+    emit committed(++revision_);
     std::sort(canceled.begin(), canceled.end());
     if (canceledDates) *canceledDates = canceled;
     return true;

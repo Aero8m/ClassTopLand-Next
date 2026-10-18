@@ -152,7 +152,9 @@ CourseView::CourseView(QWidget* parent) : CourseView(CourseRefreshService::Clock
 {
 }
 
-CourseView::CourseView(CourseRefreshService::Clock clock, QWidget* parent)
+CourseView::CourseView(CourseRefreshService::Clock clock, QWidget* parent) : CourseView(std::move(clock), nullptr, parent) {}
+CourseView::CourseView(CourseRefreshService* service, QWidget* parent) : CourseView(CourseRefreshService::Clock{}, service, parent) {}
+CourseView::CourseView(CourseRefreshService::Clock clock, CourseRefreshService* service, QWidget* parent)
     : ICourseBarComponent(parent)
 {
     setObjectName(QStringLiteral("courseView"));
@@ -181,11 +183,12 @@ CourseView::CourseView(CourseRefreshService::Clock clock, QWidget* parent)
     connect(&ThemeManager::instance(), &ThemeManager::themeColorChanged,
             this, &CourseView::refreshThemeColor);
 
-    service_ = new CourseRefreshService(std::move(clock), this);
+    service_ = service ? service : new CourseRefreshService(std::move(clock), this);
     connect(service_, &CourseRefreshService::tableChanged, this, &CourseView::applyTable);
     connect(service_, &CourseRefreshService::stateChanged, this, &CourseView::applyState);
     connect(service_, &CourseRefreshService::errorOccurred, this, &CourseView::logError);
-    service_->start();
+    if (service_->isRunning()) { applyTable(service_->table()); applyState(service_->state()); }
+    else service_->start();
 }
 
 QSize CourseView::sizeHint() const

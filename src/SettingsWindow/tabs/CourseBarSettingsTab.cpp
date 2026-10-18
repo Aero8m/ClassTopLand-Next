@@ -1,4 +1,5 @@
 #include "CourseBarSettingsTab.h"
+#include "../../CourseBar/CourseBarComponentRegistry.h"
 
 #include "../../Core/ConfigManager/ConfigManager.h"
 #include "../../CourseBar/CourseBarMetrics.h"
@@ -38,6 +39,7 @@ QString componentName(CourseBarComponentType type)
     case CourseBarComponentType::CourseView: return QObject::tr("课程查看");
     case CourseBarComponentType::TextTip: return QObject::tr("文本提示");
     case CourseBarComponentType::Countdown: return QObject::tr("倒计时");
+    case CourseBarComponentType::Plugin: return QObject::tr("插件组件");
     }
     return {};
 }
@@ -181,7 +183,7 @@ private:
     int insertion_ = -1;
 };
 
-CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent) : ElaScrollPage(parent)
+CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent, CourseBarComponentRegistry* registry) : ElaScrollPage(parent), registry_(registry)
 {
     using namespace AppUi;
     setObjectName(QStringLiteral("courseBarSettingsTab"));
@@ -265,6 +267,15 @@ CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent) : ElaScrollPage(pare
     typeCombo_->addItem(tr("文本提示"), static_cast<int>(CourseBarComponentType::TextTip));
     typeCombo_->addItem(tr("倒计时"), static_cast<int>(CourseBarComponentType::Countdown));
     addRow->addWidget(typeCombo_, 1);
+    if (registry_) {
+        typeCombo_->clear(); const auto types = registry_->types();
+        for (auto it = types.begin(); it != types.end(); ++it) typeCombo_->addItem(it.value(), it.key());
+        connect(registry_, &CourseBarComponentRegistry::changed, this, [this] {
+            const auto selected = typeCombo_->currentData(); const QSignalBlocker blocker(typeCombo_); typeCombo_->clear();
+            const auto types = registry_->types(); for (auto it = types.begin(); it != types.end(); ++it) typeCombo_->addItem(it.value(), it.key());
+            typeCombo_->setCurrentIndex(qMax(0, typeCombo_->findData(selected))); scheduleRefresh();
+        });
+    }
     auto* add = button(tr("添加"), this, true);
     add->setObjectName(QStringLiteral("addCourseBarComponent"));
     addRow->addWidget(add);
@@ -305,7 +316,7 @@ CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent) : ElaScrollPage(pare
     });
     connect(add, &ElaPushButton::clicked, this, [this] {
         auto candidate = config_;
-        candidate.components.append({static_cast<CourseBarComponentType>(typeCombo_->currentData().toInt()), true});
+        candidate.components.append(registry_ ? CourseBarComponentRegistry::configuration(typeCombo_->currentData().toString()) : CourseBarComponentConfig{static_cast<CourseBarComponentType>(typeCombo_->currentData().toInt()), true});
         save(candidate, candidate.components.size() - 1);
     });
     connect(reset, &ElaPushButton::clicked, this, [this] {
@@ -318,7 +329,7 @@ CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent) : ElaScrollPage(pare
             // has been accepted; a canceled exit must preserve all settings.
             return;
         }
-        save(CourseBarConfig{}, 0);
+        save(CourseBarConfig{}, 0, true, true);
     });
     connect(preview_, &QListWidget::currentItemChanged, this, [this](QListWidgetItem* item) {
         if (item) selectComponent(item->data(Qt::UserRole).toInt());
@@ -360,7 +371,7 @@ void CourseBarSettingsTab::refresh()
     components_->clear();
     for (int i = 0; i < config_.components.size(); ++i) {
         const auto component = config_.components.at(i);
-        const QString name = componentName(component.type);
+        const QString name = registry_ ? registry_->name(component) : componentName(component.type);
         auto* item = new QListWidgetItem(components_);
         components_->identify(item, i);
         auto* row = new QWidget;
@@ -395,7 +406,7 @@ void CourseBarSettingsTab::refresh()
                 save(candidate, i);
             });
         }
-        if (component.type == CourseBarComponentType::CourseView) {
+        if (component.type == CourseBarComponentType::CourseView || component.type == CourseBarComponentType::Plugin) {
             auto* settings = smallButton(tr("设置"), tr("第 %1 个课程显示组件的设置").arg(i + 1), row);
             settings->setObjectName(QStringLiteral("courseBarComponentSettings_%1").arg(i));
             rowLayout->addWidget(settings);
@@ -441,6 +452,9 @@ void CourseBarSettingsTab::refresh()
                 break;
             case CourseBarComponentType::Countdown:
                 sample->setText(tr("倒计时\n00:35:00"));
+                break;
+            case CourseBarComponentType::Plugin:
+                sample->setText(name + QLatin1Char('\n') + (registry_ ? registry_->previewText(component) : tr("静态预览")));
                 break;
             }
             sample->setTextAlignment(Qt::AlignCenter);
@@ -509,6 +523,7 @@ void CourseBarSettingsTab::moveComponent(int from, int to)
 void CourseBarSettingsTab::showComponentSettings(int index)
 {
     using namespace AppUi;
+    if (index >= 0 && index < config_.components.size() && config_.components.at(index).type == CourseBarComponentType::Plugin && registry_) { registry_->openSettings(config_.components.at(index).instanceId, window()); return; }
     if (index < 0 || index >= config_.components.size() ||
         config_.components.at(index).type != CourseBarComponentType::CourseView) return;
     if (componentSettingsDialog_ && componentSettingsDialog_->isVisible()) {
@@ -572,14 +587,38 @@ void CourseBarSettingsTab::showComponentSettings(int index)
     spacing->setFocus();
 }
 
-bool CourseBarSettingsTab::save(const CourseBarConfig& candidate, int selection, bool refreshComponents)
+bool CourseBarSettingsTab::save(const CourseBarConfig& candidate, int selection, bool refreshComponents, bool resetAll)
 {
+    if (registry_) {
+        for (const auto& previous : config_.components) {
+            bool retained = false;
+            for (const auto& next : candidate.components)
+                if (next.instanceId == previous.instanceId) { retained = true; break; }
+            if (!retained && !registry_->prepareRemoval(previous.instanceId)) return false;
+        }
+    }
     Config latest = ConfigManager::instance().config();
-    latest.courseBarConfig = candidate;
+    auto merged = candidate;
+    if (!resetAll) {
+        if (candidate.enable == config_.enable) merged.enable = latest.courseBarConfig.enable;
+        if (candidate.height == config_.height) merged.height = latest.courseBarConfig.height;
+        if (candidate.componentSpacing == config_.componentSpacing) merged.componentSpacing = latest.courseBarConfig.componentSpacing;
+        if (candidate.uiAccessEnabled == config_.uiAccessEnabled) merged.uiAccessEnabled = latest.courseBarConfig.uiAccessEnabled;
+        for (auto& item : merged.components) for (const auto& current : latest.courseBarConfig.components)
+            if (item.instanceId == current.instanceId) {
+                item.settings = current.settings; item.extra = current.extra;
+                for (const auto& base : config_.components) if (base.instanceId == item.instanceId) {
+                    if (item.text == base.text) item.text = current.text;
+                    if (item.courseSpacing == base.courseSpacing) item.courseSpacing = current.courseSpacing;
+                    break;
+                }
+            }
+    }
+    latest.courseBarConfig = merged;
     QString error;
     const bool saved = ConfigManager::instance().commit(latest, &error);
     if (saved) {
-        config_ = candidate;
+        config_ = merged;
         selected_ = selection;
         emit configChanged();
     } else {

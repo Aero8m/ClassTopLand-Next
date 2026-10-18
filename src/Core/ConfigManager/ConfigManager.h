@@ -2,9 +2,11 @@
 #define CLASSTOPLAND_NEXT_CONFIGMANAGER_H
 
 #include "../Model/Config.h"
+#include <QObject>
 
-class ConfigManager final
+class ConfigManager final : public QObject
 {
+    Q_OBJECT
 public:
     static ConfigManager& instance();
 
@@ -21,6 +23,10 @@ public:
     bool load(const QString& filePath, QString* error = nullptr);
     bool save(QString* error = nullptr) const;
     bool commit(const Config& candidate, QString* error = nullptr);
+    quint64 revision() const { return revision_; }
+signals:
+    void committed(quint64 revision);
+    void courseBarChanged();
 
 private:
     ConfigManager() = default;
@@ -28,6 +34,7 @@ private:
 
     Config config_{};
     QString filePath_;
+    quint64 revision_ = 0;
 };
 
 #endif // CLASSTOPLAND_NEXT_CONFIGMANAGER_H

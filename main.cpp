@@ -46,6 +46,7 @@ int main(int argc, char* argv[])
     int exitCode;
     {
         AppComposer app(startup.dataDirectory);
+        app.setPluginsDisabled(startup.arguments.contains(QStringLiteral("--disable-plugins")));
         if (startupUiAccessOverride) app.setStartupUiAccessOverride(*startupUiAccessOverride);
         if (UiAccess::supported()) {
             app.setRestartHandler([&](const Config& config, const QString& directory, QString* error) {

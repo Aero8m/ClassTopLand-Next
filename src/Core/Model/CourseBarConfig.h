@@ -2,22 +2,29 @@
 #define CLASSTOPLAND_NEXT_COURSEBARCONFIG_H
 #include<QString>
 #include<QList>
+#include <QJsonObject>
+#include <QUuid>
 
 enum class CourseBarComponentType
 {
     Date,          // 日期
     CourseView,    // 课程查看
     TextTip,       // 文本提示
-    Countdown      // 倒计时
+    Countdown,     // 倒计时
+    Plugin
 };
 
 struct CourseBarComponentConfig
 {
     static constexpr int DefaultCourseSpacing = 28;
-    CourseBarComponentType type;
+    CourseBarComponentType type = CourseBarComponentType::Date;
     bool enabled = true;
     QString text = QStringLiteral("文本提示");
     int courseSpacing = DefaultCourseSpacing;
+    QString instanceId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    QString typeId;
+    QJsonObject settings;
+    QJsonObject extra;
 };
 
 struct CourseBarConfig

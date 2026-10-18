@@ -1,0 +1,11 @@
+{
+  "manifestVersion": 1,
+  "id": "org.classtopland.http-demo",
+  "name": "插件示例：HTTP",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "main.mjs",
+  "description": "点击按钮后才请求示例地址，不发送档案或课程信息。",
+  "permissions": { "network": { "origins": ["https://example.com"] } },
+  "contributions": { "settingsPages": [{ "id": "network", "name": "连接测试" }] }
+}

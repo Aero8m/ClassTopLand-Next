@@ -5,6 +5,7 @@
 #include <QPointer>
 #include "../../Core/Model/CourseBarConfig.h"
 
+class CourseBarComponentRegistry;
 class CourseBarComponentList;
 class ElaComboBox;
 class ElaDialog;
@@ -16,7 +17,7 @@ class CourseBarSettingsTab final : public ElaScrollPage
 {
     Q_OBJECT
 public:
-    explicit CourseBarSettingsTab(QWidget* parent = nullptr);
+    explicit CourseBarSettingsTab(QWidget* parent = nullptr, CourseBarComponentRegistry* registry = nullptr);
     void setUiAccessSwitching(bool switching);
     bool defaultsResetPending() const { return resetPending_; }
 signals:
@@ -30,8 +31,9 @@ private:
     void selectComponent(int index);
     void moveComponent(int from, int to);
     void showComponentSettings(int index);
-    bool save(const CourseBarConfig& candidate, int selection, bool refreshComponents = true);
+    bool save(const CourseBarConfig& candidate, int selection, bool refreshComponents = true, bool resetAll = false);
     void scheduleRefresh();
+    CourseBarComponentRegistry* registry_ = nullptr;
     CourseBarConfig config_;
     QPointer<ElaDialog> componentSettingsDialog_;
     int selected_ = -1;

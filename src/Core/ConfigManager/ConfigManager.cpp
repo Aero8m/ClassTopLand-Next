@@ -9,11 +9,12 @@
 #include <QJsonParseError>
 #include <QSaveFile>
 #include <QRegularExpression>
+#include <QSet>
 
 #include <utility>
 
 namespace {
-constexpr int kFormatVersion = 1;
+constexpr int kFormatVersion = 2;
 
 bool fail(QString* error, const QString& message)
 {
@@ -28,6 +29,7 @@ QString componentTypeText(CourseBarComponentType type)
     case CourseBarComponentType::CourseView: return QStringLiteral("courseView");
     case CourseBarComponentType::TextTip: return QStringLiteral("textTip");
     case CourseBarComponentType::Countdown: return QStringLiteral("countdown");
+    case CourseBarComponentType::Plugin: return QStringLiteral("plugin");
     }
     return {};
 }
@@ -83,7 +85,14 @@ bool validate(const Config& config, QString* error)
     if (config.courseBarConfig.componentSpacing < 0 || config.courseBarConfig.componentSpacing > CourseBarConfig::MaximumSpacing)
         return fail(error, QStringLiteral("config.courseBarConfig.componentSpacing must be an integer between 0 and %1")
             .arg(CourseBarConfig::MaximumSpacing));
+    QSet<QString> instanceIds;
     for (qsizetype i = 0; i < config.courseBarConfig.components.size(); ++i) {
+        const auto& instance = config.courseBarConfig.components.at(i);
+        if (instance.instanceId.isEmpty() || instanceIds.contains(instance.instanceId))
+            return fail(error, QStringLiteral("Duplicate or empty component instanceId"));
+        instanceIds.insert(instance.instanceId);
+        if (instance.type == CourseBarComponentType::Plugin && (instance.typeId.isEmpty() || instance.typeId.startsWith(QStringLiteral("builtin/"))))
+            return fail(error, QStringLiteral("Invalid plugin component typeId"));
         if (componentTypeText(config.courseBarConfig.components.at(i).type).isEmpty())
             return fail(error, QStringLiteral("config.courseBarConfig.components[%1].type is invalid").arg(i));
         const auto& component = config.courseBarConfig.components.at(i);
@@ -106,8 +115,12 @@ QJsonObject toJson(const Config& config)
     }
     QJsonArray components;
     for (const CourseBarComponentConfig& component : config.courseBarConfig.components) {
-        QJsonObject item{{QStringLiteral("type"), componentTypeText(component.type)},
-                         {QStringLiteral("enabled"), component.enabled}};
+        QJsonObject item = component.extra;
+        item.insert(QStringLiteral("type"), componentTypeText(component.type));
+        item.insert(QStringLiteral("typeId"), component.type == CourseBarComponentType::Plugin ? component.typeId : QStringLiteral("builtin/") + componentTypeText(component.type));
+        item.insert(QStringLiteral("instanceId"), component.instanceId);
+        item.insert(QStringLiteral("enabled"), component.enabled);
+        item.insert(QStringLiteral("settings"), component.settings);
         if (component.type == CourseBarComponentType::TextTip)
             item.insert(QStringLiteral("text"), component.text);
         if (component.type == CourseBarComponentType::CourseView)
@@ -134,8 +147,13 @@ QJsonObject toJson(const Config& config)
         {QStringLiteral("rightMargin"), desktop.rightMargin},
         {QStringLiteral("bottomMargin"), desktop.bottomMargin},
         {QStringLiteral("scalePercent"), desktop.scalePercent}};
+    QJsonObject plugins;
+    for (auto it = config.pluginConfig.plugins.cbegin(); it != config.pluginConfig.plugins.cend(); ++it)
+        plugins.insert(it.key(), QJsonObject{{QStringLiteral("enabled"), it->enabled}, {QStringLiteral("grantedPermissions"), it->grantedPermissions},
+            {QStringLiteral("approvedVersion"), it->approvedVersion}, {QStringLiteral("fault"), it->fault}});
     return {{QStringLiteral("version"), kFormatVersion},
             {QStringLiteral("config"), QJsonObject{{QStringLiteral("profileName"), config.profileName},
+                                                   {QStringLiteral("pluginConfig"), QJsonObject{{QStringLiteral("plugins"), plugins}, {QStringLiteral("recoveryNextStart"), config.pluginConfig.recoveryNextStart}}},
                                                    {QStringLiteral("desktopCountdownConfig"), desktopCountdown},
                                                    {QStringLiteral("courseBarConfig"), courseBar},
                                                    {QStringLiteral("appearanceConfig"), appearance},
@@ -145,7 +163,8 @@ QJsonObject toJson(const Config& config)
 
 bool fromJson(const QJsonObject& root, Config& config, QString* error)
 {
-    if (root.value(QStringLiteral("version")).toInt(-1) != kFormatVersion)
+    const int version = root.value(QStringLiteral("version")).toInt(-1);
+    if (version != 1 && version != kFormatVersion)
         return fail(error, QStringLiteral("Unsupported config format version"));
     const QJsonValue configValue = root.value(QStringLiteral("config"));
     if (!configValue.isObject()) return fail(error, QStringLiteral("config must be an object"));
@@ -153,6 +172,26 @@ bool fromJson(const QJsonObject& root, Config& config, QString* error)
     const QJsonValue profileName = data.value(QStringLiteral("profileName"));
     if (!profileName.isString()) return fail(error, QStringLiteral("config.profileName must be a string"));
     config.profileName = profileName.toString();
+    const auto pluginsValue = data.value(QStringLiteral("pluginConfig"));
+    if (!pluginsValue.isUndefined()) {
+        if (!pluginsValue.isObject()) return fail(error, QStringLiteral("pluginConfig must be an object"));
+        const auto object = pluginsValue.toObject();
+        const auto recovery = object.value(QStringLiteral("recoveryNextStart"));
+        if (!recovery.isUndefined() && !recovery.isBool()) return fail(error, QStringLiteral("recoveryNextStart must be boolean"));
+        config.pluginConfig.recoveryNextStart = recovery.toBool();
+        const auto entries = object.value(QStringLiteral("plugins"));
+        if (!entries.isUndefined() && !entries.isObject()) return fail(error, QStringLiteral("plugins must be an object"));
+        const auto plugins = entries.toObject();
+        for (auto it = plugins.begin(); it != plugins.end(); ++it) {
+            if (!it.value().isObject()) return fail(error, QStringLiteral("Invalid plugin preference"));
+            const auto value = it.value().toObject();
+            if (!value.value(QStringLiteral("enabled")).isBool() || !value.value(QStringLiteral("grantedPermissions")).isObject() ||
+                !value.value(QStringLiteral("approvedVersion")).isString() || !value.value(QStringLiteral("fault")).isString())
+                return fail(error, QStringLiteral("Invalid plugin preference fields"));
+            config.pluginConfig.plugins.insert(it.key(), {value.value(QStringLiteral("enabled")).toBool(), value.value(QStringLiteral("grantedPermissions")).toObject(),
+                value.value(QStringLiteral("approvedVersion")).toString(), value.value(QStringLiteral("fault")).toString()});
+        }
+    }
 
     const auto desktopValue = data.value(QStringLiteral("desktopCountdownConfig"));
     if (!desktopValue.isUndefined()) {
@@ -328,15 +367,24 @@ bool fromJson(const QJsonObject& root, Config& config, QString* error)
             if (!components.at(i).isObject())
                 return fail(error, path + QStringLiteral(" must be an object"));
             const QJsonObject item = components.at(i).toObject();
-            const QJsonValue type = item.value(QStringLiteral("type"));
+            const QJsonValue type = version == 1 ? item.value(QStringLiteral("type")) : QJsonValue(item.value(QStringLiteral("typeId")).toString().startsWith(QStringLiteral("builtin/")) ? item.value(QStringLiteral("typeId")).toString().mid(8) : QStringLiteral("plugin"));
             if (!type.isString()) return fail(error, path + QStringLiteral(".type must be a string"));
             CourseBarComponentType parsedType;
             if (type.toString() == QStringLiteral("date")) parsedType = CourseBarComponentType::Date;
             else if (type.toString() == QStringLiteral("courseView")) parsedType = CourseBarComponentType::CourseView;
             else if (type.toString() == QStringLiteral("textTip")) parsedType = CourseBarComponentType::TextTip;
             else if (type.toString() == QStringLiteral("countdown")) parsedType = CourseBarComponentType::Countdown;
+            else if (version == 2) parsedType = CourseBarComponentType::Plugin;
             else return fail(error, path + QStringLiteral(".type is invalid"));
             CourseBarComponentConfig component{parsedType};
+            if (version == 2) {
+                if (!item.value(QStringLiteral("typeId")).isString() || !item.value(QStringLiteral("instanceId")).isString() || !item.value(QStringLiteral("settings")).isObject())
+                    return fail(error, path + QStringLiteral(" requires typeId, instanceId and settings"));
+                component.typeId = item.value(QStringLiteral("typeId")).toString();
+                component.instanceId = item.value(QStringLiteral("instanceId")).toString();
+                component.settings = item.value(QStringLiteral("settings")).toObject();
+                component.extra = item;
+            }
             if (parsedType == CourseBarComponentType::CourseView) {
                 const QJsonValue courseSpacing = item.value(QStringLiteral("courseSpacing"));
                 component.courseSpacing = legacyCourseSpacing;
@@ -382,6 +430,7 @@ bool ConfigManager::load(const QString& filePath, QString* error)
     if (!QFileInfo::exists(path)) {
         config_ = Config{};
         filePath_ = path;
+        emit committed(++revision_);
         return true;
     }
 
@@ -389,6 +438,7 @@ bool ConfigManager::load(const QString& filePath, QString* error)
     if (!file.open(QIODevice::ReadOnly)) return fail(error, file.errorString());
     const QByteArray contents = file.readAll();
     if (file.error() != QFileDevice::NoError) return fail(error, file.errorString());
+    file.close(); // Windows must release the read handle before atomic v1 migration.
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(contents, &parseError);
     if (parseError.error != QJsonParseError::NoError)
@@ -397,8 +447,14 @@ bool ConfigManager::load(const QString& filePath, QString* error)
 
     Config loaded;
     if (!fromJson(document.object(), loaded, error)) return false;
+    if (document.object().value(QStringLiteral("version")).toInt() == 1) {
+        const auto previousPath = filePath_;
+        filePath_ = path;
+        if (!writeConfig(loaded, error)) { filePath_ = previousPath; return false; }
+    }
     config_ = std::move(loaded);
     filePath_ = path;
+    emit committed(++revision_);
     return true;
 }
 
@@ -414,7 +470,10 @@ bool ConfigManager::commit(const Config& candidate, QString* error)
         if (!rule.exePath.trimmed().isEmpty()) rule.exePath = normalizedWindowPath(rule.exePath);
     committed.appearanceConfig.themeColor = committed.appearanceConfig.themeColor.toLower();
     if (!writeConfig(committed, error)) return false;
+    const bool courseBarChanged = toJson(config_).value(QStringLiteral("config")).toObject().value(QStringLiteral("courseBarConfig")) != toJson(committed).value(QStringLiteral("config")).toObject().value(QStringLiteral("courseBarConfig"));
     config_ = std::move(committed);
+    emit this->committed(++revision_);
+    if (courseBarChanged) emit this->courseBarChanged();
     return true;
 }
 

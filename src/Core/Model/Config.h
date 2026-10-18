@@ -5,6 +5,7 @@
 #include "AppearanceConfig.h"
 #include "WindowInterceptionConfig.h"
 #include "DesktopCountdownConfig.h"
+#include "PluginConfig.h"
 struct Config
 {
     QString profileName = QStringLiteral("Default");
@@ -12,5 +13,6 @@ struct Config
     AppearanceConfig appearanceConfig;
     WindowInterceptionConfig windowInterceptionConfig;
     DesktopCountdownConfig desktopCountdownConfig;
+    PluginConfig pluginConfig;
 };
 #endif //CLASSTOPLAND_NEXT_CONFIG_H

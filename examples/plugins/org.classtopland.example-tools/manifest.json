@@ -1,0 +1,15 @@
+{
+  "manifestVersion": 1,
+  "id": "org.classtopland.example-tools",
+  "name": "插件示例：课程助手",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "main.mjs",
+  "description": "演示后台课程订阅、独立设置弹窗、课程条实例和业务窗口。",
+  "permissions": { "courses": "read" },
+  "contributions": {
+    "settingsPages": [{ "id": "general", "name": "常规" }, { "id": "display", "name": "显示" }],
+    "courseBarComponents": [{ "id": "status", "name": "课程状态" }],
+    "windows": [{ "id": "details", "name": "课程详情" }]
+  }
+}

@@ -1,4 +1,7 @@
 #include "SettingsWindow.h"
+#include "tabs/PluginSettingsTab.h"
+#include "../Ui/Plugins/PluginUiHost.h"
+#include <QCloseEvent>
 #include "AboutDialog.h"
 #include "tabs/AppearanceSettingsTab.h"
 #include "tabs/CourseBarSettingsTab.h"
@@ -7,9 +10,11 @@
 
 #include <QScreen>
 
-SettingsWindow::SettingsWindow(QWidget* parent, WindowInterceptionService* interception)
-    : ElaWindow(parent), interception_(interception)
+SettingsWindow::SettingsWindow(QWidget* parent, WindowInterceptionService* interception, PluginManager* plugins, PluginUiHost* pluginUi, CourseBarComponentRegistry* registry)
+    : ElaWindow(parent), plugins_(plugins), pluginUi_(pluginUi), registry_(registry), interception_(interception)
 {
+    setIsDefaultClosed(false);
+    connect(this, &ElaWindow::closeButtonClicked, this, [this] { close(); });
     initUI();
 }
 
@@ -41,7 +46,7 @@ void SettingsWindow::initUI()
     connect(profileTab_, &ProfileSettingsTab::profileSwitchRequested,
             this, &SettingsWindow::profileSwitchRequested);
     addPageNode(QStringLiteral("外观"), new AppearanceSettingsTab(this), ElaIconType::Palette);
-    courseBarTab_ = new CourseBarSettingsTab(this);
+    courseBarTab_ = new CourseBarSettingsTab(this, registry_);
     addPageNode(QStringLiteral("课程条"), courseBarTab_, ElaIconType::List);
     connect(courseBarTab_, &CourseBarSettingsTab::configChanged,
             this, &SettingsWindow::courseBarConfigChanged);
@@ -55,6 +60,7 @@ void SettingsWindow::initUI()
 
     if (interception_)
         addPageNode(QStringLiteral("窗口拦截"), new WindowInterceptionSettingsTab(interception_, this), ElaIconType::Shield);
+    if (plugins_ && pluginUi_) addPageNode(QStringLiteral("插件"), new PluginSettingsTab(plugins_, pluginUi_, this), ElaIconType::PuzzlePiece);
     addFooterNode(QStringLiteral("关于"), aboutNodeKey_, 0, ElaIconType::CircleInfo);
     connect(this, &ElaWindow::navigationNodeClicked, this,
             [this](ElaNavigationType::NavigationNodeType, const QString& nodeKey) {
@@ -98,4 +104,11 @@ void SettingsWindow::setUiAccessSwitching(bool switching)
 bool SettingsWindow::courseBarDefaultsResetPending() const
 {
     return courseBarTab_->defaultsResetPending();
+}
+
+void SettingsWindow::closeEvent(QCloseEvent* event)
+{
+    if (pluginUi_ && !pluginUi_->prepareAll()) { event->ignore(); return; }
+    if (pluginUi_) pluginUi_->closeDialogs();
+    ElaWindow::closeEvent(event);
 }

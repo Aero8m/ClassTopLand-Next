@@ -18,6 +18,7 @@
 #include "../Core/Logger/Logger.h"
 #include "../Core/CourseRefreshService/CourseRefreshService.h"
 #include"BuiltinComponents/TextTip/TextTip.h"
+class CourseBarComponentRegistry;
 class QLabel;
 class QPropertyAnimation;
 class QTimer;
@@ -26,7 +27,7 @@ class CourseBar : public QWidget
 {
     Q_OBJECT
 public:
-    CourseBar(QWidget *parent = nullptr);
+    CourseBar(QWidget *parent = nullptr, CourseBarComponentRegistry* registry = nullptr, CourseRefreshService* courses = nullptr);
     ~CourseBar();
     bool hasCourseViews() const;
     QString scheduleStatus() const;
@@ -89,6 +90,8 @@ private:
     NotificationPhase notificationPhase_ = NotificationPhase::Hidden;
     QQueue<Notification> pendingNotifications_;
     std::optional<Notification> currentNotification_;
+    CourseBarComponentRegistry* registry_ = nullptr;
+    CourseRefreshService* courses_ = nullptr;
     CourseBarConfig config;
     CourseBarMetrics metrics_;
     Profile profile;

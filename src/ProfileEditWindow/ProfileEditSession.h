@@ -2,21 +2,15 @@
 
 #include "../Core/Model/Profile.h"
 #include <QObject>
+#include "../Core/ProfileValidation/ProfileValidation.h"
 #include <QStringList>
 
 class ProfileEditSession final : public QObject
 {
     Q_OBJECT
 public:
-    enum class Page { Info, Subjects, TimeLines, Schedules };
-    struct ValidationError {
-        QString message;
-        Page page = Page::Info;
-        int item = -1;
-        int row = -1;
-        int weekday = 1;
-        explicit operator bool() const { return !message.isEmpty(); }
-    };
+    using Page = ProfileValidation::Page;
+    using ValidationError = ProfileValidation::ValidationError;
 
     explicit ProfileEditSession(QObject* parent = nullptr);
     const Profile& draft() const { return draft_; }

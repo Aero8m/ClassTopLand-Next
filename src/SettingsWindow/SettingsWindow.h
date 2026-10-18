@@ -4,6 +4,9 @@
 #include"ElaApplication.h"
 #include"tabs/ProfileSettingsTab.h"
 
+class PluginManager;
+class PluginUiHost;
+class CourseBarComponentRegistry;
 class AboutDialog;
 class CourseBarSettingsTab;
 class WindowInterceptionService;
@@ -12,7 +15,7 @@ class SettingsWindow : public ElaWindow
 {
     Q_OBJECT
 public:
-    SettingsWindow(QWidget *parent = nullptr, WindowInterceptionService* interception = nullptr);
+    SettingsWindow(QWidget *parent = nullptr, WindowInterceptionService* interception = nullptr, PluginManager* plugins = nullptr, PluginUiHost* pluginUi = nullptr, CourseBarComponentRegistry* registry = nullptr);
     ~SettingsWindow();
     void refreshProfiles();
     void showProfileError(const QString& message);
@@ -24,7 +27,12 @@ signals:
     void courseBarConfigChanged();
     void desktopCountdownConfigChanged();
     void uiAccessChangeRequested(bool enabled);
+protected:
+    void closeEvent(QCloseEvent* event) override;
 private:
+    PluginManager* plugins_ = nullptr;
+    PluginUiHost* pluginUi_ = nullptr;
+    CourseBarComponentRegistry* registry_ = nullptr;
     void initUI();
     WindowInterceptionService* interception_ = nullptr;
     void showAboutDialog();

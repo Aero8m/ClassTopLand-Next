@@ -19,6 +19,9 @@ class RescheduleWindow;
 class QTimer;
 class WindowInterceptionService;
 class DesktopCountdown;
+class PluginManager;
+class PluginUiHost;
+class CourseBarComponentRegistry;
 
 #define DATA_PATH (QDir::homePath()+"/ClassTopLand-Next_Data")
 #define CONFIG_FILE_PATH (DATA_PATH+"/MainConfig.json")
@@ -32,6 +35,7 @@ public:
     explicit AppComposer(const QString& dataDirectory, QObject* parent = nullptr);
     ~AppComposer();
     bool startApp();
+    void setPluginsDisabled(bool disabled) { pluginsDisabled_ = disabled; }
     // Keep the runtime fallback even if its disk commit was denied. The normal
     // startup reload must not restore a UIAccess request that already failed.
     void setStartupUiAccessOverride(bool enabled) { startupUiAccessOverride_ = enabled; }
@@ -77,6 +81,11 @@ private:
     bool switchingProfile_ = false;
     bool initialized_ = false;
     bool shutdown_ = false;
+    bool pluginsDisabled_ = false;
+    bool exitAccepted_ = false;
+    std::unique_ptr<PluginManager> plugins_;
+    std::unique_ptr<PluginUiHost> pluginUi_;
+    std::unique_ptr<CourseBarComponentRegistry> componentRegistry_;
     std::unique_ptr<CourseBar> courseBar;
     std::unique_ptr<DesktopCountdown> desktopCountdown_;
     std::unique_ptr<WindowInterceptionService> windowInterception_;

@@ -2,9 +2,11 @@
 #define CLASSTOPLAND_NEXT_PROFILEMANAGER_H
 
 #include "../Model/Profile.h"
+#include <QObject>
 
-class ProfileManager final
+class ProfileManager final : public QObject
 {
+    Q_OBJECT
 public:
     static ProfileManager& instance();
 
@@ -14,6 +16,7 @@ public:
     Profile& profile() noexcept { return profile_; }
     const Profile& profile() const noexcept { return profile_; }
     const QString& filePath() const noexcept { return filePath_; }
+    quint64 revision() const { return revision_; }
 
     // A missing file means a new, empty profile. A malformed file is an error.
     // The supplied path is retained only when loading succeeds.
@@ -53,6 +56,8 @@ public:
     bool isManagedExportPath(const QString& path) const;
     bool removeProfile(const QString& id, QString* error = nullptr) const;
 
+signals:
+    void committed(quint64 revision);
 private:
     ProfileManager() = default;
     bool writeProfile(const Profile& candidate, QString* error) const;
@@ -60,6 +65,7 @@ private:
 
     Profile profile_{};
     QString filePath_;
+    quint64 revision_ = 0;
 };
 
 #endif // CLASSTOPLAND_NEXT_PROFILEMANAGER_H

@@ -9,6 +9,8 @@ class ICourseBarComponent : public QWidget
 public:
     explicit ICourseBarComponent(QWidget* parent = nullptr);
     virtual QString getName() = 0;
+    virtual bool isAvailable() const { return true; }
+    virtual bool visibleWhenCollapsed() const { return false; }
     const CourseBarMetrics& metrics() const { return metrics_; }
     void applyMetrics(const CourseBarMetrics& metrics);
 

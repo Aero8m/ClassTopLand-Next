@@ -1,4 +1,6 @@
 #include "CourseBar.h"
+#include "CourseBarComponentRegistry.h"
+#include <QSet>
 
 #include "BuiltinComponents/CourseView/CourseView.h"
 #include "BuiltinComponents/Countdown/Countdown.h"
@@ -25,12 +27,11 @@ CourseRefreshService* componentService(const ICourseBarComponent* component)
 
 bool componentVisible(const ICourseBarComponent* component, bool collapsed)
 {
-    if (auto* countdown = qobject_cast<const Countdown*>(component)) return countdown->hasCountdown();
-    return !collapsed;
+    return component->isAvailable() && (!collapsed || component->visibleWhenCollapsed());
 }
 } // namespace
 
-CourseBar::CourseBar(QWidget* parent) : QWidget(parent)
+CourseBar::CourseBar(QWidget* parent, CourseBarComponentRegistry* registry, CourseRefreshService* courses) : QWidget(parent), registry_(registry), courses_(courses)
 {
     Logger::instance().log(Logger::Level::Info,"Initializing CourseBar...");
     Logger::instance().flush();
@@ -122,11 +123,15 @@ void CourseBar::initComponents()
 {
     Logger::instance().log(Logger::Level::Info,"Initializing Components...");
     Logger::instance().flush();
+    QSet<CourseRefreshService*> connectedSources;
     for (auto component : config.components)
     {
         bool addedComponent = false;
         if (!component.enabled) continue;
-        if (component.type == CourseBarComponentType::Date)
+        if (registry_) {
+            if (auto* created = registry_->create(component, courses_, this)) { componentLayout_->addWidget(created); components.append(created); addedComponent = true; }
+        }
+        else if (component.type == CourseBarComponentType::Date)
         {
             addedComponent = true;
             ICourseBarComponent* newComponent = new Date(this);
@@ -163,7 +168,9 @@ void CourseBar::initComponents()
             components.last()->applyMetrics(componentMetrics);
             connect(components.last(), &ICourseBarComponent::preferredSizeChanged,
                     this, &CourseBar::scheduleGeometryUpdate);
-            if (auto* service = componentService(components.last())) {
+            if (auto* service = componentService(components.last()); service && !connectedSources.contains(service)) {
+                connectedSources.insert(service);
+                disconnect(service, nullptr, this, nullptr);
                 connect(service, &CourseRefreshService::eventOccurred,
                         this, &CourseBar::showCourseNotification);
                 connect(service, &CourseRefreshService::tableChanged, this, [this, service] {
@@ -237,6 +244,7 @@ void CourseBar::reloadConfig()
     currentNotification_.reset();
     pendingNotifications_.clear();
 
+    if (courses_) disconnect(courses_, nullptr, this, nullptr);
     for (auto* component : std::as_const(components)) {
         componentLayout_->removeWidget(component);
         delete component;
@@ -255,7 +263,7 @@ void CourseBar::reloadProfile()
 {
     profile = ProfileManager::instance().profile();
     for (auto* component : components) {
-        if (auto* service = componentService(component)) service->reloadTable();
+        if (auto* service = componentService(component); service && service != courses_) service->reloadTable();
     }
     scheduleGeometryUpdate();
     emit scheduleStatusChanged();
@@ -538,6 +546,7 @@ void CourseBar::updateMetrics()
     notificationIcon_->setPixmap(bell.scaled(iconSize, iconSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     notificationText_->setFont(metrics_.font(true));
     notificationText_->setContentsMargins(metrics_.textGuard(), 0, metrics_.textGuard(), 0);
+    if (courses_) disconnect(courses_, nullptr, this, nullptr);
     for (auto* component : std::as_const(components)) {
         auto componentMetrics = metrics_;
         componentMetrics.baseCourseSpacing = component->metrics().baseCourseSpacing;

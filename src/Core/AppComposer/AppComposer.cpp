@@ -1,4 +1,8 @@
 #include "AppComposer.h"
+#include "../Plugins/PluginManager.h"
+#include "../../Ui/Plugins/PluginUiHost.h"
+#include "../../CourseBar/CourseBarComponentRegistry.h"
+#include <QScopeGuard>
 #include "../../TaskbarTrayMenu/TaskbarTrayMenu.h"
 #include "../../SettingsWindow/SettingsWindow.h"
 #include "../../DesktopCountdown/DesktopCountdown.h"
@@ -87,11 +91,43 @@ bool AppComposer::initInstances()
     });
     if (windowInterception_->supported()) windowInterception_->start();
     // init course bar
-    courseBar = std::make_unique<CourseBar>();
+    plugins_ = std::make_unique<PluginManager>(dataDirectory_, pluginsDisabled_);
+    pluginUi_ = std::make_unique<PluginUiHost>(plugins_.get());
+    componentRegistry_ = std::make_unique<CourseBarComponentRegistry>(plugins_.get(), pluginUi_.get());
+    plugins_->editorDirty = [this] { return profileEditorWindow_ && profileEditorWindow_->session()->isDirty(); };
+    courseBar = std::make_unique<CourseBar>(nullptr, componentRegistry_.get(), plugins_->courses());
+    connect(componentRegistry_.get(), &CourseBarComponentRegistry::changed, courseBar.get(), &CourseBar::reloadConfig);
+    connect(&ConfigManager::instance(), &ConfigManager::courseBarChanged, courseBar.get(), &CourseBar::reloadConfig);
+    connect(plugins_.get(), &PluginManager::notification, this, [this](const QString& title, const QString& message) {
+        Logger::instance().log(Logger::Level::Warning, title + QStringLiteral(": ") + message);
+        if (courseBar) courseBar->showNotification(title + QStringLiteral(": ") + message);
+        if (trayMenu_) trayMenu_->showScheduleError(title + QStringLiteral(": ") + message);
+    });
+    connect(plugins_.get(), &PluginManager::restartRequested, this, [this] {
+        if (trayMenu_) trayMenu_->requestExit(TaskbarTrayMenu::RestartExitCode);
+        if (!exitAccepted_) {
+            auto candidate = ConfigManager::instance().config(); candidate.pluginConfig.recoveryNextStart = false;
+            QString error; if (!ConfigManager::instance().commit(candidate, &error)) Logger::instance().log(Logger::Level::Error, error);
+        }
+    });
+    connect(&ProfileManager::instance(), &ProfileManager::committed, this, [this] {
+        // Refresh a clean editor synchronously, before another input event can create a stale draft.
+        if (profileEditorWindow_ && !profileEditorWindow_->session()->isDirty())
+            profileEditorWindow_->session()->reset(ProfileManager::instance().profile());
+        QTimer::singleShot(0, this, [this] {
+            if (!initialized_) return;
+            if (profileEditorWindow_ && !profileEditorWindow_->session()->isDirty()) profileEditorWindow_->session()->reset(ProfileManager::instance().profile());
+            syncDateAdjustments(); if (settingsWindow_) settingsWindow_->refreshProfiles();
+        });
+    });
+    connect(plugins_.get(), &PluginManager::profileWritten, this, [this](const QJsonArray& canceled) {
+        if (!canceled.isEmpty() && trayMenu_) { QStringList dates; for (const auto& date : canceled) dates.append(date.toString()); trayMenu_->showScheduleError(tr("来源课程变化，已取消特殊安排：%1").arg(dates.join(QStringLiteral("、")))); }
+    });
     desktopCountdown_ = std::make_unique<DesktopCountdown>();
     trayMenu_ = std::make_unique<TaskbarTrayMenu>();
     trayMenu_->setExitGuard([this](int exitCode) { return prepareToExit(exitCode); });
     connect(trayMenu_.get(), &TaskbarTrayMenu::exitAccepted, this, [this] {
+        exitAccepted_ = true;
         // Do not allow queued settings actions to delete or change the selected
         // target between acceptance and the deferred application exit.
         if (settingsWindow_) settingsWindow_->setEnabled(false);
@@ -116,6 +152,7 @@ bool AppComposer::initInstances()
     QApplication::setQuitOnLastWindowClosed(false);
 
     initialized_ = true;
+    plugins_->start();
     cleanupDateOverrides();
     dateCleanupTimer_ = new QTimer(this);
     dateCleanupTimer_->setObjectName(QStringLiteral("dateScheduleCleanupTimer"));
@@ -138,11 +175,16 @@ void AppComposer::dropInstances()
     if (dateCleanupTimer_) dateCleanupTimer_->stop();
     swapWindow_.reset();
     rescheduleWindow_.reset();
+    if (pluginUi_) pluginUi_->closeDialogs();
+    if (plugins_) plugins_->stopAll();
     settingsWindow_.reset();
     windowInterception_.reset();
     profileEditorWindow_.reset();
     trayMenu_.reset();
     courseBar.reset();
+    componentRegistry_.reset();
+    pluginUi_.reset();
+    plugins_.reset();
     desktopCountdown_.reset();
     QString error;
     if (!ConfigManager::instance().save(&error))
@@ -165,13 +207,12 @@ void AppComposer::showSettingsWindow()
     // A click queued by a panel that is already being torn down must not revive the window.
     if (!initialized_) return;
     if (!settingsWindow_) {
-        settingsWindow_ = std::make_unique<SettingsWindow>(nullptr, windowInterception_.get());
+        settingsWindow_ = std::make_unique<SettingsWindow>(nullptr, windowInterception_.get(), plugins_.get(), pluginUi_.get(), componentRegistry_.get());
         connect(settingsWindow_.get(), &SettingsWindow::profileEditorRequested,
                 this, &AppComposer::showProfileEditorWindow);
         connect(settingsWindow_.get(), &SettingsWindow::profileSwitchRequested,
                 this, &AppComposer::switchProfile);
-        connect(settingsWindow_.get(), &SettingsWindow::courseBarConfigChanged,
-                courseBar.get(), &CourseBar::reloadConfig);
+
         connect(settingsWindow_.get(), &SettingsWindow::desktopCountdownConfigChanged,
                 desktopCountdown_.get(), &DesktopCountdown::reloadConfig);
         connect(settingsWindow_.get(), &SettingsWindow::uiAccessChangeRequested,
@@ -372,12 +413,16 @@ bool AppComposer::prepareToExit(int exitCode)
 {
     if (restartPreparing_ || restartAccepted_) return false;
     QScopedValueRollback<bool> preparing(restartPreparing_, true);
+    bool exitAccepted = false;
+    if (plugins_) plugins_->setWritesBlocked(true);
+    auto resumePlugins = qScopeGuard([this, &exitAccepted] { if (!exitAccepted && plugins_) plugins_->setWritesBlocked(false); });
+    if (pluginUi_ && !pluginUi_->prepareAll()) return false;
     if (profileEditorWindow_ && profileEditorWindow_->session()->isDirty()) {
         showProfileEditorWindow();
         if (!profileEditorWindow_->prepareToClose()) return false;
     }
     const bool restarting = exitCode == TaskbarTrayMenu::RestartExitCode;
-    if (pendingProfileId_.isEmpty() && !pendingUiAccess_ && (!restarting || !prepareRestart_)) return true;
+    if (pendingProfileId_.isEmpty() && !pendingUiAccess_ && (!restarting || !prepareRestart_)) { exitAccepted = true; return true; }
     QString error;
     auto report = [this](const QString& message) {
         Logger::instance().log(Logger::Level::Error, message);
@@ -416,6 +461,7 @@ bool AppComposer::prepareToExit(int exitCode)
         return false;
     }
     restartAccepted_ = restarting && bool(prepareRestart_);
+    exitAccepted = true;
     return true;
 }
 

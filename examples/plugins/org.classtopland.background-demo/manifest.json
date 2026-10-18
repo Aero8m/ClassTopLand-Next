@@ -1,0 +1,10 @@
+{
+  "manifestVersion": 1,
+  "id": "org.classtopland.background-demo",
+  "name": "插件示例：纯后台",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "main.mjs",
+  "description": "不创建窗口或组件，只订阅课程并记录日志。",
+  "permissions": { "courses": "read" }
+}
