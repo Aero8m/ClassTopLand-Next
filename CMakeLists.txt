@@ -19,6 +19,8 @@ endif ()
 
 # AUTO INSERT THE MSVC PROPERTIES
 
+# Keep CTest disabled when configuring third-party dependencies.
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(YAML_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
@@ -36,6 +38,14 @@ add_executable(ClassTopLand-Next
         src/Core/Model/AppearanceConfig.h
         src/Core/Model/Class.h
         src/Core/Model/Config.h
+        src/Core/Model/DesktopCountdownConfig.h
+        src/DesktopCountdown/DesktopCountdown.cpp
+        src/DesktopCountdown/DesktopCountdown.h
+        src/SettingsWindow/tabs/DesktopCountdownSettingsTab.cpp
+        src/SettingsWindow/tabs/DesktopCountdownSettingsTab.h
+        src/Core/Model/WindowInterceptionConfig.h
+        src/Core/WindowInterception/WindowInterceptionService.cpp
+        src/Core/WindowInterception/WindowInterceptionService.h
         src/Core/Model/CourseBarConfig.h
         src/Core/Model/Profile.h
         src/Core/Model/Schedule.h
@@ -64,17 +74,23 @@ add_executable(ClassTopLand-Next
         src/CourseBar/CourseBar.cpp
         src/CourseBar/CourseBar.h
         src/CourseBar/ICourseBarComponent.h
+        src/CourseBar/ICourseBarComponent.cpp
+        src/CourseBar/CourseBarMetrics.h
+        src/CourseBar/CourseBarLabel.h
+        src/CourseBar/CourseBarText.h
         src/CourseBar/BuiltinComponents/CourseView/CourseView.cpp
         src/CourseBar/BuiltinComponents/CourseView/CourseView.h
         src/CourseBar/BuiltinComponents/Date/Date.cpp
         src/CourseBar/BuiltinComponents/Date/Date.h
+        src/CourseBar/BuiltinComponents/Countdown/Countdown.cpp
+        src/CourseBar/BuiltinComponents/Countdown/Countdown.h
         src/CourseBar/BuiltinComponents/TextTip/TextTip.cpp
         src/CourseBar/BuiltinComponents/TextTip/TextTip.h
 
         src/ProfileEditWindow/ProfileEditSession.cpp
         src/ProfileEditWindow/ProfileEditSession.h
-        src/ProfileEditWindow/ProfileEditWidgets.cpp
-        src/ProfileEditWindow/ProfileEditWidgets.h
+        src/Ui/UiWidgets.cpp
+        src/Ui/UiWidgets.h
         src/ProfileEditWindow/ProfileEditWindow.cpp
         src/ProfileEditWindow/ProfileEditWindow.h
         src/ProfileEditWindow/tabs/ProfileInfoTab.cpp
@@ -98,6 +114,8 @@ add_executable(ClassTopLand-Next
         src/SettingsWindow/tabs/CourseBarSettingsTab.h
         src/SettingsWindow/tabs/ProfileSettingsTab.cpp
         src/SettingsWindow/tabs/ProfileSettingsTab.h
+        src/SettingsWindow/tabs/WindowInterceptionSettingsTab.cpp
+        src/SettingsWindow/tabs/WindowInterceptionSettingsTab.h
 
         src/TaskbarTrayMenu/TaskbarTrayMenu.cpp
         src/TaskbarTrayMenu/TaskbarTrayMenu.h
@@ -124,7 +142,7 @@ endif ()
 
 add_library(classtopland_windows INTERFACE)
 if (WIN32)
-    target_link_libraries(classtopland_windows INTERFACE advapi32 shell32 ole32 oleaut32 uuid)
+    target_link_libraries(classtopland_windows INTERFACE user32 advapi32 shell32 ole32 oleaut32 uuid)
     if (MSVC)
         target_link_options(ClassTopLand-Next PRIVATE "/MANIFESTUAC:level='asInvoker' uiAccess='false'")
     endif ()

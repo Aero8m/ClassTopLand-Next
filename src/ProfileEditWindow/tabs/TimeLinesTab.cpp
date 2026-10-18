@@ -1,6 +1,6 @@
 #include "TimeLinesTab.h"
 #include "../ProfileEditSession.h"
-#include "../ProfileEditWidgets.h"
+#include "../../Ui/UiWidgets.h"
 #include "../widgets/TimeLineCanvas.h"
 #include <ElaComboBox.h>
 #include <ElaLineEdit.h>
@@ -40,16 +40,17 @@ private:
 
 TimeLinesTab::TimeLinesTab(ProfileEditSession* session, QWidget* parent) : ElaScrollPage(parent), session_(session)
 {
-    using namespace ProfileEditUi;
+    using namespace AppUi;
     undo_ = new QUndoStack(this);
     auto* layout = page(this, tr("时间线管理"));
     auto* selector = card(layout);
     lines_ = new ElaComboBox; lines_->setFixedHeight(38); lines_->setAccessibleName(tr("时间线"));
+    lines_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    selector->addWidget(lines_);
     auto* actions = new QHBoxLayout;
-    actions->addWidget(lines_, 1);
     auto* create = button(tr("新增时间线"), nullptr, true);
     rename_ = button(tr("重命名")); removeLine_ = button(tr("删除时间线"));
-    actions->addWidget(create); actions->addWidget(rename_); actions->addWidget(removeLine_); selector->addLayout(actions);
+    actions->addWidget(create); actions->addWidget(rename_); actions->addWidget(removeLine_); actions->addStretch(); selector->addLayout(actions);
     auto* tools = new QHBoxLayout;
     add_ = button(tr("新增时段"), nullptr, true); remove_ = button(tr("删除"));
     auto* undo = button(tr("撤销")); auto* redo = button(tr("重做"));
@@ -159,7 +160,7 @@ void TimeLinesTab::syncSelection()
 }
 void TimeLinesTab::editLine(bool create)
 {
-    using namespace ProfileEditUi;
+    using namespace AppUi;
     const int index = currentLine_;
     if (!create && index < 0) return;
     auto* dialog = new FormDialog(this, create ? tr("新增时间线") : tr("重命名时间线"));
@@ -175,7 +176,7 @@ void TimeLinesTab::editLine(bool create)
 }
 void TimeLinesTab::removeLine()
 {
-    using namespace ProfileEditUi;
+    using namespace AppUi;
     if (currentLine_ < 0 || !confirm(this, tr("删除时间线"), tr("确定删除“%1”及其全部时段？").arg(lines_->currentText()))) return;
     undo_->clear(); canvas_->cancelDrag();
     session_->edit().timeLines.removeAt(currentLine_); currentLine_ = -1; session_->notifyChanged();
@@ -197,12 +198,12 @@ void TimeLinesTab::applySnapshot(const QList<TimeLinePoint>& points, int selecti
     QString message;
     const bool accepted = session_->replaceTimePoints(currentLine_, points, &message);
     applying_ = false;
-    if (!accepted) { ProfileEditUi::error(this, message); return; }
+    if (!accepted) { AppUi::error(this, message); return; }
     canvas_->setSelectedIndex(selection); syncSelection(); scrollToSelection();
 }
 void TimeLinesTab::addPoint(QTime requested)
 {
-    using namespace ProfileEditUi;
+    using namespace AppUi;
     if (currentLine_ < 0) return;
     const int line = currentLine_;
     if (!requested.isValid()) {
@@ -228,10 +229,10 @@ void TimeLinesTab::addPoint(QTime requested)
 void TimeLinesTab::removePoint()
 {
     const int index = canvas_->selectedIndex();
-    if (index < 0 || !ProfileEditUi::confirm(this, tr("删除时段"), tr("确定删除所选时段？"))) return;
+    if (index < 0 || !AppUi::confirm(this, tr("删除时段"), tr("确定删除所选时段？"))) return;
     auto points = displayed_; points.removeAt(index);
     QString message;
-    if (!pushChange(points, points.isEmpty() ? -1 : qMin(index, int(points.size()) - 1), tr("删除时段"), &message)) ProfileEditUi::error(this, message);
+    if (!pushChange(points, points.isEmpty() ? -1 : qMin(index, int(points.size()) - 1), tr("删除时段"), &message)) AppUi::error(this, message);
 }
 void TimeLinesTab::changeSelectedTime()
 {
@@ -239,7 +240,7 @@ void TimeLinesTab::changeSelectedTime()
     if (index < 0) return;
     auto points = displayed_; points[index] = TimeLinePoint(start_->time(), end_->time());
     QString message;
-    if (!pushChange(points, index, tr("编辑时间"), &message)) { syncSelection(); ProfileEditUi::error(this, message); }
+    if (!pushChange(points, index, tr("编辑时间"), &message)) { syncSelection(); AppUi::error(this, message); }
 }
 void TimeLinesTab::scrollToSelection(bool initial)
 {

@@ -1,6 +1,7 @@
 #include "CourseBar.h"
 
 #include "BuiltinComponents/CourseView/CourseView.h"
+#include "BuiltinComponents/Countdown/Countdown.h"
 #include "../Core/ThemeManager/ThemeManager.h"
 
 #include <QEvent>
@@ -14,12 +15,28 @@
 #include <QTimer>
 #include <utility>
 
+namespace {
+CourseRefreshService* componentService(const ICourseBarComponent* component)
+{
+    if (auto* view = qobject_cast<const CourseView*>(component)) return view->refreshService();
+    if (auto* countdown = qobject_cast<const Countdown*>(component)) return countdown->refreshService();
+    return nullptr;
+}
+
+bool componentVisible(const ICourseBarComponent* component, bool collapsed)
+{
+    if (auto* countdown = qobject_cast<const Countdown*>(component)) return countdown->hasCountdown();
+    return !collapsed;
+}
+} // namespace
+
 CourseBar::CourseBar(QWidget* parent) : QWidget(parent)
 {
     Logger::instance().log(Logger::Level::Info,"Initializing CourseBar...");
     Logger::instance().flush();
     // set config variable and profile variable
     config = ConfigManager::instance().config().courseBarConfig;
+    metrics_ = CourseBarMetrics(config);
     profile = ProfileManager::instance().profile();
 
     initUI();
@@ -54,24 +71,32 @@ void CourseBar::initUI()
     setAttribute(Qt::WidgetAttribute::WA_TranslucentBackground,true);
     setAttribute(Qt::WidgetAttribute::WA_ShowWithoutActivating,true);
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
-    setFixedHeight(config.height);
+    setFixedHeight(metrics_.height);
     GlassHelper::enableBlurBehind(this);
 
     // init window layout
     mainLayout = new QHBoxLayout(this);
     mainLayout->setSizeConstraint(QLayout::SetNoConstraint);
-    mainLayout->setSpacing(15);
-    mainLayout->setContentsMargins(0, 0, 20, 0);
+    mainLayout->setSpacing(metrics_.leadingSpacing());
+    mainLayout->setContentsMargins(0, 0, metrics_.rightMargin(), 0);
     setLayout(mainLayout);
 
     // init hide button
     hideButton = new QPushButton(this);
     hideButton->setObjectName(QStringLiteral("hideButton"));
     hideButton->setStyleSheet("background: rgba(200,200,200,0.5); border:none;");
-    hideButton->setFixedSize(19,config.height);
+    hideButton->setFixedSize(metrics_.handleWidth(), metrics_.height);
     mainLayout->addWidget(hideButton);
+    // Account for the handle in the left inset, while retaining the normal
+    // spacing between components (including when the first one is hidden).
+    componentLayout_ = new QHBoxLayout;
+    componentLayout_->setObjectName(QStringLiteral("courseBarComponentsLayout"));
+    componentLayout_->setContentsMargins(0, 0, 0, 0);
+    componentLayout_->setSpacing(metrics_.componentSpacing());
+    mainLayout->addLayout(componentLayout_);
 
     hideAnimation_ = new QPropertyAnimation(this, "pos", this);
+    hideAnimation_->setObjectName(QStringLiteral("presentationAnimation"));
     hideAnimation_->setDuration(700);
     hideAnimation_->setEasingCurve(QEasingCurve::InOutExpo);
     midpointTimer_ = new QTimer(this);
@@ -81,7 +106,7 @@ void CourseBar::initUI()
     connect(hideButton, &QPushButton::clicked, this, &CourseBar::toggleCollapsed);
     connect(midpointTimer_, &QTimer::timeout, this, [this] {
         applyPresentation();
-        resize(transitionWidth_, config.height);
+        resize(transitionWidth_, metrics_.height);
         mainLayout->activate();
     });
     connect(hideAnimation_, &QPropertyAnimation::finished, this, [this] {
@@ -105,22 +130,20 @@ void CourseBar::initComponents()
         {
             addedComponent = true;
             ICourseBarComponent* newComponent = new Date(this);
-            mainLayout->addWidget(newComponent);
+            componentLayout_->addWidget(newComponent);
             components.append(newComponent);
         }
         else if (component.type == CourseBarComponentType::CourseView)
         {
             auto* newComponent = new CourseView(this);
-            connect(newComponent, &CourseView::preferredSizeChanged,
-                    this, &CourseBar::scheduleGeometryUpdate);
-            auto* service = newComponent->refreshService();
-            connect(service, &CourseRefreshService::eventOccurred,
-                    this, &CourseBar::showCourseNotification);
-            connect(service, &CourseRefreshService::tableChanged, this, [this, service] {
-                invalidateNotifications(service);
-                emit scheduleStatusChanged();
-            });
-            mainLayout->addWidget(newComponent);
+            componentLayout_->addWidget(newComponent);
+            components.append(newComponent);
+            addedComponent = true;
+        }
+        else if (component.type == CourseBarComponentType::Countdown)
+        {
+            auto* newComponent = new Countdown(this);
+            componentLayout_->addWidget(newComponent);
             components.append(newComponent);
             addedComponent = true;
         }
@@ -128,12 +151,26 @@ void CourseBar::initComponents()
         {
             auto* newComponent = new TextTip(this);
             newComponent->setText(component.text);
-            mainLayout->addWidget(newComponent);
+            componentLayout_->addWidget(newComponent);
             components.append(newComponent);
             addedComponent = true;
         }
         if (addedComponent)
         {
+            auto componentMetrics = metrics_;
+            if (component.type == CourseBarComponentType::CourseView)
+                componentMetrics.baseCourseSpacing = component.courseSpacing;
+            components.last()->applyMetrics(componentMetrics);
+            connect(components.last(), &ICourseBarComponent::preferredSizeChanged,
+                    this, &CourseBar::scheduleGeometryUpdate);
+            if (auto* service = componentService(components.last())) {
+                connect(service, &CourseRefreshService::eventOccurred,
+                        this, &CourseBar::showCourseNotification);
+                connect(service, &CourseRefreshService::tableChanged, this, [this, service] {
+                    invalidateNotifications(service);
+                    emit scheduleStatusChanged();
+                });
+            }
             Logger::instance().log(Logger::Level::Info,QString("Added a course bar component, name: %1").arg(components.last()->getName()));
             Logger::instance().flush();
         }
@@ -142,8 +179,11 @@ void CourseBar::initComponents()
     {
         auto* newComponent = new TextTip(this);
         newComponent->setText("当前尚未添加组件");
-        mainLayout->addWidget(newComponent);
+        componentLayout_->addWidget(newComponent);
         components.append(newComponent);
+        newComponent->applyMetrics(metrics_);
+        connect(newComponent, &ICourseBarComponent::preferredSizeChanged,
+                this, &CourseBar::scheduleGeometryUpdate);
     }
 }
 
@@ -159,7 +199,7 @@ bool CourseBar::hasCourseViews() const
 {
     if (!config.enable) return false;
     for (const auto* component : components)
-        if (qobject_cast<const CourseView*>(component)) return true;
+        if (componentService(component)) return true;
     return false;
 }
 
@@ -167,14 +207,14 @@ QString CourseBar::scheduleStatus() const
 {
     if (!config.enable) return tr("课程条已关闭");
     for (auto* component : components) {
-        auto* view = qobject_cast<CourseView*>(component);
-        if (!view) continue;
-        const auto& table = view->refreshService()->table();
+        auto* service = componentService(component);
+        if (!service) continue;
+        const auto& table = service->table();
         if (!table.valid) {
             if (table.error == QStringLiteral("Multiple week schedules match; select an explicit index"))
                 return tr("多张课表匹配，请手动选择");
             if (table.error == QStringLiteral("Odd/even schedules require a week reference date"))
-                return tr("单双周缺少第一周日期，请手动选择");
+                return tr("请在档案编辑的“基本信息”中设置学期第一天");
             return tr("课表匹配失败：%1").arg(table.error);
         }
         if (table.name.isEmpty()) return tr("今日无匹配课表");
@@ -198,20 +238,12 @@ void CourseBar::reloadConfig()
     pendingNotifications_.clear();
 
     for (auto* component : std::as_const(components)) {
-        mainLayout->removeWidget(component);
+        componentLayout_->removeWidget(component);
         delete component;
     }
     components.clear();
     config = ConfigManager::instance().config().courseBarConfig;
-    setFixedHeight(config.height);
-    hideButton->setFixedSize(19, config.height);
-    const int iconSize = qMax(1, qRound(config.height * 35.0 / 49.0));
-    notificationIcon_->setFixedSize(iconSize, iconSize);
-    const QPixmap bell(QStringLiteral(":/res/images/ring.png"));
-    notificationIcon_->setPixmap(bell.scaled(iconSize, iconSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    QFont font = notificationText_->font();
-    font.setPixelSize(qMax(1, qRound(config.height * 24.0 / 49.0)));
-    notificationText_->setFont(font);
+    updateMetrics();
     // A disabled bar has no running component services or queued notifications.
     if (config.enable) initComponents();
     updateBarGeometry();
@@ -223,7 +255,7 @@ void CourseBar::reloadProfile()
 {
     profile = ProfileManager::instance().profile();
     for (auto* component : components) {
-        if (auto* view = qobject_cast<CourseView*>(component)) view->refreshService()->reloadTable();
+        if (auto* service = componentService(component)) service->reloadTable();
     }
     scheduleGeometryUpdate();
     emit scheduleStatusChanged();
@@ -257,7 +289,7 @@ void CourseBar::updateBarGeometry()
     if (!screen) return;
     applyPresentation();
     // Let the content extend beyond the screen; do not clamp or scroll courses.
-    resize(barWidth(collapsed_), config.height);
+    resize(barWidth(collapsed_), metrics_.height);
     mainLayout->activate();
     centerOnScreen();
 }
@@ -282,16 +314,14 @@ int CourseBar::barWidth(bool collapsed) const
     int width = hideButton->width();
     int count = 0;
     for (ICourseBarComponent* component : components) {
-        auto* courseView = qobject_cast<CourseView*>(component);
-        if (collapsed && (!courseView || !courseView->hasCompactContent())) continue;
-        width += courseView ? (collapsed ? courseView->compactSizeHint().width()
-                                       : courseView->expandedSizeHint().width())
-                            : component->sizeHint().width();
+        if (!componentVisible(component, collapsed)) continue;
+        width += component->sizeHint().width();
         ++count;
     }
     // A lone restore button must not leave an empty right margin.
-    if (!collapsed || count > 0) width += 20;
-    width += count * mainLayout->spacing();
+    if (!collapsed || count > 0) width += metrics_.rightMargin();
+    if (count > 0)
+        width += mainLayout->spacing() + (count - 1) * componentLayout_->spacing();
     if (!collapsed && currentNotification_) width = qMax(width, notificationMinimumWidth());
     return qMax(1, width);
 }
@@ -300,13 +330,11 @@ void CourseBar::applyPresentation()
 {
     bool hasContent = false;
     for (ICourseBarComponent* component : components) {
-        auto* courseView = qobject_cast<CourseView*>(component);
-        if (courseView) courseView->setCompactMode(collapsed_);
-        const bool visible = !collapsed_ || (courseView && courseView->hasCompactContent());
+        const bool visible = componentVisible(component, collapsed_);
         component->setVisible(visible);
         hasContent |= visible;
     }
-    mainLayout->setContentsMargins(0, 0, collapsed_ && !hasContent ? 0 : 20, 0);
+    mainLayout->setContentsMargins(0, 0, collapsed_ && !hasContent ? 0 : metrics_.rightMargin(), 0);
     hideButton->raise();
     if (notificationLayer_ && notificationPhase_ != NotificationPhase::Hidden)
         notificationLayer_->raise();
@@ -340,8 +368,6 @@ void CourseBar::initNotifications()
     notificationLayer_->setFocusPolicy(Qt::NoFocus);
     notificationLayout_ = new QHBoxLayout(notificationLayer_);
     notificationLayout_->setSizeConstraint(QLayout::SetNoConstraint);
-    notificationLayout_->setContentsMargins(12, 0, 12, 0);
-    notificationLayout_->setSpacing(12);
     notificationIcon_ = new QLabel(notificationLayer_);
     notificationIcon_->setObjectName(QStringLiteral("notificationIcon"));
     notificationIcon_->setAlignment(Qt::AlignCenter);
@@ -350,21 +376,16 @@ void CourseBar::initNotifications()
         Logger::instance().log(Logger::Level::Error, "CourseBar notification bell resource could not be loaded");
         Logger::instance().flush();
     }
-    const int iconSize = qMax(1, qRound(height() * 35.0 / 49.0));
-    notificationIcon_->setFixedSize(iconSize, iconSize);
-    notificationIcon_->setPixmap(bell.scaled(iconSize, iconSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     notificationText_ = new QLabel(notificationLayer_);
     notificationText_->setObjectName(QStringLiteral("notificationText"));
     notificationText_->setAlignment(Qt::AlignCenter);
     notificationText_->setTextFormat(Qt::PlainText);
     notificationText_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
     notificationText_->setStyleSheet(QStringLiteral("color: white; background: transparent;"));
-    QFont font(QStringLiteral("Microsoft YaHei UI"));
-    font.setPixelSize(qMax(1, qRound(height() * 24.0 / 49.0)));
-    notificationText_->setFont(font);
     notificationLayout_->addWidget(notificationIcon_);
     notificationLayout_->addWidget(notificationText_, 1);
     notificationLayer_->hide();
+    updateMetrics();
 
     notificationAnimation_ = new QPropertyAnimation(notificationLayer_, "geometry", this);
     notificationAnimation_->setObjectName(QStringLiteral("notificationAnimation"));
@@ -430,7 +451,7 @@ void CourseBar::showCourseNotification(const CourseRefreshService::Event& event)
 void CourseBar::enqueueNotification(const Notification& notification)
 {
     if (!config.enable) return;
-    // Multiple CourseView instances may publish the same course boundary.
+    // Multiple course components may publish the same course boundary.
     if (!notification.eventKey.isEmpty()) {
         if (currentNotification_ && currentNotification_->eventKey == notification.eventKey) return;
         for (const Notification& pending : pendingNotifications_)
@@ -501,6 +522,29 @@ void CourseBar::invalidateNotifications(CourseRefreshService* source)
         currentNotification_->tableRevision != source->table().revision) finishNotification();
 }
 
+void CourseBar::updateMetrics()
+{
+    metrics_ = CourseBarMetrics(config);
+    setFixedHeight(metrics_.height);
+    hideButton->setFixedSize(metrics_.handleWidth(), metrics_.height);
+    mainLayout->setSpacing(metrics_.leadingSpacing());
+    componentLayout_->setSpacing(metrics_.componentSpacing());
+    const int inset = metrics_.notificationInset();
+    notificationLayout_->setContentsMargins(inset, 0, inset, 0);
+    notificationLayout_->setSpacing(inset);
+    const int iconSize = metrics_.notificationIconSize();
+    notificationIcon_->setFixedSize(iconSize, iconSize);
+    const QPixmap bell(QStringLiteral(":/res/images/ring.png"));
+    notificationIcon_->setPixmap(bell.scaled(iconSize, iconSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    notificationText_->setFont(metrics_.font(true));
+    notificationText_->setContentsMargins(metrics_.textGuard(), 0, metrics_.textGuard(), 0);
+    for (auto* component : std::as_const(components)) {
+        auto componentMetrics = metrics_;
+        componentMetrics.baseCourseSpacing = component->metrics().baseCourseSpacing;
+        component->applyMetrics(componentMetrics);
+    }
+}
+
 int CourseBar::notificationMinimumWidth() const
 {
     if (!currentNotification_) return 0;
@@ -510,7 +554,7 @@ int CourseBar::notificationMinimumWidth() const
     for (const QString& message : currentNotification_->messages)
         textWidth = qMin(textWidth, metrics.horizontalAdvance(message));
     return margins.left() + margins.right() + notificationIcon_->width() +
-           notificationLayout_->spacing() + textWidth + 2;
+           notificationLayout_->spacing() + textWidth + 2 * metrics_.textGuard();
 }
 
 void CourseBar::selectNotificationText()
@@ -518,7 +562,7 @@ void CourseBar::selectNotificationText()
     if (!currentNotification_) return;
     const QMargins margins = notificationLayout_->contentsMargins();
     const int available = width() - margins.left() - margins.right() -
-                          notificationIcon_->width() - notificationLayout_->spacing();
+                          notificationIcon_->width() - notificationLayout_->spacing() - 2 * metrics_.textGuard();
     const QFontMetrics metrics(notificationText_->font());
     QString text = currentNotification_->messages.last();
     for (const QString& message : currentNotification_->messages) {
@@ -532,7 +576,7 @@ void CourseBar::selectNotificationText()
 
 QRect CourseBar::notificationHiddenRect() const
 {
-    return QRect((width() - height()) / 2, -qRound(height() * 78.0 / 49.0), height(), height());
+    return QRect((width() - height()) / 2, -metrics_.scaled(78), height(), height());
 }
 
 void CourseBar::updateNotificationGeometry()

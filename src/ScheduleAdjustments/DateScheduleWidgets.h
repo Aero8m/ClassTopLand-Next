@@ -8,6 +8,7 @@
 class ElaComboBox;
 class ElaPushButton;
 class ElaText;
+class CompactScheduleText;
 class QButtonGroup;
 class QCloseEvent;
 class QListWidget;
@@ -58,23 +59,28 @@ public:
     void refreshProfile(const Profile& profile);
     void showError(const QString& message);
 signals:
-    void swapRequested(const QDate& date, const QString& weekId, int first, int second);
+    void swapRequested(const QDate& firstDate, const QString& firstWeekId, int first,
+                       const QDate& secondDate, const QString& secondWeekId, int second);
     void restoreRequested(const QDate& date);
 protected:
     void closeEvent(QCloseEvent* event) override;
 private:
-    void rebuildClasses();
+    struct CourseSide {
+        DateSchedule::Result table;
+        FutureDatePicker* date = nullptr;
+        ElaComboBox* source = nullptr;
+        ElaText* weekday = nullptr;
+        CompactScheduleText* status = nullptr;
+        QListWidget* courses = nullptr;
+        ElaPushButton* restore = nullptr;
+    };
+    void rebuildClasses(int side);
+    void rebuildBoth();
+    void synchronizeSource(int side);
     void updateSelection();
     Profile profile_;
-    DateSchedule::Result table_;
-    FutureDatePicker* date_;
-    ElaComboBox* source_;
-    ElaText* weekday_;
-    ElaText* status_;
-    ElaText* summary_;
+    CourseSide sides_[2];
+    CompactScheduleText* summary_;
     ElaText* error_;
-    QListWidget* courses_;
     ElaPushButton* confirm_;
-    ElaPushButton* restore_;
-    QList<int> selected_;
 };

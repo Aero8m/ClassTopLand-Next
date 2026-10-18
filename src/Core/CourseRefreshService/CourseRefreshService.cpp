@@ -21,7 +21,8 @@ bool sameState(const CourseRefreshService::State& left,
            left.currentClassIndex == right.currentClassIndex &&
            left.nextClassIndex == right.nextClassIndex &&
            left.countdownTarget == right.countdownTarget &&
-           left.remainingSeconds == right.remainingSeconds;
+           left.remainingSeconds == right.remainingSeconds &&
+           left.durationSeconds == right.durationSeconds;
 }
 } // namespace
 
@@ -174,11 +175,16 @@ CourseRefreshService::State CourseRefreshService::calculateState(const QDateTime
             result.phase = i == 0 ? Phase::BeforeFirstClass : Phase::Break;
             result.nextClassIndex = static_cast<int>(i);
             result.countdownTarget = start;
+            if (i > 0) {
+                const QDateTime previousEnd(table_.date, table_.classes[i - 1].endTime, now.timeZone());
+                result.durationSeconds = previousEnd.secsTo(start);
+            }
         } else if (now < end) {
             result.phase = Phase::InClass;
             result.currentClassIndex = static_cast<int>(i);
             if (i + 1 < table_.classes.size()) result.nextClassIndex = static_cast<int>(i + 1);
             result.countdownTarget = end;
+            result.durationSeconds = start.secsTo(end);
         } else {
             continue;
         }

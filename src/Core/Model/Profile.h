@@ -20,6 +20,8 @@ struct DateScheduleOverride
 struct Profile
 {
     QString name;
+    // Optional: the week containing this date is semester week 1 (Monday-based).
+    QDate semesterStartDate;
     QList<Subject> subjects;
     QList<TimeLine> timeLines;
     QList<WeekSchedule> schedules;

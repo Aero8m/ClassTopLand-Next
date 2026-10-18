@@ -1,10 +1,12 @@
 #include "CourseBarSettingsTab.h"
 
 #include "../../Core/ConfigManager/ConfigManager.h"
+#include "../../CourseBar/CourseBarMetrics.h"
 #include "../../Core/ThemeManager/ThemeManager.h"
 #include "../../Utils/UiAccess/UiAccess.h"
-#include "../../ProfileEditWindow/ProfileEditWidgets.h"
+#include "../../Ui/UiWidgets.h"
 #include <ElaComboBox.h>
+#include <ElaDialog.h>
 #include <ElaLineEdit.h>
 #include <ElaPushButton.h>
 #include <ElaSpinBox.h>
@@ -35,6 +37,7 @@ QString componentName(CourseBarComponentType type)
     case CourseBarComponentType::Date: return QObject::tr("日期");
     case CourseBarComponentType::CourseView: return QObject::tr("课程查看");
     case CourseBarComponentType::TextTip: return QObject::tr("文本提示");
+    case CourseBarComponentType::Countdown: return QObject::tr("倒计时");
     }
     return {};
 }
@@ -75,6 +78,7 @@ public:
         } else {
             setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         }
+        AppUi::enableTouchScrolling(this, horizontal_ ? Qt::Horizontal : Qt::Vertical);
     }
 
     std::function<void(int, int)> moved;
@@ -179,14 +183,12 @@ private:
 
 CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent) : ElaScrollPage(parent)
 {
-    using namespace ProfileEditUi;
+    using namespace AppUi;
     setObjectName(QStringLiteral("courseBarSettingsTab"));
-    auto* layout = page(this, tr("课程条"));
-    layout->addWidget(text(tr("配置课程条的显示、组件和排列顺序；增强置顶切换后重启，其余修改立即生效。"), this));
-
-    auto* basics = card(layout, tr("基本设置"));
+    auto* layout = page(this, tr("课程条"), 24);
+    auto* basics = section(layout, tr("基本设置"));
     auto* enableRow = new QHBoxLayout;
-    enableRow->addWidget(text(tr("启用课程条"), this, 16));
+    enableRow->addWidget(text(tr("启用课程条"), this));
     enableRow->addStretch();
     enableSwitch_ = new ElaToggleSwitch(this);
     enableSwitch_->setObjectName(QStringLiteral("courseBarEnableSwitch"));
@@ -194,19 +196,19 @@ CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent) : ElaScrollPage(pare
     enableRow->addWidget(enableSwitch_);
     basics->addLayout(enableRow);
     auto* uiAccessRow = new QHBoxLayout;
-    uiAccessRow->addWidget(text(tr("UIAccess 增强置顶"), this, 16));
+    uiAccessRow->addWidget(text(tr("增强置顶"), this));
     uiAccessRow->addStretch();
     uiAccessSwitch_ = new ElaToggleSwitch(this);
     uiAccessSwitch_->setObjectName(QStringLiteral("courseBarUiAccessSwitch"));
     uiAccessSwitch_->setAccessibleName(tr("UIAccess 增强置顶"));
     uiAccessRow->addWidget(uiAccessSwitch_);
     basics->addLayout(uiAccessRow);
-    basics->addWidget(text(tr("切换后自动重启；开启时需要管理员授权。"), this));
-    uiAccessStatus_ = text({}, this);
+    basics->addWidget(text(tr("切换后自动重启，开启时需管理员授权。"), this, 12));
+    uiAccessStatus_ = text({}, this, 12);
     uiAccessStatus_->setObjectName(QStringLiteral("courseBarUiAccessStatus"));
     basics->addWidget(uiAccessStatus_);
     auto* heightRow = new QHBoxLayout;
-    heightRow->addWidget(text(tr("课程条高度"), this, 16));
+    heightRow->addWidget(text(tr("课程条高度"), this));
     heightRow->addStretch();
     heightSpin_ = new ElaSpinBox(this);
     heightSpin_->setObjectName(QStringLiteral("courseBarHeightSpin"));
@@ -218,9 +220,23 @@ CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent) : ElaScrollPage(pare
     heightRow->addWidget(heightSpin_);
     basics->addLayout(heightRow);
 
+    auto* componentSpacingRow = new QHBoxLayout;
+    componentSpacingRow->addWidget(text(tr("控件间距"), this));
+    componentSpacingRow->addStretch();
+    componentSpacingSpin_ = new ElaSpinBox(this);
+    componentSpacingSpin_->setObjectName(QStringLiteral("courseBarComponentSpacingSpin"));
+    componentSpacingSpin_->setAccessibleName(tr("控件间距"));
+    componentSpacingSpin_->setToolTip(tr("控件之间的距离，以 49 px 栏高为基准随高度缩放；0 表示无间距"));
+    componentSpacingSpin_->setRange(0, CourseBarConfig::MaximumSpacing);
+    componentSpacingSpin_->setSuffix(QStringLiteral(" px"));
+    componentSpacingSpin_->setKeyboardTracking(false);
+    componentSpacingSpin_->setFixedWidth(150);
+    componentSpacingRow->addWidget(componentSpacingSpin_);
+    basics->addLayout(componentSpacingRow);
+
     const QString scope = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    auto* previewBody = card(layout, tr("布局预览"));
-    previewStatus_ = text({}, this);
+    auto* previewBody = section(layout, tr("布局预览"));
+    previewStatus_ = text({}, this, 12);
     previewStatus_->setObjectName(QStringLiteral("courseBarPreviewStatus"));
     previewBody->addWidget(previewStatus_);
     auto* previewRow = new QHBoxLayout;
@@ -233,12 +249,12 @@ CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent) : ElaScrollPage(pare
     preview_ = new CourseBarComponentList(true, scope, this);
     preview_->setObjectName(QStringLiteral("courseBarPreview"));
     preview_->setAccessibleName(tr("拖拽调整课程条组件位置"));
+    preview_->setToolTip(tr("拖动调整顺序，点击定位组件；仅显示已启用的组件"));
     preview_->setFixedHeight(92);
     previewRow->addWidget(preview_, 1);
     previewBody->addLayout(previewRow);
-    previewBody->addWidget(text(tr("拖动示例组件调整左右位置，点击组件可定位到管理列表。预览只展示启用的组件。"), this));
 
-    auto* body = card(layout, tr("组件管理"));
+    auto* body = section(layout, tr("组件管理"));
     auto* addRow = new QHBoxLayout;
     addRow->addWidget(text(tr("添加组件"), this));
     typeCombo_ = new ElaComboBox(this);
@@ -247,6 +263,7 @@ CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent) : ElaScrollPage(pare
     typeCombo_->addItem(tr("日期"), static_cast<int>(CourseBarComponentType::Date));
     typeCombo_->addItem(tr("课程查看"), static_cast<int>(CourseBarComponentType::CourseView));
     typeCombo_->addItem(tr("文本提示"), static_cast<int>(CourseBarComponentType::TextTip));
+    typeCombo_->addItem(tr("倒计时"), static_cast<int>(CourseBarComponentType::Countdown));
     addRow->addWidget(typeCombo_, 1);
     auto* add = button(tr("添加"), this, true);
     add->setObjectName(QStringLiteral("addCourseBarComponent"));
@@ -255,10 +272,10 @@ CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent) : ElaScrollPage(pare
     components_ = new CourseBarComponentList(false, scope, this);
     components_->setObjectName(QStringLiteral("courseBarComponents"));
     components_->setAccessibleName(tr("课程条组件列表"));
+    components_->setToolTip(tr("拖动组件或使用箭头调整顺序"));
     body->addWidget(components_);
-    emptyLabel_ = text(tr("尚未添加组件，请从上方选择组件并添加。"), this);
+    emptyLabel_ = text(tr("暂无组件"), this, 12);
     body->addWidget(emptyLabel_);
-    body->addWidget(text(tr("从左到右按列表顺序排列；拖动组件行或使用箭头调整位置。关闭组件会保留其位置。"), this));
 
     auto* footer = new QHBoxLayout;
     footer->addStretch();
@@ -281,6 +298,10 @@ CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent) : ElaScrollPage(pare
     connect(heightSpin_, &ElaSpinBox::valueChanged, this, [this](int height) {
         if (height == config_.height) return;
         auto candidate = config_; candidate.height = height; save(candidate, selected_);
+    });
+    connect(componentSpacingSpin_, &ElaSpinBox::valueChanged, this, [this](int spacing) {
+        if (spacing == config_.componentSpacing) return;
+        auto candidate = config_; candidate.componentSpacing = spacing; save(candidate, selected_);
     });
     connect(add, &ElaPushButton::clicked, this, [this] {
         auto candidate = config_;
@@ -321,9 +342,10 @@ void CourseBarSettingsTab::showEvent(QShowEvent* event)
 
 void CourseBarSettingsTab::refresh()
 {
-    using namespace ProfileEditUi;
+    using namespace AppUi;
     config_ = ConfigManager::instance().config().courseBarConfig;
     const QSignalBlocker enableBlock(enableSwitch_), heightBlock(heightSpin_);
+    const QSignalBlocker componentSpacingBlock(componentSpacingSpin_);
     const QSignalBlocker previewBlock(preview_), listBlock(components_);
     enableSwitch_->setIsToggled(config_.enable);
     const QSignalBlocker uiAccessBlock(uiAccessSwitch_);
@@ -331,7 +353,9 @@ void CourseBarSettingsTab::refresh()
     uiAccessSwitch_->setEnabled(UiAccess::supported() && !uiAccessSwitching_);
     uiAccessStatus_->setText(!UiAccess::supported() ? tr("仅支持 Windows")
         : uiAccessSwitching_ ? tr("切换中…") : UiAccess::enabled() ? tr("增强置顶") : tr("普通置顶"));
+    uiAccessStatus_->setVisible(!UiAccess::supported() || uiAccessSwitching_);
     heightSpin_->setValue(config_.height);
+    componentSpacingSpin_->setValue(config_.componentSpacing);
     preview_->clear();
     components_->clear();
     for (int i = 0; i < config_.components.size(); ++i) {
@@ -339,11 +363,13 @@ void CourseBarSettingsTab::refresh()
         const QString name = componentName(component.type);
         auto* item = new QListWidgetItem(components_);
         components_->identify(item, i);
-        item->setSizeHint(QSize(0, 54));
         auto* row = new QWidget;
-        auto* rowLayout = new QHBoxLayout(row);
-        rowLayout->setContentsMargins(10, 4, 10, 4);
+        auto* bodyLayout = new QVBoxLayout(row);
+        bodyLayout->setContentsMargins(10, 4, 10, 4);
+        bodyLayout->setSpacing(6);
+        auto* rowLayout = new QHBoxLayout;
         rowLayout->setSpacing(6);
+        bodyLayout->addLayout(rowLayout);
         auto* grip = new ElaText(row);
         grip->setElaIcon(ElaIconType::GripVertical);
         grip->setTextPixelSize(16);
@@ -360,13 +386,20 @@ void CourseBarSettingsTab::refresh()
             edit->setPlaceholderText(tr("显示文本"));
             edit->setText(component.text);
             edit->setMinimumWidth(120);
-            rowLayout->addWidget(edit, 2);
+            edit->setFixedHeight(38);
+            bodyLayout->addWidget(edit);
             connect(edit, &ElaLineEdit::editingFinished, this, [this, i, edit] {
                 if (edit->text() == config_.components.at(i).text) return;
                 auto candidate = config_;
                 candidate.components[i].text = edit->text();
                 save(candidate, i);
             });
+        }
+        if (component.type == CourseBarComponentType::CourseView) {
+            auto* settings = smallButton(tr("设置"), tr("第 %1 个课程显示组件的设置").arg(i + 1), row);
+            settings->setObjectName(QStringLiteral("courseBarComponentSettings_%1").arg(i));
+            rowLayout->addWidget(settings);
+            connect(settings, &ElaPushButton::clicked, this, [this, i] { showComponentSettings(i); });
         }
         auto* toggle = new ElaToggleSwitch(row);
         toggle->setObjectName(QStringLiteral("courseBarComponentEnable_%1").arg(i));
@@ -382,6 +415,8 @@ void CourseBarSettingsTab::refresh()
         left->setEnabled(i > 0);
         right->setEnabled(i + 1 < config_.components.size());
         rowLayout->addWidget(left); rowLayout->addWidget(right); rowLayout->addWidget(remove);
+        // The selected item has a two-pixel border on every side.
+        item->setSizeHint(QSize(0, qMax(54, bodyLayout->sizeHint().height() + 4)));
         components_->setItemWidget(item, row);
         connect(toggle, &ElaToggleSwitch::toggled, this, [this, i](bool enabled) {
             auto candidate = config_; candidate.components[i].enabled = enabled; save(candidate, i);
@@ -404,19 +439,26 @@ void CourseBarSettingsTab::refresh()
             case CourseBarComponentType::TextTip:
                 sample->setText(tr("文本提示\n%1").arg(component.text));
                 break;
+            case CourseBarComponentType::Countdown:
+                sample->setText(tr("倒计时\n00:35:00"));
+                break;
             }
             sample->setTextAlignment(Qt::AlignCenter);
             sample->setToolTip(tr("第 %1 个组件：%2；拖动调整位置").arg(i + 1).arg(name));
-            sample->setSizeHint(QSize(component.type == CourseBarComponentType::Date ? 140 : 240,
+            sample->setSizeHint(QSize(component.type == CourseBarComponentType::Date ||
+                                      component.type == CourseBarComponentType::Countdown ? 140 : 240,
                                       qBound(48, config_.height, 64)));
         }
     }
     components_->setVisible(!config_.components.isEmpty());
-    components_->setFixedHeight(qBound(62, static_cast<int>(config_.components.size()) * 62, 310));
+    int listHeight = components_->spacing();
+    for (int i = 0; i < components_->count(); ++i)
+        listHeight += components_->item(i)->sizeHint().height() + 2 * components_->spacing();
+    components_->setFixedHeight(qBound(62, listHeight, 310));
     emptyLabel_->setVisible(config_.components.isEmpty());
-    previewStatus_->setText(!config_.enable ? tr("课程条已关闭，仍可编辑下次启用时的布局。")
-        : preview_->count() == 0 ? tr("没有启用的组件，课程条仅显示收起按钮。")
-                               : tr("示例内容 · 实际高度 %1 px").arg(config_.height));
+    previewStatus_->setText(!config_.enable ? tr("课程条已关闭")
+        : preview_->count() == 0 ? tr("暂无启用的组件") : QString());
+    previewStatus_->setVisible(!previewStatus_->text().isEmpty());
     selected_ = config_.components.isEmpty() ? -1 : qBound(0, selected_, static_cast<int>(config_.components.size()) - 1);
     selectComponent(selected_);
     refreshTheme();
@@ -464,20 +506,89 @@ void CourseBarSettingsTab::moveComponent(int from, int to)
     save(candidate, to);
 }
 
-void CourseBarSettingsTab::save(const CourseBarConfig& candidate, int selection)
+void CourseBarSettingsTab::showComponentSettings(int index)
+{
+    using namespace AppUi;
+    if (index < 0 || index >= config_.components.size() ||
+        config_.components.at(index).type != CourseBarComponentType::CourseView) return;
+    if (componentSettingsDialog_ && componentSettingsDialog_->isVisible()) {
+        componentSettingsDialog_->raise();
+        componentSettingsDialog_->activateWindow();
+        return;
+    }
+    auto* dialog = new ElaDialog(window());
+    componentSettingsDialog_ = dialog;
+    dialog->setObjectName(QStringLiteral("courseBarComponentDialog"));
+    dialog->setWindowTitle(tr("课程显示组件设置"));
+    dialog->setWindowModality(Qt::WindowModal);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setIsStayTop(false);
+    dialog->setIsFixedSize(true);
+    dialog->setWindowButtonFlags(ElaAppBarType::CloseButtonHint);
+    auto* layout = new QVBoxLayout(dialog);
+    layout->setContentsMargins(24, 20, 24, 20);
+    layout->setSpacing(14);
+    layout->addWidget(text(tr("第 %1 个组件 · 课程查看").arg(index + 1), dialog, 16));
+    auto* spacingRow = new QHBoxLayout;
+    spacingRow->addWidget(text(tr("课程间距"), dialog));
+    spacingRow->addStretch();
+    auto* spacing = new ElaSpinBox(dialog);
+    spacing->setObjectName(QStringLiteral("courseBarCourseSpacing_%1").arg(index));
+    spacing->setAccessibleName(tr("课程间距"));
+    spacing->setToolTip(tr("以 49 px 栏高为基准，随高度同比缩放"));
+    spacing->setRange(0, CourseBarConfig::MaximumSpacing);
+    spacing->setSuffix(QStringLiteral(" px"));
+    spacing->setKeyboardTracking(false);
+    spacing->setFixedWidth(140);
+    spacing->setValue(config_.components.at(index).courseSpacing);
+    spacingRow->addWidget(spacing);
+    layout->addLayout(spacingRow);
+    auto* actualSpacing = text(tr("当前间距：%1 px")
+        .arg(CourseBarMetrics(config_.height, spacing->value()).courseSpacing()), dialog, 12);
+    layout->addWidget(actualSpacing);
+    auto* footer = new QHBoxLayout;
+    footer->addStretch();
+    auto* close = button(tr("关闭"), dialog, true);
+    close->setObjectName(QStringLiteral("closeCourseBarComponentSettings"));
+    footer->addWidget(close);
+    layout->addLayout(footer);
+    connect(close, &ElaPushButton::clicked, dialog, &QDialog::accept);
+    connect(dialog, &ElaDialog::closeButtonClicked, dialog, &QDialog::reject);
+    connect(dialog, &QDialog::finished, this, [this] { scheduleRefresh(); });
+    connect(spacing, &ElaSpinBox::valueChanged, this, [this, index, spacing, actualSpacing](int value) {
+        if (value == config_.components.at(index).courseSpacing) return;
+        auto candidate = config_;
+        candidate.components[index].courseSpacing = value;
+        if (!save(candidate, index, false)) {
+            const QSignalBlocker blocker(spacing);
+            spacing->setValue(config_.components.at(index).courseSpacing);
+        }
+        actualSpacing->setText(tr("当前间距：%1 px")
+            .arg(CourseBarMetrics(config_.height, spacing->value()).courseSpacing()));
+    });
+    dialog->adjustSize();
+    dialog->show();
+    dialog->moveToCenter();
+    spacing->setFocus();
+}
+
+bool CourseBarSettingsTab::save(const CourseBarConfig& candidate, int selection, bool refreshComponents)
 {
     Config latest = ConfigManager::instance().config();
     latest.courseBarConfig = candidate;
     QString error;
-    if (ConfigManager::instance().commit(latest, &error)) {
+    const bool saved = ConfigManager::instance().commit(latest, &error);
+    if (saved) {
         config_ = candidate;
         selected_ = selection;
         emit configChanged();
     } else {
-        ProfileEditUi::error(this, tr("课程条配置保存失败：%1").arg(error));
+        QWidget* errorParent = componentSettingsDialog_ ? static_cast<QWidget*>(componentSettingsDialog_.data()) : this;
+        AppUi::error(errorParent, tr("课程条配置保存失败：%1").arg(error));
     }
     // Reconstruct after the sender's button/drag handler returns.
-    scheduleRefresh();
+    if (refreshComponents || !saved) scheduleRefresh();
+    return saved;
 }
 
 void CourseBarSettingsTab::scheduleRefresh()

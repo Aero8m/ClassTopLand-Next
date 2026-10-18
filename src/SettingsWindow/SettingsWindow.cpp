@@ -2,10 +2,13 @@
 #include "AboutDialog.h"
 #include "tabs/AppearanceSettingsTab.h"
 #include "tabs/CourseBarSettingsTab.h"
+#include "tabs/DesktopCountdownSettingsTab.h"
+#include "tabs/WindowInterceptionSettingsTab.h"
 
 #include <QScreen>
 
-SettingsWindow::SettingsWindow(QWidget* parent) : ElaWindow(parent)
+SettingsWindow::SettingsWindow(QWidget* parent, WindowInterceptionService* interception)
+    : ElaWindow(parent), interception_(interception)
 {
     initUI();
 }
@@ -26,10 +29,11 @@ void SettingsWindow::initUI()
 
     // init tabs
     setUserInfoCardVisible(false);
-    setNavigationBarWidth(220);
+    setNavigationBarWidth(180);
+    setNavigationBarDisplayMode(ElaNavigationType::Maximal);
     setIsAllowPageOpenInNewWindow(false);
-    resize(1000, 720);
-    setMinimumSize(900, 600);
+    resize(850, 550);
+    setMinimumSize(850, 550);
     profileTab_ = new ProfileSettingsTab(this);
     addPageNode("档案管理", profileTab_, ElaIconType::FileLines);
     connect(profileTab_, &ProfileSettingsTab::profileEditorRequested,
@@ -44,6 +48,13 @@ void SettingsWindow::initUI()
     connect(courseBarTab_, &CourseBarSettingsTab::uiAccessChangeRequested,
             this, &SettingsWindow::uiAccessChangeRequested);
 
+    auto* desktopCountdownTab = new DesktopCountdownSettingsTab(this);
+    addPageNode(QStringLiteral("桌面倒计时"), desktopCountdownTab, ElaIconType::Clock);
+    connect(desktopCountdownTab, &DesktopCountdownSettingsTab::configChanged,
+            this, &SettingsWindow::desktopCountdownConfigChanged);
+
+    if (interception_)
+        addPageNode(QStringLiteral("窗口拦截"), new WindowInterceptionSettingsTab(interception_, this), ElaIconType::Shield);
     addFooterNode(QStringLiteral("关于"), aboutNodeKey_, 0, ElaIconType::CircleInfo);
     connect(this, &ElaWindow::navigationNodeClicked, this,
             [this](ElaNavigationType::NavigationNodeType, const QString& nodeKey) {

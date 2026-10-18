@@ -1,6 +1,6 @@
 #include "SubjectsTab.h"
 #include "../ProfileEditSession.h"
-#include "../ProfileEditWidgets.h"
+#include "../../Ui/UiWidgets.h"
 #include <ElaLineEdit.h>
 #include <ElaPushButton.h>
 #include <ElaTableView.h>
@@ -11,7 +11,7 @@
 
 SubjectsTab::SubjectsTab(ProfileEditSession* session, QWidget* parent) : ElaScrollPage(parent), session_(session)
 {
-    using namespace ProfileEditUi;
+    using namespace AppUi;
     auto* layout = page(this, tr("科目管理"));
     auto* body = card(layout);
     auto* actions = new QHBoxLayout;
@@ -22,18 +22,18 @@ SubjectsTab::SubjectsTab(ProfileEditSession* session, QWidget* parent) : ElaScro
     table_ = table(body, {tr("科目名称"), tr("简称"), tr("教师")}, model_);
     layout->addStretch();
     connect(add, &ElaPushButton::clicked, this, [this] { editSubject(-1); });
-    connect(edit_, &ElaPushButton::clicked, this, [this] { editSubject(ProfileEditUi::selected(table_)); });
+    connect(edit_, &ElaPushButton::clicked, this, [this] { editSubject(AppUi::selected(table_)); });
     connect(remove_, &ElaPushButton::clicked, this, &SubjectsTab::removeSubject);
-    connect(table_, &ElaTableView::doubleClicked, this, [this] { editSubject(ProfileEditUi::selected(table_)); });
+    connect(table_, &ElaTableView::doubleClicked, this, [this] { editSubject(AppUi::selected(table_)); });
     connect(table_->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this] {
-        const bool enabled = ProfileEditUi::selected(table_) >= 0; edit_->setEnabled(enabled); remove_->setEnabled(enabled);
+        const bool enabled = AppUi::selected(table_) >= 0; edit_->setEnabled(enabled); remove_->setEnabled(enabled);
     });
     connect(session_, &ProfileEditSession::changed, this, &SubjectsTab::refresh);
     refresh();
 }
 void SubjectsTab::refresh()
 {
-    using namespace ProfileEditUi;
+    using namespace AppUi;
     int index = selected(table_);
     model_->removeRows(0, model_->rowCount());
     const auto& subjects = session_->draft().subjects;
@@ -43,7 +43,7 @@ void SubjectsTab::refresh()
 }
 void SubjectsTab::editSubject(int index)
 {
-    using namespace ProfileEditUi;
+    using namespace AppUi;
     if (index < -1 || index >= session_->draft().subjects.size()) return;
     const Subject value = index >= 0 ? session_->draft().subjects[index] : Subject({});
     auto* dialog = new FormDialog(this, index < 0 ? tr("新增科目") : tr("编辑科目"));
@@ -59,11 +59,11 @@ void SubjectsTab::editSubject(int index)
 }
 void SubjectsTab::removeSubject()
 {
-    using namespace ProfileEditUi;
+    using namespace AppUi;
     const int index = selected(table_);
     if (index < 0) return;
     if (!confirm(this, tr("删除科目"), tr("确定删除“%1”？").arg(session_->draft().subjects[index].name))) return;
     QString failure;
     if (!session_->removeSubject(index, &failure)) error(this, failure);
 }
-void SubjectsTab::focusItem(int index) { ProfileEditUi::select(table_, index); table_->setFocus(); }
+void SubjectsTab::focusItem(int index) { AppUi::select(table_, index); table_->setFocus(); }

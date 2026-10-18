@@ -1,33 +1,40 @@
 #include "TextTip.h"
+#include "../../CourseBarLabel.h"
 TextTip::TextTip(QWidget* parent) : ICourseBarComponent(parent)
 {
     // init ui
-    textLabel = new QLabel;
+    textLabel = new CourseBarLabel(this);
+    textLabel->setObjectName(QStringLiteral("tipText"));
     textLabel->setTextFormat(Qt::PlainText);
-    textLabel->setFont(QFont("Microsoft YaHei UI",14));
     textLabel->setStyleSheet("color:black;");
     textLabel->setAlignment(Qt::AlignCenter);
-    textLabel->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Ignored);
+    textLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
 
     layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSizeConstraint(QLayout::SetNoConstraint);
     layout->addWidget(textLabel);
+    updateMetrics();
 }
 
 TextTip::~TextTip()
 {
 }
 
-void TextTip::resizeEvent(QResizeEvent* event)
+void TextTip::setText(QString text)
 {
-    ICourseBarComponent::resizeEvent(event);
-    const int pixelSize = qMax(
-        1,
-        qRound(contentsRect().height() * 14.0 / 35.0)
-    );
-    QFont font = textLabel->font();
-    if (font.pixelSize() != pixelSize) {
-        font.setPixelSize(pixelSize);
-        textLabel->setFont(font);
-    }
+    if (textLabel->text() == text) return;
+    textLabel->setText(text);
+    notifyPreferredSizeChanged();
+}
+
+QSize TextTip::sizeHint() const
+{
+    return QSize(metrics().textWidth(textLabel->text(), textLabel->font()), metrics().height);
+}
+
+void TextTip::updateMetrics()
+{
+    textLabel->setFont(metrics().font());
+    textLabel->setContentsMargins(metrics().textGuard(), 0, metrics().textGuard(), 0);
 }

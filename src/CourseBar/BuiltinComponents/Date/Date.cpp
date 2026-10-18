@@ -1,19 +1,22 @@
 #include "Date.h"
+#include "../../CourseBarLabel.h"
 Date::Date(QWidget* parent) : ICourseBarComponent(parent)
 {
     // init ui
-    dateLabel = new QLabel;
-    dateLabel->setFont(QFont("Microsoft YaHei UI",14));
+    dateLabel = new CourseBarLabel(this);
+    dateLabel->setObjectName(QStringLiteral("dateText"));
     dateLabel->setStyleSheet("color:black;");
     dateLabel->setAlignment(Qt::AlignCenter);
-    dateLabel->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Ignored);
+    dateLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
 
     layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSizeConstraint(QLayout::SetNoConstraint);
     layout->addWidget(dateLabel);
+    updateMetrics();
 
     // init timer
-    timer = new QTimer;
+    timer = new QTimer(this);
     timer->setInterval(500);
     connect(timer, &QTimer::timeout, this, &Date::refreshDate);
 
@@ -33,19 +36,19 @@ void Date::refreshDate()
     QString text = QStringLiteral("周%1 %2")
         .arg(weekdays.at(date.dayOfWeek() - 1))
         .arg(date.toString("MM/dd"));
-    dateLabel->setText(text);
+    if (dateLabel->text() != text) {
+        dateLabel->setText(text);
+        notifyPreferredSizeChanged();
+    }
 }
 
-void Date::resizeEvent(QResizeEvent* event)
+QSize Date::sizeHint() const
 {
-    ICourseBarComponent::resizeEvent(event);
-    const int pixelSize = qMax(
-        1,
-        qRound(contentsRect().height() * 14.0 / 35.0)
-    );
-    QFont font = dateLabel->font();
-    if (font.pixelSize() != pixelSize) {
-        font.setPixelSize(pixelSize);
-        dateLabel->setFont(font);
-    }
+    return QSize(metrics().textWidth(dateLabel->text(), dateLabel->font()), metrics().height);
+}
+
+void Date::updateMetrics()
+{
+    dateLabel->setFont(metrics().font());
+    dateLabel->setContentsMargins(metrics().textGuard(), 0, metrics().textGuard(), 0);
 }

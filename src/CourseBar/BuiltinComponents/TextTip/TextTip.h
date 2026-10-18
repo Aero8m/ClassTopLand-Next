@@ -12,10 +12,12 @@ public:
     TextTip(QWidget* parent);
     ~TextTip();
     QString getName() override { return "TextTip"; }
-    void setText(QString text) { textLabel->setText(text); };
+    void setText(QString text);
     QString getText() { return textLabel->text(); };
+    QSize sizeHint() const override;
+    QSize minimumSizeHint() const override { return QSize(0, 0); }
 private:
-    void resizeEvent(QResizeEvent* event) override;
+    void updateMetrics() override;
     QLabel* textLabel;
     QVBoxLayout* layout;
 };

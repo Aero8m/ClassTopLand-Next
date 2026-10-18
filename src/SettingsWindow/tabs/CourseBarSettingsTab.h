@@ -2,10 +2,12 @@
 #define CLASSTOPLAND_NEXT_COURSEBARSETTINGSTAB_H
 
 #include <ElaScrollPage.h>
+#include <QPointer>
 #include "../../Core/Model/CourseBarConfig.h"
 
 class CourseBarComponentList;
 class ElaComboBox;
+class ElaDialog;
 class ElaSpinBox;
 class ElaText;
 class ElaToggleSwitch;
@@ -27,9 +29,11 @@ private:
     void refreshTheme();
     void selectComponent(int index);
     void moveComponent(int from, int to);
-    void save(const CourseBarConfig& candidate, int selection);
+    void showComponentSettings(int index);
+    bool save(const CourseBarConfig& candidate, int selection, bool refreshComponents = true);
     void scheduleRefresh();
     CourseBarConfig config_;
+    QPointer<ElaDialog> componentSettingsDialog_;
     int selected_ = -1;
     bool refreshPending_ = false;
     bool uiAccessSwitching_ = false;
@@ -38,6 +42,7 @@ private:
     ElaToggleSwitch* uiAccessSwitch_;
     ElaText* uiAccessStatus_;
     ElaSpinBox* heightSpin_;
+    ElaSpinBox* componentSpacingSpin_;
     ElaComboBox* typeCombo_;
     ElaText* previewStatus_;
     ElaText* emptyLabel_;

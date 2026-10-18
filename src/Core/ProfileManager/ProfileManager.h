@@ -26,8 +26,11 @@ public:
     bool setDateReschedule(const QDate& date, const QString& weekId, int weekday, QString* error = nullptr);
     bool swapDateClasses(const QDate& date, const QString& weekId, int first, int second,
                          QString* error = nullptr);
+    bool swapDateClasses(const QDate& firstDate, const QString& firstWeekId, int first,
+                         const QDate& secondDate, const QString& secondWeekId, int second,
+                         QString* error = nullptr);
     bool restoreDate(const QDate& date, QString* error = nullptr);
-    // Explicit date keeps cleanup deterministic in tests. No write when unchanged.
+    // Remove overrides before the supplied date. No write when unchanged.
     bool cleanPastDateOverrides(const QDate& today, QString* error = nullptr,
                                 QList<QDate>* canceledDates = nullptr);
 

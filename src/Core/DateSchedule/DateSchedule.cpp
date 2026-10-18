@@ -81,6 +81,9 @@ Result resolve(const Profile& profile, const QDate& date, const QString& weekId,
         result.valid = false; result.error = message; result.classes.clear(); return result;
     };
     if (!date.isValid()) return fail(QStringLiteral("日期无效"));
+    const QDate referenceDate = weekOneMonday.isValid() ? weekOneMonday : profile.semesterStartDate;
+    const QDate firstMonday = referenceDate.isValid()
+        ? referenceDate.addDays(1 - referenceDate.dayOfWeek()) : QDate{};
     if (!weekday) {
         if (const auto* record = find(profile, date); record && sourceMatches(profile, *record)) {
             result.classes = sorted(record->classes);
@@ -114,10 +117,11 @@ Result resolve(const Profile& profile, const QDate& date, const QString& weekId,
             if (week.mode != WeekScheduleMode::All) {
                 if (week.mode != WeekScheduleMode::Odd && week.mode != WeekScheduleMode::Even)
                     return fail(QStringLiteral("Week schedule has an invalid mode"));
-                if (!weekOneMonday.isValid())
+                if (!firstMonday.isValid())
                     return fail(QStringLiteral("Odd/even schedules require a week reference date"));
                 const auto monday = date.addDays(1 - date.dayOfWeek());
-                const qint64 weekNumber = weekOneMonday.daysTo(monday) / 7 + 1;
+                if (monday < firstMonday) continue;
+                const qint64 weekNumber = firstMonday.daysTo(monday) / 7 + 1;
                 if ((week.mode == WeekScheduleMode::Odd) != (weekNumber % 2 != 0)) continue;
             }
             if (selected != -1)

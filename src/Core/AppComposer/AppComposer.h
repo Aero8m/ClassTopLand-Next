@@ -17,6 +17,8 @@ class ProfileEditWindow;
 class SwapClassesWindow;
 class RescheduleWindow;
 class QTimer;
+class WindowInterceptionService;
+class DesktopCountdown;
 
 #define DATA_PATH (QDir::homePath()+"/ClassTopLand-Next_Data")
 #define CONFIG_FILE_PATH (DATA_PATH+"/MainConfig.json")
@@ -33,8 +35,7 @@ public:
     // Keep the runtime fallback even if its disk commit was denied. The normal
     // startup reload must not restore a UIAccess request that already failed.
     void setStartupUiAccessOverride(bool enabled) { startupUiAccessOverride_ = enabled; }
-    // Production supplies the process launcher; tests can reject a launch
-    // without requesting UAC or spawning another copy of the test executable.
+    // Prepare or cancel the process handoff before committing a restart.
     void setRestartHandler(std::function<bool(const Config&, const QString&, QString*)> prepare,
                            std::function<void()> cancel);
     // Deterministic teardown: destroys the windows, saves config and profile, and
@@ -77,6 +78,8 @@ private:
     bool initialized_ = false;
     bool shutdown_ = false;
     std::unique_ptr<CourseBar> courseBar;
+    std::unique_ptr<DesktopCountdown> desktopCountdown_;
+    std::unique_ptr<WindowInterceptionService> windowInterception_;
     std::unique_ptr<TaskbarTrayMenu> trayMenu_;
     std::unique_ptr<SettingsWindow> settingsWindow_;
     std::unique_ptr<ProfileEditWindow> profileEditorWindow_;

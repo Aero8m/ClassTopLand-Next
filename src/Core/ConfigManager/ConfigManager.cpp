@@ -27,6 +27,7 @@ QString componentTypeText(CourseBarComponentType type)
     case CourseBarComponentType::Date: return QStringLiteral("date");
     case CourseBarComponentType::CourseView: return QStringLiteral("courseView");
     case CourseBarComponentType::TextTip: return QStringLiteral("textTip");
+    case CourseBarComponentType::Countdown: return QStringLiteral("countdown");
     }
     return {};
 }
@@ -56,6 +57,20 @@ QString windowEffectText(AppearanceWindowEffect effect)
 
 bool validate(const Config& config, QString* error)
 {
+    const auto& countdown = config.desktopCountdownConfig;
+    if (countdown.enable && !countdown.targetDateTime.isValid())
+        return fail(error, QStringLiteral("config.desktopCountdownConfig.targetDateTime must be valid when enabled"));
+    if (countdown.scalePercent < 50 || countdown.scalePercent > 200)
+        return fail(error, QStringLiteral("config.desktopCountdownConfig.scalePercent must be between 50 and 200"));
+    if (countdown.rightMargin < 0 || countdown.bottomMargin < 0 ||
+        countdown.rightMargin > DesktopCountdownConfig::MaximumMargin ||
+        countdown.bottomMargin > DesktopCountdownConfig::MaximumMargin)
+        return fail(error, QStringLiteral("config.desktopCountdownConfig margins must be between 0 and 10000"));
+    for (qsizetype i = 0; i < config.windowInterceptionConfig.rules.size(); ++i) {
+        const auto& rule = config.windowInterceptionConfig.rules.at(i);
+        if (rule.exePath.trimmed().isEmpty() || rule.className.trimmed().isEmpty())
+            return fail(error, QStringLiteral("config.windowInterceptionConfig.rules[%1]: exePath and className must not be empty").arg(i));
+    }
     static const QRegularExpression hexColor(QStringLiteral("\\A#[0-9a-fA-F]{6}\\z"));
     if (!hexColor.match(config.appearanceConfig.themeColor).hasMatch())
         return fail(error, QStringLiteral("config.appearanceConfig.themeColor must be a #rrggbb hex color"));
@@ -65,34 +80,67 @@ bool validate(const Config& config, QString* error)
         return fail(error, QStringLiteral("config.appearanceConfig.windowEffect must be normal, elaMica, mica, micaAlt, acrylic or dwmBlur"));
     if (config.courseBarConfig.height <= 0)
         return fail(error, QStringLiteral("config.courseBarConfig.height must be a positive integer"));
+    if (config.courseBarConfig.componentSpacing < 0 || config.courseBarConfig.componentSpacing > CourseBarConfig::MaximumSpacing)
+        return fail(error, QStringLiteral("config.courseBarConfig.componentSpacing must be an integer between 0 and %1")
+            .arg(CourseBarConfig::MaximumSpacing));
     for (qsizetype i = 0; i < config.courseBarConfig.components.size(); ++i) {
         if (componentTypeText(config.courseBarConfig.components.at(i).type).isEmpty())
             return fail(error, QStringLiteral("config.courseBarConfig.components[%1].type is invalid").arg(i));
+        const auto& component = config.courseBarConfig.components.at(i);
+        if (component.type == CourseBarComponentType::CourseView &&
+            (component.courseSpacing < 0 || component.courseSpacing > CourseBarConfig::MaximumSpacing))
+            return fail(error, QStringLiteral("config.courseBarConfig.components[%1].courseSpacing must be an integer between 0 and %2")
+                .arg(i).arg(CourseBarConfig::MaximumSpacing));
     }
     return true;
 }
 
 QJsonObject toJson(const Config& config)
 {
+    QJsonArray rules;
+    for (const auto& rule : config.windowInterceptionConfig.rules) {
+        rules.append(QJsonObject{{QStringLiteral("exePath"), normalizedWindowPath(rule.exePath)},
+                                 {QStringLiteral("className"), rule.className},
+                                 {QStringLiteral("titleContains"), rule.titleContains},
+                                 {QStringLiteral("enabled"), rule.enabled}});
+    }
     QJsonArray components;
     for (const CourseBarComponentConfig& component : config.courseBarConfig.components) {
         QJsonObject item{{QStringLiteral("type"), componentTypeText(component.type)},
                          {QStringLiteral("enabled"), component.enabled}};
         if (component.type == CourseBarComponentType::TextTip)
             item.insert(QStringLiteral("text"), component.text);
+        if (component.type == CourseBarComponentType::CourseView)
+            item.insert(QStringLiteral("courseSpacing"), component.courseSpacing);
         components.append(item);
     }
     const QJsonObject courseBar{{QStringLiteral("enable"), config.courseBarConfig.enable},
                                 {QStringLiteral("uiAccessEnabled"), config.courseBarConfig.uiAccessEnabled},
                                 {QStringLiteral("height"), config.courseBarConfig.height},
+                                {QStringLiteral("componentSpacing"), config.courseBarConfig.componentSpacing},
                                 {QStringLiteral("components"), components}};
     const QJsonObject appearance{{QStringLiteral("themeColor"), config.appearanceConfig.themeColor.toLower()},
                                  {QStringLiteral("themeMode"), themeModeText(config.appearanceConfig.themeMode)},
                                  {QStringLiteral("windowEffect"), windowEffectText(config.appearanceConfig.windowEffect)}};
+    const auto& desktop = config.desktopCountdownConfig;
+    const QJsonObject desktopCountdown{
+        {QStringLiteral("enable"), desktop.enable},
+        {QStringLiteral("targetDateTime"), desktop.targetDateTime.isValid()
+            ? desktop.targetDateTime.toLocalTime().toString(QStringLiteral("yyyy-MM-ddTHH:mm:ss")) : QString()},
+        {QStringLiteral("labelTag"), desktop.labelTag},
+        {QStringLiteral("englishTag"), desktop.englishTag},
+        {QStringLiteral("showMilliseconds"), desktop.showMilliseconds},
+        {QStringLiteral("screenName"), desktop.screenName},
+        {QStringLiteral("rightMargin"), desktop.rightMargin},
+        {QStringLiteral("bottomMargin"), desktop.bottomMargin},
+        {QStringLiteral("scalePercent"), desktop.scalePercent}};
     return {{QStringLiteral("version"), kFormatVersion},
             {QStringLiteral("config"), QJsonObject{{QStringLiteral("profileName"), config.profileName},
+                                                   {QStringLiteral("desktopCountdownConfig"), desktopCountdown},
                                                    {QStringLiteral("courseBarConfig"), courseBar},
-                                                   {QStringLiteral("appearanceConfig"), appearance}}}};
+                                                   {QStringLiteral("appearanceConfig"), appearance},
+                                                   {QStringLiteral("windowInterceptionConfig"),
+                                                    QJsonObject{{QStringLiteral("rules"), rules}}}}}};
 }
 
 bool fromJson(const QJsonObject& root, Config& config, QString* error)
@@ -105,6 +153,79 @@ bool fromJson(const QJsonObject& root, Config& config, QString* error)
     const QJsonValue profileName = data.value(QStringLiteral("profileName"));
     if (!profileName.isString()) return fail(error, QStringLiteral("config.profileName must be a string"));
     config.profileName = profileName.toString();
+
+    const auto desktopValue = data.value(QStringLiteral("desktopCountdownConfig"));
+    if (!desktopValue.isUndefined()) {
+        const QString path = QStringLiteral("config.desktopCountdownConfig");
+        if (!desktopValue.isObject()) return fail(error, path + QStringLiteral(" must be an object"));
+        const auto desktop = desktopValue.toObject();
+        auto& countdown = config.desktopCountdownConfig;
+        const auto readBool = [&](const QString& key, bool& value) {
+            const auto item = desktop.value(key);
+            if (item.isUndefined()) return true;
+            if (!item.isBool()) return fail(error, path + '.' + key + QStringLiteral(" must be a boolean"));
+            value = item.toBool(); return true;
+        };
+        const auto readString = [&](const QString& key, QString& value) {
+            const auto item = desktop.value(key);
+            if (item.isUndefined()) return true;
+            if (!item.isString()) return fail(error, path + '.' + key + QStringLiteral(" must be a string"));
+            value = item.toString(); return true;
+        };
+        const auto readInt = [&](const QString& key, int& value, int minimum, int maximum) {
+            const auto item = desktop.value(key);
+            if (item.isUndefined()) return true;
+            if (!item.isDouble() || item.toDouble() < minimum || item.toDouble() > maximum ||
+                item.toDouble() != item.toInt())
+                return fail(error, path + '.' + key + QStringLiteral(" must be an integer between %1 and %2").arg(minimum).arg(maximum));
+            value = item.toInt(); return true;
+        };
+        QString target;
+        if (!readBool(QStringLiteral("enable"), countdown.enable) ||
+            !readBool(QStringLiteral("showMilliseconds"), countdown.showMilliseconds) ||
+            !readString(QStringLiteral("labelTag"), countdown.labelTag) ||
+            !readString(QStringLiteral("englishTag"), countdown.englishTag) ||
+            !readString(QStringLiteral("screenName"), countdown.screenName) ||
+            !readString(QStringLiteral("targetDateTime"), target) ||
+            !readInt(QStringLiteral("rightMargin"), countdown.rightMargin, 0, DesktopCountdownConfig::MaximumMargin) ||
+            !readInt(QStringLiteral("bottomMargin"), countdown.bottomMargin, 0, DesktopCountdownConfig::MaximumMargin) ||
+            !readInt(QStringLiteral("scalePercent"), countdown.scalePercent, 50, 200)) return false;
+        if (!target.isEmpty()) {
+            countdown.targetDateTime = QDateTime::fromString(target, QStringLiteral("yyyy-MM-ddTHH:mm:ss"));
+            if (!countdown.targetDateTime.isValid() ||
+                countdown.targetDateTime.toString(QStringLiteral("yyyy-MM-ddTHH:mm:ss")) != target)
+                return fail(error, path + QStringLiteral(".targetDateTime must use yyyy-MM-ddTHH:mm:ss local time"));
+        }
+    }
+
+    const auto interception = data.value(QStringLiteral("windowInterceptionConfig"));
+    if (!interception.isUndefined()) {
+        if (!interception.isObject())
+            return fail(error, QStringLiteral("config.windowInterceptionConfig must be an object"));
+        const auto rules = interception.toObject().value(QStringLiteral("rules"));
+        if (!rules.isUndefined() && !rules.isArray())
+            return fail(error, QStringLiteral("config.windowInterceptionConfig.rules must be an array"));
+        for (const auto& value : rules.toArray()) {
+            const QString path = QStringLiteral("config.windowInterceptionConfig.rules[%1]")
+                                     .arg(config.windowInterceptionConfig.rules.size());
+            if (!value.isObject()) return fail(error, path + QStringLiteral(" must be an object"));
+            const auto item = value.toObject();
+            const auto exe = item.value(QStringLiteral("exePath"));
+            const auto cls = item.value(QStringLiteral("className"));
+            const auto title = item.value(QStringLiteral("titleContains"));
+            const auto enabled = item.value(QStringLiteral("enabled"));
+            if (!exe.isString() || exe.toString().trimmed().isEmpty())
+                return fail(error, path + QStringLiteral(".exePath must be a non-empty string"));
+            if (!cls.isString() || cls.toString().trimmed().isEmpty())
+                return fail(error, path + QStringLiteral(".className must be a non-empty string"));
+            if (!title.isUndefined() && !title.isString())
+                return fail(error, path + QStringLiteral(".titleContains must be a string"));
+            if (!enabled.isUndefined() && !enabled.isBool())
+                return fail(error, path + QStringLiteral(".enabled must be a boolean"));
+            config.windowInterceptionConfig.rules.append({normalizedWindowPath(exe.toString()), cls.toString(),
+                                                          title.toString(), enabled.toBool(true)});
+        }
+    }
 
     const QJsonValue appearanceValue = data.value(QStringLiteral("appearanceConfig"));
     if (!appearanceValue.isUndefined()) {
@@ -173,6 +294,29 @@ bool fromJson(const QJsonObject& root, Config& config, QString* error)
         config.courseBarConfig.height = height.toInt();
     }
 
+    int legacyCourseSpacing = CourseBarConfig::DefaultSpacing;
+    const QJsonValue spacing = courseBar.value(QStringLiteral("spacing"));
+    if (!spacing.isUndefined()) {
+        if (!spacing.isDouble() || spacing.toInt(-1) < 0 ||
+            spacing.toInt(-1) > CourseBarConfig::MaximumSpacing || spacing.toDouble() != spacing.toInt(-1))
+            return fail(error, QStringLiteral("config.courseBarConfig.spacing must be an integer between 0 and %1")
+                .arg(CourseBarConfig::MaximumSpacing));
+        legacyCourseSpacing = spacing.toInt();
+    }
+    // Migrate the former shared gap, including files using default components.
+    for (auto& component : config.courseBarConfig.components)
+        if (component.type == CourseBarComponentType::CourseView) component.courseSpacing = legacyCourseSpacing;
+
+    const QJsonValue componentSpacing = courseBar.value(QStringLiteral("componentSpacing"));
+    if (!componentSpacing.isUndefined()) {
+        if (!componentSpacing.isDouble() || componentSpacing.toInt(-1) < 0 ||
+            componentSpacing.toInt(-1) > CourseBarConfig::MaximumSpacing ||
+            componentSpacing.toDouble() != componentSpacing.toInt(-1))
+            return fail(error, QStringLiteral("config.courseBarConfig.componentSpacing must be an integer between 0 and %1")
+                .arg(CourseBarConfig::MaximumSpacing));
+        config.courseBarConfig.componentSpacing = componentSpacing.toInt();
+    }
+
     const QJsonValue componentsValue = courseBar.value(QStringLiteral("components"));
     if (!componentsValue.isUndefined()) {
         if (!componentsValue.isArray())
@@ -186,19 +330,25 @@ bool fromJson(const QJsonObject& root, Config& config, QString* error)
             const QJsonObject item = components.at(i).toObject();
             const QJsonValue type = item.value(QStringLiteral("type"));
             if (!type.isString()) return fail(error, path + QStringLiteral(".type must be a string"));
-            // Retired version-1 component: omit it from the next normal save.
-            if (type.toString() == QStringLiteral("countdown")) {
-                const QJsonValue enabled = item.value(QStringLiteral("enabled"));
-                if (!enabled.isUndefined() && !enabled.isBool())
-                    return fail(error, path + QStringLiteral(".enabled must be a boolean"));
-                continue;
-            }
             CourseBarComponentType parsedType;
             if (type.toString() == QStringLiteral("date")) parsedType = CourseBarComponentType::Date;
             else if (type.toString() == QStringLiteral("courseView")) parsedType = CourseBarComponentType::CourseView;
             else if (type.toString() == QStringLiteral("textTip")) parsedType = CourseBarComponentType::TextTip;
+            else if (type.toString() == QStringLiteral("countdown")) parsedType = CourseBarComponentType::Countdown;
             else return fail(error, path + QStringLiteral(".type is invalid"));
             CourseBarComponentConfig component{parsedType};
+            if (parsedType == CourseBarComponentType::CourseView) {
+                const QJsonValue courseSpacing = item.value(QStringLiteral("courseSpacing"));
+                component.courseSpacing = legacyCourseSpacing;
+                if (!courseSpacing.isUndefined()) {
+                    if (!courseSpacing.isDouble() || courseSpacing.toInt(-1) < 0 ||
+                        courseSpacing.toInt(-1) > CourseBarConfig::MaximumSpacing ||
+                        courseSpacing.toDouble() != courseSpacing.toInt(-1))
+                        return fail(error, path + QStringLiteral(".courseSpacing must be an integer between 0 and %1")
+                            .arg(CourseBarConfig::MaximumSpacing));
+                    component.courseSpacing = courseSpacing.toInt();
+                }
+            }
             const QJsonValue enabled = item.value(QStringLiteral("enabled"));
             if (!enabled.isUndefined()) {
                 if (!enabled.isBool()) return fail(error, path + QStringLiteral(".enabled must be a boolean"));
@@ -260,6 +410,8 @@ bool ConfigManager::save(QString* error) const
 bool ConfigManager::commit(const Config& candidate, QString* error)
 {
     Config committed = candidate;
+    for (auto& rule : committed.windowInterceptionConfig.rules)
+        if (!rule.exePath.trimmed().isEmpty()) rule.exePath = normalizedWindowPath(rule.exePath);
     committed.appearanceConfig.themeColor = committed.appearanceConfig.themeColor.toLower();
     if (!writeConfig(committed, error)) return false;
     config_ = std::move(committed);

@@ -1,5 +1,6 @@
 #include "TimeLineCanvas.h"
 #include "../ProfileEditSession.h"
+#include "../../Ui/UiWidgets.h"
 #include <ElaTheme.h>
 #include <ElaToolTip.h>
 #include <QHideEvent>
@@ -8,6 +9,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QTimer>
+#include <QTouchEvent>
 #include <algorithm>
 #include <cmath>
 
@@ -34,6 +36,8 @@ QString pointText(int start, int end)
 TimeLineCanvas::TimeLineCanvas(QWidget* parent) : ElaScrollPageArea(parent)
 {
     setObjectName(QStringLiteral("timeLineCanvas"));
+    setAttribute(Qt::WA_AcceptTouchEvents);
+    AppUi::excludeFromTouchScrolling(this);
     setMinimumWidth(260);
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
@@ -168,27 +172,68 @@ void TimeLineCanvas::paintEvent(QPaintEvent* event)
         }
     }
 }
+bool TimeLineCanvas::event(QEvent* event)
+{
+    if (event->type() == QEvent::TouchCancel) {
+        touchId_ = -1;
+        cancelDrag();
+        event->accept();
+        return true;
+    }
+    if (event->type() == QEvent::TouchBegin || event->type() == QEvent::TouchUpdate || event->type() == QEvent::TouchEnd) {
+        auto* touch = static_cast<QTouchEvent*>(event);
+        event->accept();
+        // A second finger cancels the preview rather than committing an edit.
+        if (touch->points().size() != 1) {
+            touchId_ = -1;
+            cancelDrag();
+            return true;
+        }
+        const auto& point = touch->points().first();
+        if (event->type() == QEvent::TouchBegin) {
+            touchId_ = point.id();
+            beginDrag(point.position(), true);
+        } else if (point.id() == touchId_) {
+            if (event->type() == QEvent::TouchEnd) {
+                touchId_ = -1;
+                finishDrag(point.position());
+            } else if (isDragging()) {
+                updatePreview(point.position().y());
+            }
+        }
+        return true;
+    }
+    return ElaScrollPageArea::event(event);
+}
+
 void TimeLineCanvas::mousePressEvent(QMouseEvent* event)
 {
     if (event->button() != Qt::LeftButton) { ElaScrollPageArea::mousePressEvent(event); return; }
+    if (event->source() != Qt::MouseEventNotSynthesized) return;
+    beginDrag(event->position(), false);
+}
+void TimeLineCanvas::beginDrag(QPointF position, bool touch)
+{
     cancelDrag(); setFocus(); tip_->hide(); hoverTimer_->stop(); hovered_ = -1;
-    int hit = hitTest(event->position());
+    const qreal edgeTolerance = touch ? 16 : 6;
+    int hit = hitTest(position);
     // Selected handles are accessible even just outside the block's actual bounds.
     if (selected_ >= 0) {
         const auto rect = pointRect(selected_);
-        if (qAbs(event->position().x() - rect.center().x()) < 12 &&
-            (qAbs(event->position().y() - rect.top()) < 7 || qAbs(event->position().y() - rect.bottom()) < 7)) hit = selected_;
+        if (qAbs(position.x() - rect.center().x()) < 12 &&
+            (qAbs(position.y() - rect.top()) < edgeTolerance + 1 || qAbs(position.y() - rect.bottom()) < edgeTolerance + 1)) hit = selected_;
     }
     const bool wasSelected = hit == selected_;
     setSelectedIndex(hit); emit selectionRequested(hit);
     if (hit < 0) return;
     const auto rect = pointRect(hit);
     drag_ = Drag::Move;
-    const auto fromTop = qAbs(event->position().y() - rect.top());
-    const auto fromBottom = qAbs(event->position().y() - rect.bottom());
-    if (wasSelected && qMin(fromTop, fromBottom) <= 6)
+    const auto fromTop = qAbs(position.y() - rect.top());
+    const auto fromBottom = qAbs(position.y() - rect.bottom());
+    // Touching an edge resizes immediately, without first selecting the block.
+    if ((touch || wasSelected) && qMin(fromTop, fromBottom) <= edgeTolerance)
         drag_ = fromTop <= fromBottom ? Drag::Start : Drag::End;
-    pressY_ = event->position().y(); moved_ = false;
+    pressY_ = position.y(); moved_ = false;
     originalStart_ = previewStart_ = seconds(points_[hit].startTime);
     originalEnd_ = previewEnd_ = seconds(points_[hit].endTime);
     setCursor(drag_ == Drag::Move ? Qt::ClosedHandCursor : Qt::SizeVerCursor);
@@ -223,12 +268,19 @@ void TimeLineCanvas::updateHover(QPointF position)
 }
 void TimeLineCanvas::mouseMoveEvent(QMouseEvent* event)
 {
+    if (event->source() != Qt::MouseEventNotSynthesized) return;
     if (isDragging()) updatePreview(event->position().y()); else updateHover(event->position());
 }
 void TimeLineCanvas::mouseReleaseEvent(QMouseEvent* event)
 {
+    if (event->source() != Qt::MouseEventNotSynthesized) return;
     if (event->button() != Qt::LeftButton || !isDragging()) return;
-    updatePreview(event->position().y());
+    finishDrag(event->position());
+}
+void TimeLineCanvas::finishDrag(QPointF position)
+{
+    if (!isDragging()) return;
+    updatePreview(position.y());
     const QString error = previewError();
     const int index = selected_, start = previewStart_, end = previewEnd_;
     const bool changed = moved_;
@@ -240,6 +292,7 @@ void TimeLineCanvas::mouseReleaseEvent(QMouseEvent* event)
 }
 void TimeLineCanvas::mouseDoubleClickEvent(QMouseEvent* event)
 {
+    if (event->source() != Qt::MouseEventNotSynthesized) return;
     cancelDrag();
     if (event->button() == Qt::LeftButton && hitTest(event->position()) < 0) {
         const int value = qBound(0, qRound(secondsAtY(event->position().y()) / 300.0) * 300, 86398);
@@ -258,6 +311,7 @@ void TimeLineCanvas::keyPressEvent(QKeyEvent* event)
 }
 void TimeLineCanvas::hideEvent(QHideEvent* event)
 {
+    touchId_ = -1;
     cancelDrag(); hoverTimer_->stop(); tip_->hide(); ElaScrollPageArea::hideEvent(event);
 }
 void TimeLineCanvas::leaveEvent(QEvent* event)

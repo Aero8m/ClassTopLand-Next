@@ -22,6 +22,7 @@ const DaySchedule* sourceDay(const Profile& profile, const QString& weekId, int 
 const DateScheduleOverride* find(const Profile& profile, const QDate& date);
 bool sourceMatches(const Profile& profile, const DateScheduleOverride& record);
 // Explicit weekday/index are the legacy temporary-selection overrides.
+// The explicit reference date overrides the profile's semester start date.
 Result resolve(const Profile& profile, const QDate& date, const QString& weekId = {},
                int weekday = 0, int weekIndex = -1, const QDate& weekOneMonday = {});
 }

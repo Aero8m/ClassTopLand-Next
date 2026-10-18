@@ -9,7 +9,7 @@ class ElaScrollArea;
 class TimeLineCanvas;
 class QUndoStack;
 class QBoxLayout;
-namespace ProfileEditUi { class TimePicker; }
+namespace AppUi { class TimePicker; }
 
 class TimeLinesTab final : public ElaScrollPage {
     Q_OBJECT
@@ -40,8 +40,8 @@ private:
     QBoxLayout* columns_ = nullptr;
     ElaText* empty_;
     ElaText* zoomText_;
-    ProfileEditUi::TimePicker* start_;
-    ProfileEditUi::TimePicker* end_;
+    AppUi::TimePicker* start_;
+    AppUi::TimePicker* end_;
     ElaPushButton* rename_;
     ElaPushButton* removeLine_;
     ElaPushButton* add_;

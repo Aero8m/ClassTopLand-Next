@@ -161,6 +161,8 @@ QJsonObject toJson(const Profile& profile)
 {
     QJsonObject data;
     data.insert(QStringLiteral("name"), profile.name);
+    if (profile.semesterStartDate.isValid())
+        data.insert(QStringLiteral("semesterStartDate"), profile.semesterStartDate.toString(Qt::ISODate));
     data.insert(QStringLiteral("activeWeekScheduleId"), profile.activeWeekScheduleId);
 
     QJsonArray subjects;
@@ -221,6 +223,13 @@ bool fromJson(const QJsonObject& root, Profile& profile, QString* error)
     if (!profileValue.isObject()) return fail(error, QStringLiteral("profile must be an object"));
     const QJsonObject data = profileValue.toObject();
     if (!stringField(data, QStringLiteral("name"), profile.name, error, QStringLiteral("profile"))) return false;
+    const auto semesterStart = data.value(QStringLiteral("semesterStartDate"));
+    if (!semesterStart.isUndefined()) {
+        profile.semesterStartDate = QDate::fromString(semesterStart.toString(), Qt::ISODate);
+        if (!semesterStart.isString() || !profile.semesterStartDate.isValid() ||
+            profile.semesterStartDate.toString(Qt::ISODate) != semesterStart.toString())
+            return fail(error, QStringLiteral("profile.semesterStartDate must be a valid YYYY-MM-DD date"));
+    }
 
     const auto selection = data.value(QStringLiteral("activeWeekScheduleId"));
     if (!selection.isUndefined() && !selection.isString())
@@ -431,6 +440,8 @@ bool toTables(const Profile& profile, const QString& weekId, QByteArray& content
     messages.append(QStringLiteral("仅导出周课表“%1”的课程名称和时间；不保留其他周课表、档案名称、周课表名称和 ID、日课表名称、科目简称与教师、未使用科目、时间线及当前课表选择。完整备份请使用原生 JSON。").arg(selected->name));
     if (selected->mode != WeekScheduleMode::All)
         messages.append(QStringLiteral("所选课表的单双周规则无法保存，导出后按每周课表使用。"));
+    if (profile.semesterStartDate.isValid())
+        messages.append(QStringLiteral("学期第一天不会导出；完整备份请使用原生 JSON。"));
     if (!profile.dateOverrides.isEmpty())
         messages.append(QStringLiteral("指定日期的调休和换课安排不会导出；完整备份请使用原生 JSON。"));
     QJsonObject root;
@@ -543,7 +554,8 @@ void exchangeWarnings(Profile& profile, QStringList& warnings, bool addMissing)
         }
     }
     if (conflict) warnings.append(QStringLiteral("已保留全部重复生效安排，课程栏自动匹配可能冲突。"));
-    if (parity) warnings.append(QStringLiteral("单双周自动运行需要第一周日期配置，当前尚未提供。"));
+    if (parity && !profile.semesterStartDate.isValid())
+        warnings.append(QStringLiteral("单双周自动运行需要在档案编辑的“基本信息”中设置学期第一天。"));
 }
 bool fromCses(const QByteArray& bytes, Profile& profile, QString* error)
 {
@@ -763,6 +775,8 @@ bool ProfileExchange::serialize(const Profile& profile, Format format, QByteArra
     if (!validateTransfer(profile, error)) return false;
     Profile candidate = profile;
     QStringList messages;
+    if (profile.semesterStartDate.isValid())
+        messages.append(QStringLiteral("学期第一天不会导出到 CSES，导入后需重新设置；完整备份请使用原生 JSON。"));
     if (!profile.dateOverrides.isEmpty())
         messages.append(QStringLiteral("指定日期的调休和换课安排不会导出；完整备份请使用原生 JSON。"));
     exchangeWarnings(candidate, messages, true);

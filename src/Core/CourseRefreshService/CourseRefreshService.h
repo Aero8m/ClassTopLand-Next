@@ -50,6 +50,8 @@ public:
         int nextClassIndex = -1;
         QDateTime countdownTarget;
         qint64 remainingSeconds = 0;
+        // Current class or break duration; zero before the first class or without a target.
+        qint64 durationSeconds = 0;
     };
 
     struct Event {
@@ -73,7 +75,7 @@ public:
     // -1: follow the profile selection (empty ID means automatic matching).
     // An explicit index overrides the saved selection and bypasses week mode.
     void setWeekScheduleIndex(int index);
-    // The containing Monday is week one. Invalid date clears the reference.
+    // The containing Monday is week one. Invalid date uses the profile's semester date.
     void setWeekReferenceDate(const QDate& date);
     // Temporary selections expire when the actual calendar date changes.
     void setTemporaryWeekday(int weekday);

@@ -6,12 +6,13 @@
 
 class AboutDialog;
 class CourseBarSettingsTab;
+class WindowInterceptionService;
 
 class SettingsWindow : public ElaWindow
 {
     Q_OBJECT
 public:
-    SettingsWindow(QWidget *parent = nullptr);
+    SettingsWindow(QWidget *parent = nullptr, WindowInterceptionService* interception = nullptr);
     ~SettingsWindow();
     void refreshProfiles();
     void showProfileError(const QString& message);
@@ -21,9 +22,11 @@ signals:
     void profileEditorRequested();
     void profileSwitchRequested(const QString& id);
     void courseBarConfigChanged();
+    void desktopCountdownConfigChanged();
     void uiAccessChangeRequested(bool enabled);
 private:
     void initUI();
+    WindowInterceptionService* interception_ = nullptr;
     void showAboutDialog();
     QString aboutNodeKey_;
     AboutDialog* aboutDialog_ = nullptr;

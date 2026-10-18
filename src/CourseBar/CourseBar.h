@@ -55,6 +55,7 @@ private:
     void initUI();
     void initComponents();
     void initNotifications();
+    void updateMetrics();
     void refreshThemeColor();
     void showCourseNotification(const CourseRefreshService::Event& event);
     void enqueueNotification(const Notification& notification);
@@ -89,8 +90,10 @@ private:
     QQueue<Notification> pendingNotifications_;
     std::optional<Notification> currentNotification_;
     CourseBarConfig config;
+    CourseBarMetrics metrics_;
     Profile profile;
     QHBoxLayout* mainLayout;
+    QHBoxLayout* componentLayout_;
     QPushButton* hideButton;
     QList<ICourseBarComponent*> components;
 };

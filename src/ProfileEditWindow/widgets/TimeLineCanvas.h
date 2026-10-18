@@ -29,6 +29,7 @@ signals:
     void previewChanged(QTime start, QTime end);
     void previewFinished();
 protected:
+    bool event(QEvent*) override;
     void paintEvent(QPaintEvent*) override;
     void mousePressEvent(QMouseEvent*) override;
     void mouseMoveEvent(QMouseEvent*) override;
@@ -42,6 +43,8 @@ private:
     int hitTest(QPointF position) const;
     QRectF rangeRect(int start, int end) const;
     QString previewError() const;
+    void beginDrag(QPointF position, bool touch);
+    void finishDrag(QPointF position);
     void updatePreview(qreal y);
     void updateHover(QPointF position);
     qreal pixelsPerMinute() const { return 2.0 * zoom_ / 100.0; }
@@ -49,6 +52,7 @@ private:
     int selected_ = -1;
     int zoom_ = 100;
     Drag drag_ = Drag::None;
+    int touchId_ = -1;
     qreal pressY_ = 0;
     int originalStart_ = 0, originalEnd_ = 0;
     int previewStart_ = 0, previewEnd_ = 0;

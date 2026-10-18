@@ -3,5 +3,8 @@
         <file>res/images/icon.png</file>
         <file>res/images/ring.png</file>
         <file>res/logo.txt</file>
+        <file>res/fonts/DTF-1.ttf</file>
+        <file>res/fonts/DTF-2.ttf</file>
+        <file>res/fonts/DTF-3.ttf</file>
     </qresource>
 </RCC>

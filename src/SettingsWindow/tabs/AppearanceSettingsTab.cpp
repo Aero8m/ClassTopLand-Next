@@ -1,7 +1,7 @@
 #include "AppearanceSettingsTab.h"
 
 #include "../../Core/ThemeManager/ThemeManager.h"
-#include "../../ProfileEditWindow/ProfileEditWidgets.h"
+#include "../../Ui/UiWidgets.h"
 #include <ElaColorDialog.h>
 #include <ElaComboBox.h>
 #include <ElaPushButton.h>
@@ -15,17 +15,13 @@
 
 AppearanceSettingsTab::AppearanceSettingsTab(QWidget* parent) : ElaScrollPage(parent)
 {
-    using namespace ProfileEditUi;
+    using namespace AppUi;
     setObjectName(QStringLiteral("appearanceSettingsTab"));
-    auto* layout = page(this, tr("外观"));
+    auto* layout = page(this, tr("外观"), 24);
     auto* body = card(layout);
     auto* row = new QHBoxLayout;
     row->setSpacing(20);
-    auto* description = new QVBoxLayout;
-    description->setSpacing(6);
-    description->addWidget(text(tr("主题色"), this, 18));
-    description->addWidget(text(tr("设置课表和应用控件的主题色，修改后立即生效。"), this));
-    row->addLayout(description, 1);
+    row->addWidget(text(tr("主题色"), this), 1);
 
     auto* systemColor = button(tr("使用系统主题色"), this);
     systemColor->setObjectName(QStringLiteral("useSystemThemeColor"));
@@ -44,11 +40,7 @@ AppearanceSettingsTab::AppearanceSettingsTab(QWidget* parent) : ElaScrollPage(pa
     auto* modeBody = card(layout);
     auto* modeRow = new QHBoxLayout;
     modeRow->setSpacing(20);
-    auto* modeDescription = new QVBoxLayout;
-    modeDescription->setSpacing(6);
-    modeDescription->addWidget(text(tr("深浅模式"), this, 18));
-    modeDescription->addWidget(text(tr("跟随系统或固定使用浅色、深色外观，修改后立即生效。"), this));
-    modeRow->addLayout(modeDescription, 1);
+    modeRow->addWidget(text(tr("深浅模式"), this), 1);
     modeCombo_ = new ElaComboBox(this);
     modeCombo_->setObjectName(QStringLiteral("themeModeCombo"));
     modeCombo_->setAccessibleName(tr("深浅模式"));
@@ -64,8 +56,8 @@ AppearanceSettingsTab::AppearanceSettingsTab(QWidget* parent) : ElaScrollPage(pa
     effectRow->setSpacing(20);
     auto* effectDescription = new QVBoxLayout;
     effectDescription->setSpacing(6);
-    effectDescription->addWidget(text(tr("窗口效果"), this, 18));
-    windowEffectDescription_ = text({}, this);
+    effectDescription->addWidget(text(tr("窗口效果"), this));
+    windowEffectDescription_ = text({}, this, 12);
     windowEffectDescription_->setObjectName(QStringLiteral("windowEffectDescription"));
     effectDescription->addWidget(windowEffectDescription_);
     effectRow->addLayout(effectDescription, 1);
@@ -76,6 +68,7 @@ AppearanceSettingsTab::AppearanceSettingsTab(QWidget* parent) : ElaScrollPage(pa
     windowEffectCombo_->setMaxVisibleItems(6);
     windowEffectCombo_->addItem(QStringLiteral("Normal"), static_cast<int>(AppearanceWindowEffect::Normal));
     windowEffectCombo_->addItem(QStringLiteral("ElaMica"), static_cast<int>(AppearanceWindowEffect::ElaMica));
+    windowEffectCombo_->setItemData(1, tr("使用桌面壁纸生成模糊背景，读取失败时使用默认背景。"), Qt::ToolTipRole);
     windowEffectCombo_->addItem(QStringLiteral("Mica"), static_cast<int>(AppearanceWindowEffect::Mica));
     windowEffectCombo_->addItem(QStringLiteral("Mica-Alt"), static_cast<int>(AppearanceWindowEffect::MicaAlt));
     windowEffectCombo_->addItem(QStringLiteral("Acrylic"), static_cast<int>(AppearanceWindowEffect::Acrylic));
@@ -84,7 +77,7 @@ AppearanceSettingsTab::AppearanceSettingsTab(QWidget* parent) : ElaScrollPage(pa
     for (int i = 0; i < windowEffectCombo_->count(); ++i) {
         const auto effect = static_cast<AppearanceWindowEffect>(windowEffectCombo_->itemData(i).toInt());
         const QString reason = ThemeManager::instance().windowEffectUnavailableReason(effect);
-        windowEffectCombo_->setItemData(i, reason, Qt::ToolTipRole);
+        if (!reason.isEmpty()) windowEffectCombo_->setItemData(i, reason, Qt::ToolTipRole);
         if (effectModel && !reason.isEmpty()) effectModel->item(i)->setEnabled(false);
     }
     effectRow->addWidget(windowEffectCombo_, 0, Qt::AlignVCenter);
@@ -132,7 +125,7 @@ void AppearanceSettingsTab::chooseColor()
     connect(dialog, &ElaColorDialog::colorSelected, this, [this](const QColor& color) {
         QString error;
         if (!ThemeManager::instance().setThemeColor(color, &error))
-            ProfileEditUi::error(this, tr("主题色保存失败：%1").arg(error));
+            AppUi::error(this, tr("主题色保存失败：%1").arg(error));
     });
     dialog->show();
 }
@@ -142,7 +135,7 @@ void AppearanceSettingsTab::useSystemColor()
     const QColor color = QGuiApplication::palette().color(QPalette::Active, QPalette::Accent);
     QString error;
     if (!ThemeManager::instance().setThemeColor(color, &error))
-        ProfileEditUi::error(this, tr("主题色保存失败：%1").arg(error));
+        AppUi::error(this, tr("主题色保存失败：%1").arg(error));
 }
 
 void AppearanceSettingsTab::refreshMode()
@@ -157,7 +150,7 @@ void AppearanceSettingsTab::changeMode()
     QString error;
     if (!ThemeManager::instance().setThemeMode(mode, &error)) {
         refreshMode();
-        ProfileEditUi::error(this, tr("深浅模式保存失败：%1").arg(error));
+        AppUi::error(this, tr("深浅模式保存失败：%1").arg(error));
     }
 }
 
@@ -167,14 +160,11 @@ void AppearanceSettingsTab::refreshWindowEffect()
     const QSignalBlocker blocker(windowEffectCombo_);
     windowEffectCombo_->setCurrentIndex(windowEffectCombo_->findData(static_cast<int>(manager.windowEffect())));
     const QString reason = manager.windowEffectUnavailableReason(manager.windowEffect());
-    QString description = tr("设置应用窗口的背景效果，修改后立即生效并保存。");
-#ifdef Q_OS_WIN
-    if (manager.windowEffect() == AppearanceWindowEffect::ElaMica)
-        description = tr("使用当前桌面壁纸生成模糊背景，壁纸更换后自动刷新。读取失败时使用默认背景。");
-#endif
     windowEffectDescription_->setText(reason.isEmpty()
-        ? description : tr("%1 当前系统不支持已保存的效果，本次运行使用 Normal。").arg(reason));
-    windowEffectCombo_->setToolTip(reason);
+        ? QString() : tr("当前效果不可用，已使用 Normal。"));
+    windowEffectDescription_->setVisible(!reason.isEmpty());
+    windowEffectCombo_->setToolTip(!reason.isEmpty() ? reason
+        : windowEffectCombo_->currentData(Qt::ToolTipRole).toString());
 }
 
 void AppearanceSettingsTab::changeWindowEffect()
@@ -183,6 +173,6 @@ void AppearanceSettingsTab::changeWindowEffect()
     QString error;
     if (!ThemeManager::instance().setWindowEffect(effect, &error)) {
         refreshWindowEffect();
-        ProfileEditUi::error(this, tr("窗口效果设置失败：%1").arg(error));
+        AppUi::error(this, tr("窗口效果设置失败：%1").arg(error));
     }
 }

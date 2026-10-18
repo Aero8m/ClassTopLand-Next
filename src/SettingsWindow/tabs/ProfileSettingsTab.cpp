@@ -1,8 +1,9 @@
 #include "ProfileSettingsTab.h"
-#include "../../ProfileEditWindow/ProfileEditWidgets.h"
+#include "../../Ui/UiWidgets.h"
 #include "../../Core/ProfileManager/ProfileExchange.h"
 
 #include <ElaComboBox.h>
+#include <ElaFlowLayout.h>
 #include <ElaLineEdit.h>
 #include <ElaMessageBar.h>
 #include <ElaPushButton.h>
@@ -48,13 +49,14 @@ public:
 
 ProfileSettingsTab::ProfileSettingsTab(QWidget* parent) : ElaScrollPage(parent)
 {
-    using namespace ProfileEditUi;
-    auto* layout = page(this, tr("档案管理"));
+    using namespace AppUi;
+    auto* layout = page(this, tr("档案管理"), 24);
     auto* controls = card(layout);
-    controls->addWidget(text(tr("添加或删除档案，切换档案需要重启应用。其他档案需先切换后编辑。")));
-    auto* actions = new QHBoxLayout;
+    auto* actions = new ElaFlowLayout(0, 6, 6);
+    actions->setIsAnimation(false);
     add_ = button(tr("添加档案"), this, true);
     edit_ = button(tr("编辑当前档案"), this);
+    edit_->setToolTip(tr("其他档案需先切换后编辑"));
     switch_ = button(tr("切换并重启"), this);
     delete_ = button(tr("删除"), this);
     add_->setObjectName(QStringLiteral("addProfile"));
@@ -62,26 +64,26 @@ ProfileSettingsTab::ProfileSettingsTab(QWidget* parent) : ElaScrollPage(parent)
     switch_->setObjectName(QStringLiteral("switchProfile"));
     delete_->setObjectName(QStringLiteral("deleteProfile"));
     for (auto* action : {add_, edit_, switch_, delete_}) actions->addWidget(action);
-    actions->addStretch();
     controls->addLayout(actions);
     auto* exchangeActions = new QHBoxLayout;
     import_ = button(tr("导入档案"), this);
     export_ = button(tr("导出档案"), this);
+    import_->setToolTip(tr("支持原生 JSON、ClassTopLand tables.json 和 CSES；导入为新档案"));
+    export_->setToolTip(tr("导出选中档案已保存的内容"));
     import_->setObjectName(QStringLiteral("importProfile"));
     export_->setObjectName(QStringLiteral("exportProfile"));
     exchangeActions->addWidget(import_);
     exchangeActions->addWidget(export_);
     exchangeActions->addStretch();
     controls->addLayout(exchangeActions);
-    controls->addWidget(text(tr("支持原生 JSON 完整档案、ClassTopLand tables.json 常规课表和 CSES 课表。导入会创建新档案；导出使用选中档案的已保存内容。")));
     table_ = table(layout, {tr("档案名称"), tr("文件名"), tr("状态")}, model_);
     table_->setObjectName(QStringLiteral("profileList"));
     table_->setItemDelegate(new ProfileItemDelegate(table_));
     table_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Fixed);
     table_->horizontalHeader()->resizeSection(2, 136);
     table_->setAccessibleName(tr("档案列表"));
-    table_->setMinimumHeight(320);
-    status_ = text({});
+    table_->setMinimumHeight(220);
+    status_ = text({}, this, 12);
     status_->setObjectName(QStringLiteral("profileListStatus"));
     layout->addWidget(status_);
     layout->addStretch();
@@ -98,7 +100,7 @@ ProfileSettingsTab::ProfileSettingsTab(QWidget* parent) : ElaScrollPage(parent)
 
 int ProfileSettingsTab::selectedIndex() const
 {
-    const int index = ProfileEditUi::selected(table_);
+    const int index = AppUi::selected(table_);
     return index >= 0 && index < entries_.size() ? index : -1;
 }
 
@@ -115,17 +117,17 @@ void ProfileSettingsTab::refreshProfiles(const QString& selectedId)
         const auto& entry = entries_[i];
         QString state = entry.current ? tr("当前使用") : tr("可切换");
         if (!entry.isValid()) state = entry.current ? tr("当前使用 · 文件异常") : tr("文件异常");
-        ProfileEditUi::appendRow(model_, {entry.name, QFileInfo(entry.filePath).fileName(), state}, i);
+        AppUi::appendRow(model_, {entry.name, QFileInfo(entry.filePath).fileName(), state}, i);
         model_->item(i, 0)->setToolTip(entry.name + QLatin1Char('\n') + entry.filePath);
         if (!entry.isValid()) model_->item(i, 2)->setToolTip(entry.error);
         if (entry.id == selection) selectedRow = i;
         if (entry.current) currentRow = i;
     }
     if (selectedRow < 0) selectedRow = currentRow >= 0 ? currentRow : (entries_.isEmpty() ? -1 : 0);
-    if (selectedRow >= 0) ProfileEditUi::select(table_, selectedRow);
+    if (selectedRow >= 0) AppUi::select(table_, selectedRow);
     status_->setText(!error.isEmpty() ? tr("读取档案列表失败：%1").arg(error)
-                       : entries_.isEmpty() ? tr("暂无档案，可点击“添加档案”创建。")
-                                            : tr("共 %1 个档案。当前档案需先切换后删除；文件异常的档案无法切换。").arg(entries_.size()));
+                       : entries_.isEmpty() ? tr("暂无档案")
+                                            : tr("共 %1 个档案").arg(entries_.size()));
     updateActions();
 }
 
@@ -151,7 +153,7 @@ void ProfileSettingsTab::updateActions()
 
 void ProfileSettingsTab::showError(const QString& message)
 {
-    ProfileEditUi::error(this, message);
+    AppUi::error(this, message);
 }
 
 void ProfileSettingsTab::addProfile()
@@ -160,7 +162,7 @@ void ProfileSettingsTab::addProfile()
     {
         QScopedValueRollback<bool> guard(busy_, true);
         updateActions();
-        auto* dialog = new ProfileEditUi::FormDialog(this, tr("添加档案"), tr("创建"));
+        auto* dialog = new AppUi::FormDialog(this, tr("添加档案"), tr("创建"));
         auto* name = dialog->line(tr("档案名称"));
         name->setObjectName(QStringLiteral("newProfileName"));
         auto* mode = new ElaComboBox(dialog);
@@ -174,7 +176,7 @@ void ProfileSettingsTab::addProfile()
             ProfileManager::instance().createProfile(name->text(), mode->currentIndex() == 1, createdId, &error);
             return error;
         };
-        const bool confirmed = ProfileEditUi::run(dialog);
+        const bool confirmed = AppUi::run(dialog);
         // The dialog is retired after the nested event loop; clear stack captures.
         dialog->submit = {};
         if (confirmed) refreshProfiles(createdId);
@@ -189,7 +191,7 @@ void ProfileSettingsTab::deleteProfile()
     {
         QScopedValueRollback<bool> guard(busy_, true);
         updateActions();
-        if (ProfileEditUi::confirm(this, tr("删除档案"),
+        if (AppUi::confirm(this, tr("删除档案"),
                 tr("确定永久删除档案“%1”？\n文件：%2\n此操作无法撤销。")
                     .arg(entry.name, QFileInfo(entry.filePath).fileName()))) {
             QString error;
@@ -208,7 +210,7 @@ void ProfileSettingsTab::switchProfile()
     {
         QScopedValueRollback<bool> guard(busy_, true);
         updateActions();
-        if (ProfileEditUi::confirm(this, tr("切换档案"),
+        if (AppUi::confirm(this, tr("切换档案"),
                 tr("切换到档案“%1”需要立即重启应用。\n如有未保存更改，将先询问如何处理。\n确定切换并重启？").arg(entry.name)))
             emit profileSwitchRequested(entry.id);
     }
@@ -239,7 +241,7 @@ void ProfileSettingsTab::importProfile()
             if (!ProfileExchange::readImportFile(path, candidate, format, &warnings, &error)) {
                 showError(tr("导入失败：%1").arg(error)); return;
             }
-            auto* dialog = new ProfileEditUi::FormDialog(this, tr("导入档案"), tr("导入"));
+            auto* dialog = new AppUi::FormDialog(this, tr("导入档案"), tr("导入"));
             auto* name = dialog->line(tr("档案名称"), candidate.name);
             name->setObjectName(QStringLiteral("importProfileName"));
             const QString formatName = format == ProfileExchange::Format::NativeJson ? tr("原生 JSON 完整档案")
@@ -258,7 +260,7 @@ void ProfileSettingsTab::importProfile()
                 ProfileManager::instance().createProfile(candidate, createdId, &failure);
                 return failure;
             };
-            const bool confirmed = ProfileEditUi::run(dialog);
+            const bool confirmed = AppUi::run(dialog);
             dialog->submit = {};
             if (confirmed) {
                 refreshProfiles(createdId);
@@ -324,7 +326,7 @@ void ProfileSettingsTab::exportProfile()
             }
             if (tables) {
                 if (candidate.schedules.isEmpty()) { showError(tr("没有可导出的周课表。")); return; }
-                auto* dialog = new ProfileEditUi::FormDialog(this, tr("导出 ClassTopLand 课表"), tr("导出"));
+                auto* dialog = new AppUi::FormDialog(this, tr("导出 ClassTopLand 课表"), tr("导出"));
                 auto* weeks = new ElaComboBox(dialog);
                 weeks->setObjectName(QStringLiteral("exportTablesWeekSchedule"));
                 QHash<QString, int> nameCounts;
@@ -341,9 +343,10 @@ void ProfileSettingsTab::exportProfile()
                 dialog->field(tr("周课表"), weeks);
                 auto* details = new ElaScrollArea(dialog);
                 details->setWidgetResizable(true);
+                AppUi::enableTouchScrolling(details);
                 details->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
                 details->viewport()->setAutoFillBackground(false);
-                auto* notice = ProfileEditUi::text({}, details);
+                auto* notice = AppUi::text({}, details);
                 notice->setObjectName(QStringLiteral("exportTablesWarnings"));
                 notice->setMargin(8);
                 notice->setAlignment(Qt::AlignLeft | Qt::AlignTop);
@@ -363,7 +366,7 @@ void ProfileSettingsTab::exportProfile()
                 const auto previewConnection = connect(weeks, qOverload<int>(&ElaComboBox::currentIndexChanged), dialog, preview);
                 preview();
                 dialog->submit = [&] { return conversionError; };
-                const bool confirmed = ProfileEditUi::run(dialog);
+                const bool confirmed = AppUi::run(dialog);
                 dialog->submit = {};
                 disconnect(previewConnection);
                 if (!confirmed) return;
@@ -372,7 +375,7 @@ void ProfileSettingsTab::exportProfile()
             } else if (cses) {
                 QString message = tr("将导出整个档案的科目与日课表。\nCSES 不保存档案名称、周课表分组名称和 ID、时间线及当前周课表选择。完整备份请使用 JSON。");
                 if (!warnings.isEmpty()) message += QLatin1Char('\n') + warnings.join(QLatin1Char('\n'));
-                if (!ProfileEditUi::confirm(this, tr("导出 CSES 课表"), message)) return;
+                if (!AppUi::confirm(this, tr("导出 CSES 课表"), message)) return;
             }
             // Recheck after the confirmation's nested event loop.
             if (manager.isManagedExportPath(path)) { showError(tr("不能覆盖受管理的档案文件。")); return; }

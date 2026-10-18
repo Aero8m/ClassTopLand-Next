@@ -10,12 +10,19 @@ class ElaRollerPicker;
 class ElaScrollPage;
 class ElaTableView;
 class ElaText;
+class QAbstractScrollArea;
 class QStandardItemModel;
 class QVBoxLayout;
 
-namespace ProfileEditUi {
-QVBoxLayout* page(ElaScrollPage* page, const QString& title);
-QVBoxLayout* card(QVBoxLayout* layout, const QString& title = {});
+namespace AppUi {
+// Touch gestures only; mouse selection, editing and drag/drop remain available.
+void enableTouchScrolling(QAbstractScrollArea* area, Qt::Orientations directions = Qt::Vertical);
+// Let an interactive canvas handle touches without ancestor scrolling or tap buffering.
+void excludeFromTouchScrolling(QWidget* widget);
+QVBoxLayout* page(ElaScrollPage* page, const QString& title, int titleSize = 28);
+QVBoxLayout* card(QVBoxLayout* layout, const QString& title = {}, int titleSize = 18);
+// Settings section: a 16px heading above the card, separated by 8px.
+QVBoxLayout* section(QVBoxLayout* layout, const QString& title);
 ElaText* text(const QString& value, QWidget* parent = nullptr, int size = 14);
 ElaPushButton* button(const QString& title, QWidget* parent = nullptr, bool primary = false);
 void primary(ElaPushButton* button);

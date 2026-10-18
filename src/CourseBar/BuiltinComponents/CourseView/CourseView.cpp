@@ -1,27 +1,51 @@
 #include "CourseView.h"
+#include "../../CourseBarLabel.h"
 
-#include "../../../Core/ConfigManager/ConfigManager.h"
 #include "../../../Core/Logger/Logger.h"
 #include "../../../Core/ThemeManager/ThemeManager.h"
 
-#include <QFontMetrics>
-#include <QHBoxLayout>
 #include <QLabel>
+#include <QPainter>
+#include <QProgressBar>
 #include <QResizeEvent>
 #include <QStackedLayout>
 
 #include <utility>
 
-namespace {
-QString timeText(qint64 seconds)
+// Keep QProgressBar's value/range semantics, with the remaining span centered.
+class CenteredProgressBar final : public QProgressBar
 {
-    seconds = qMax<qint64>(0, seconds);
-    return QStringLiteral("%1:%2:%3")
-        .arg(seconds / 3600, 2, 10, QLatin1Char('0'))
-        .arg(seconds / 60 % 60, 2, 10, QLatin1Char('0'))
-        .arg(seconds % 60, 2, 10, QLatin1Char('0'));
-}
-} // namespace
+public:
+    explicit CenteredProgressBar(QWidget* parent) : QProgressBar(parent)
+    {
+        // The translucent track needs the parent's background painted first.
+        setAttribute(Qt::WA_OpaquePaintEvent, false);
+        setAutoFillBackground(false);
+    }
+
+    void setThemeColor(const QColor& color)
+    {
+        color_ = color;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override
+    {
+        QPainter painter(this);
+        QColor track = color_;
+        track.setAlpha(115);
+        painter.fillRect(rect(), track);
+        if (maximum() <= minimum() || value() <= minimum()) return;
+        const double remaining = qBound(0.0,
+            (double(value()) - minimum()) / (double(maximum()) - minimum()), 1.0);
+        const int span = qRound(width() * remaining);
+        painter.fillRect(QRect((width() - span) / 2, 0, span, height()), color_);
+    }
+
+private:
+    QColor color_;
+};
 
 // Presentation only: the service owns all course and time calculations.
 class CourseBlock final : public QWidget
@@ -29,70 +53,73 @@ class CourseBlock final : public QWidget
 public:
     explicit CourseBlock(QWidget* parent) : QWidget(parent)
     {
-        name_ = new QLabel(this);
+        name_ = new CourseBarLabel(this);
         name_->setObjectName(QStringLiteral("courseName"));
-        time_ = new QLabel(this);
-        time_->setObjectName(QStringLiteral("remainingTime"));
-        for (QLabel* label : {name_, time_}) {
-            label->setTextFormat(Qt::PlainText);
-            label->setStyleSheet(QStringLiteral("color: black; background: transparent;"));
-            label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-        }
-        time_->hide();
-
-        underline_ = new QWidget(this);
-        underline_->setObjectName(QStringLiteral("activeUnderline"));
+        name_->setTextFormat(Qt::PlainText);
+        name_->setAlignment(Qt::AlignCenter);
+        name_->setStyleSheet(QStringLiteral("color: black; background: transparent;"));
+        name_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        progress_ = new CenteredProgressBar(this);
+        progress_->setObjectName(QStringLiteral("remainingProgress"));
+        progress_->setRange(0, 10000);
+        progress_->setValue(10000);
+        progress_->setTextVisible(false);
         setPresentation({}, false);
     }
 
     void setPresentation(const QString& name, bool active)
     {
         name_->setText(name);
-        active_ = active;
-        time_->setVisible(active);
-        refreshThemeColor();
+        progress_->setVisible(active);
         setProperty("active", active);
+        refreshThemeColor();
         updateWidth();
     }
 
     void refreshThemeColor()
     {
-        underline_->setStyleSheet(active_
-            ? QStringLiteral("background: %1;").arg(ThemeManager::instance().themeColor().name(QColor::HexRgb))
-            : QStringLiteral("background: transparent;"));
+        progress_->setThemeColor(ThemeManager::instance().themeColor());
+        update();
     }
 
-    void setRemaining(qint64 seconds)
+    void setProgress(const CourseRefreshService::State& state)
     {
-        const QString text = timeText(seconds);
-        if (time_->text() != text) time_->setText(text);
-        updateTimeWidth();
+        const int value = state.phase == CourseRefreshService::Phase::BeforeFirstClass ? 10000 :
+            (state.durationSeconds > 0 ? qRound(qBound(0.0,
+                double(state.remainingSeconds) / double(state.durationSeconds), 1.0) * 10000) : 0);
+        progress_->setValue(value);
+    }
+
+    void setMetrics(const CourseBarMetrics& metrics)
+    {
+        metrics_ = metrics;
+        setFixedHeight(metrics.height);
+        name_->setFont(metrics.font());
+        progress_->setFixedHeight(metrics.progressHeight());
         updateWidth();
     }
 
-    void setTrailing(bool trailing)
+    int textWidth() const
     {
-        trailing_ = trailing;
-        updateWidth();
+        return metrics_.textWidth(name_->text(), name_->font());
     }
 
-    void setMetrics(int height)
+    void setHorizontalExtension(int left, int right)
     {
-        height_ = height;
-        setFixedHeight(height);
-        QFont nameFont(QStringLiteral("Microsoft YaHei UI"));
-        nameFont.setPixelSize(qMax(1, qRound(height * 0.4)));
-        name_->setFont(nameFont);
-        QFont timeFont = nameFont;
-        timeFont.setPixelSize(qMax(1, qRound(nameFont.pixelSize() * 0.7)));
-        time_->setFont(timeFont);
-        padding_ = qMax(1, qRound(height * 0.12));
-        underline_->setFixedHeight(qMax(2, qRound(height * 4.0 / 49.0)));
-        updateTimeWidth();
+        leftExtension_ = left;
+        rightExtension_ = right;
         updateWidth();
     }
 
 private:
+    void paintEvent(QPaintEvent*) override
+    {
+        if (!property("active").toBool()) return;
+        const QColor background(200, 200, 200, 77);
+        QPainter painter(this);
+        painter.fillRect(rect(), background);
+    }
+
     void resizeEvent(QResizeEvent* event) override
     {
         QWidget::resizeEvent(event);
@@ -101,49 +128,24 @@ private:
 
     void layoutText()
     {
-        const QFontMetrics nameMetrics(name_->font());
-        const QFontMetrics timeMetrics(time_->font());
-        const int ascent = qMax(nameMetrics.ascent(), active_ ? timeMetrics.ascent() : 0);
-        const int descent = qMax(nameMetrics.descent(), active_ ? timeMetrics.descent() : 0);
-        const int baseline = (height() - underline_->height() - ascent - descent) / 2 + ascent;
-        const int nameWidth = nameMetrics.horizontalAdvance(name_->text()) + 2;
-        name_->setGeometry(padding_, baseline - nameMetrics.ascent(), nameWidth, nameMetrics.height());
-        time_->setGeometry(padding_ + nameWidth + padding_, baseline - timeMetrics.ascent(),
-                           time_->width(), timeMetrics.height());
-        underline_->setGeometry(0, height() - underline_->height(), width(), underline_->height());
-    }
-
-    void updateTimeWidth()
-    {
-        // Reserve the widest digits so each ticking second keeps the same width.
-        const QFontMetrics metrics(time_->font());
-        int digitWidth = 0;
-        for (char digit = '0'; digit <= '9'; ++digit)
-            digitWidth = qMax(digitWidth, metrics.horizontalAdvance(QChar::fromLatin1(digit)));
-        int width = 2;
-        for (const QChar character : time_->text())
-            width += character.isDigit() ? digitWidth : metrics.horizontalAdvance(character);
-        time_->setFixedWidth(width);
+        // Keep the text in place while the decoration extends into existing gaps.
+        name_->setGeometry(leftExtension_, 0, textWidth(), height());
+        progress_->setGeometry(0, height() - progress_->height(), width(), progress_->height());
     }
 
     void updateWidth()
     {
-        int width = QFontMetrics(name_->font()).horizontalAdvance(name_->text()) +
-                    padding_ + (trailing_ ? 0 : padding_) + 2;
-        if (active_) width += padding_ + time_->width();
-        // The bar already supplies its 20px right margin. Do not add an empty
-        // square cell or internal right padding after the final course label.
-        setFixedWidth(trailing_ ? width : qMax(height_, width));
+        const int margin = metrics_.textGuard();
+        name_->setContentsMargins(margin, 0, margin, 0);
+        setFixedWidth(textWidth() + leftExtension_ + rightExtension_);
         layoutText();
     }
 
     QLabel* name_;
-    QLabel* time_;
-    QWidget* underline_;
-    int padding_ = 6;
-    int height_ = 49;
-    bool active_ = false;
-    bool trailing_ = false;
+    CenteredProgressBar* progress_;
+    CourseBarMetrics metrics_;
+    int leftExtension_ = 0;
+    int rightExtension_ = 0;
 };
 
 CourseView::CourseView(QWidget* parent) : CourseView(CourseRefreshService::Clock{}, parent)
@@ -154,21 +156,17 @@ CourseView::CourseView(CourseRefreshService::Clock clock, QWidget* parent)
     : ICourseBarComponent(parent)
 {
     setObjectName(QStringLiteral("courseView"));
-    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Ignored);
-    componentHeight_ = qMax(1, ConfigManager::instance().config().courseBarConfig.height);
     pages_ = new QStackedLayout(this);
     pages_->setContentsMargins(0, 0, 0, 0);
     pages_->setSizeConstraint(QLayout::SetNoConstraint);
 
     content_ = new QWidget(this);
     content_->setObjectName(QStringLiteral("courseList"));
-    courseLayout_ = new QHBoxLayout(content_);
-    courseLayout_->setContentsMargins(0, 0, 0, 0);
-    courseLayout_->setSizeConstraint(QLayout::SetNoConstraint);
     content_->setAutoFillBackground(false);
     pages_->addWidget(content_);
 
-    status_ = new QLabel(tr("正在加载课表…"), this);
+    status_ = new CourseBarLabel(this);
+    status_->setText(tr("正在加载课表…"));
     status_->setObjectName(QStringLiteral("courseStatus"));
     status_->setAlignment(Qt::AlignCenter);
     status_->setTextFormat(Qt::PlainText);
@@ -179,12 +177,7 @@ CourseView::CourseView(CourseRefreshService::Clock clock, QWidget* parent)
     breakBlock_ = new CourseBlock(content_);
     breakBlock_->setObjectName(QStringLiteral("breakBlock"));
     breakBlock_->hide();
-    compactContent_ = new QWidget(this);
-    compactContent_->setObjectName(QStringLiteral("compactCourse"));
-    compactBlock_ = new CourseBlock(compactContent_);
-    compactBlock_->setTrailing(true);
-    pages_->addWidget(compactContent_);
-    updateMetrics(componentHeight_);
+    updateMetrics();
     connect(&ThemeManager::instance(), &ThemeManager::themeColorChanged,
             this, &CourseView::refreshThemeColor);
 
@@ -197,14 +190,13 @@ CourseView::CourseView(CourseRefreshService::Clock clock, QWidget* parent)
 
 QSize CourseView::sizeHint() const
 {
-    return QSize(preferredWidth_, componentHeight_);
+    return QSize(preferredWidth_, metrics().height);
 }
 
 void CourseView::refreshThemeColor()
 {
     for (CourseBlock* block : blocks_) block->refreshThemeColor();
     breakBlock_->refreshThemeColor();
-    compactBlock_->refreshThemeColor();
 }
 
 QSize CourseView::minimumSizeHint() const
@@ -212,33 +204,9 @@ QSize CourseView::minimumSizeHint() const
     return QSize(1, 0);
 }
 
-void CourseView::setCompactMode(bool compact)
-{
-    if (compactMode_ == compact) return;
-    compactMode_ = compact;
-    updateDisplayPage();
-    updateContentSize();
-}
-
-bool CourseView::hasCompactContent() const noexcept
-{
-    return hasVisualState_ && !showingStatus_ && activeBlock_;
-}
-
-QSize CourseView::expandedSizeHint() const
-{
-    return QSize(expandedWidth_, componentHeight_);
-}
-
-QSize CourseView::compactSizeHint() const
-{
-    return QSize(compactWidth_, componentHeight_);
-}
-
 void CourseView::updateDisplayPage()
 {
-    pages_->setCurrentWidget(compactMode_ ? compactContent_ :
-        (showingStatus_ ? static_cast<QWidget*>(status_) : content_));
+    pages_->setCurrentWidget(showingStatus_ ? static_cast<QWidget*>(status_) : content_);
 }
 
 QString CourseView::shortName(const QString& subject) const
@@ -254,7 +222,6 @@ void CourseView::applyTable(const CourseRefreshService::TableSnapshot& table)
 {
     activeBlock_ = nullptr;
     hasVisualState_ = false;
-    courseLayout_->removeWidget(breakBlock_);
     breakBlock_->hide();
     qDeleteAll(blocks_);
     blocks_.clear();
@@ -263,10 +230,8 @@ void CourseView::applyTable(const CourseRefreshService::TableSnapshot& table)
         for (qsizetype i = 0; i < table.classes.size(); ++i) {
             auto* block = new CourseBlock(content_);
             block->setObjectName(QStringLiteral("courseBlock_%1").arg(i));
-            block->setTrailing(i + 1 == table.classes.size());
-            block->setMetrics(componentHeight_);
+            block->setMetrics(metrics());
             block->setPresentation(shortName(table.classes[i].subject), false);
-            courseLayout_->addWidget(block);
             block->show();
             blocks_.append(block);
         }
@@ -286,7 +251,6 @@ void CourseView::applyState(const CourseRefreshService::State& state)
                             state.nextClassIndex != visualState_.nextClassIndex;
     if (transition) {
         activeBlock_ = nullptr;
-        courseLayout_->removeWidget(breakBlock_);
         breakBlock_->hide();
         for (qsizetype i = 0; i < blocks_.size(); ++i) {
             const bool current = state.phase == Phase::InClass && state.currentClassIndex == i;
@@ -304,7 +268,6 @@ void CourseView::applyState(const CourseRefreshService::State& state)
         case Phase::Break:
             if (state.nextClassIndex > 0 && state.nextClassIndex < blocks_.size()) {
                 breakBlock_->setPresentation(tr("课间"), true);
-                courseLayout_->insertWidget(state.nextClassIndex, breakBlock_);
                 breakBlock_->show();
                 activeBlock_ = breakBlock_;
             }
@@ -319,16 +282,7 @@ void CourseView::applyState(const CourseRefreshService::State& state)
     }
     visualState_ = state;
     hasVisualState_ = true;
-    if (activeBlock_) activeBlock_->setRemaining(state.remainingSeconds);
-    if (hasCompactContent()) {
-        if (transition) {
-            const int index = state.phase == Phase::BeforeFirstClass
-                ? state.nextClassIndex : state.currentClassIndex;
-            compactBlock_->setPresentation(state.phase == Phase::Break
-                ? tr("课间") : table_.classes[index].subject, true);
-        }
-        compactBlock_->setRemaining(state.remainingSeconds);
-    }
+    if (activeBlock_) activeBlock_->setProgress(state);
     updateDisplayPage();
     updateContentSize();
 }
@@ -339,52 +293,45 @@ void CourseView::logError(const QString& message)
     Logger::instance().flush();
 }
 
-void CourseView::updateMetrics(int height)
+void CourseView::updateMetrics()
 {
-    componentHeight_ = qMax(1, height);
-    QFont font(QStringLiteral("Microsoft YaHei UI"));
-    font.setPixelSize(qMax(1, qRound(componentHeight_ * 0.4)));
-    status_->setFont(font);
-    courseLayout_->setSpacing(qMax(1, qRound(componentHeight_ * 0.08)));
-    for (CourseBlock* block : blocks_) block->setMetrics(componentHeight_);
-    breakBlock_->setMetrics(componentHeight_);
-    compactBlock_->setMetrics(componentHeight_);
+    status_->setFont(metrics().font());
+    status_->setContentsMargins(metrics().textGuard(), 0, metrics().textGuard(), 0);
+    for (CourseBlock* block : blocks_) block->setMetrics(metrics());
+    breakBlock_->setMetrics(metrics());
     updateContentSize();
 }
 
 void CourseView::updateContentSize()
 {
-    int count = 0;
-    int width = 0;
-    for (CourseBlock* block : blocks_) {
-        width += block->width();
-        ++count;
-    }
-    if (!breakBlock_->isHidden()) {
-        width += breakBlock_->width();
-        ++count;
-    }
-    width += qMax(0, count - 1) * courseLayout_->spacing();
-    content_->setFixedSize(qMax(1, width), componentHeight_);
-    courseLayout_->activate();
-    const int expanded = showingStatus_
-        ? QFontMetrics(status_->font()).horizontalAdvance(status_->text()) + componentHeight_ / 2
-        : qMax(1, width);
-    const int compact = hasCompactContent() ? compactBlock_->width() : 0;
-    compactBlock_->setVisible(hasCompactContent());
-    compactContent_->setFixedSize(qMax(1, compact), componentHeight_);
-    const int preferred = compactMode_ ? compact : expanded;
-    if (preferredWidth_ != preferred || expandedWidth_ != expanded || compactWidth_ != compact) {
-        preferredWidth_ = preferred;
-        expandedWidth_ = expanded;
-        compactWidth_ = compact;
-        updateGeometry();
-        emit preferredSizeChanged();
-    }
-}
+    QList<CourseBlock*> visibleBlocks = blocks_;
+    if (!breakBlock_->isHidden())
+        visibleBlocks.insert(visualState_.nextClassIndex, breakBlock_);
 
-void CourseView::resizeEvent(QResizeEvent* event)
-{
-    ICourseBarComponent::resizeEvent(event);
-    if (height() > 0 && componentHeight_ != height()) updateMetrics(height());
+    const int spacing = metrics().courseSpacing();
+    const int activeSpacing = qRound(spacing * 1.2);
+    // Borrow 60% of each adjacent gap, reserving space at exposed active edges.
+    const int extension = qRound(activeSpacing * 0.6);
+    int width = !visibleBlocks.isEmpty() && visibleBlocks.first() == activeBlock_ ? extension : 0;
+    for (qsizetype i = 0; i < visibleBlocks.size(); ++i) {
+        CourseBlock* block = visibleBlocks[i];
+        const bool active = block == activeBlock_;
+        const int left = active ? extension : 0;
+        const int right = left;
+        block->setHorizontalExtension(left, right);
+        block->move(width - left, 0);
+        width += block->textWidth();
+        if (i + 1 < visibleBlocks.size())
+            width += active || visibleBlocks[i + 1] == activeBlock_ ? activeSpacing : spacing;
+    }
+    if (!visibleBlocks.isEmpty() && visibleBlocks.last() == activeBlock_)
+        width += extension;
+    content_->setFixedSize(qMax(1, width), metrics().height);
+    const int preferred = showingStatus_
+        ? metrics().textWidth(status_->text(), status_->font())
+        : qMax(1, width);
+    if (preferredWidth_ != preferred) {
+        preferredWidth_ = preferred;
+        notifyPreferredSizeChanged();
+    }
 }

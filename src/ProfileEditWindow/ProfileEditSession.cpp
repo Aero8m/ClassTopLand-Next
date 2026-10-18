@@ -12,7 +12,8 @@ bool fail(QString* error, const QString& text)
 
 bool equal(const Profile& a, const Profile& b)
 {
-    if (a.name != b.name || a.activeWeekScheduleId != b.activeWeekScheduleId || a.subjects.size() != b.subjects.size() ||
+    if (a.name != b.name || a.semesterStartDate != b.semesterStartDate ||
+        a.activeWeekScheduleId != b.activeWeekScheduleId || a.subjects.size() != b.subjects.size() ||
         a.timeLines.size() != b.timeLines.size() || a.schedules.size() != b.schedules.size() ||
         a.dateOverrides.size() != b.dateOverrides.size()) return false;
     for (qsizetype i = 0; i < a.dateOverrides.size(); ++i) {
@@ -225,7 +226,8 @@ QStringList ProfileEditSession::warnings() const
             }
         }
     }
-    if (oddEven) result.append(tr("单双周自动运行需要第一周日期配置，当前尚未提供。"));
+    if (oddEven && !draft_.semesterStartDate.isValid())
+        result.append(tr("单双周自动运行需要在“基本信息”中设置学期第一天。"));
     if (conflict) result.append(tr("多个周课表适用于同一星期，课程栏自动选择可能冲突。"));
     if (unknown) result.append(tr("部分课程使用未定义科目名称，课程栏将使用原名称。"));
     return result;

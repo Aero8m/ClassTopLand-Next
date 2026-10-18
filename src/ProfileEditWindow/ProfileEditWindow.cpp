@@ -1,6 +1,6 @@
 #include "ProfileEditWindow.h"
 #include "ProfileEditSession.h"
-#include "ProfileEditWidgets.h"
+#include "../Ui/UiWidgets.h"
 #include "tabs/ProfileInfoTab.h"
 #include "tabs/SubjectsTab.h"
 #include "tabs/TimeLinesTab.h"
@@ -26,11 +26,12 @@ ProfileEditWindow::~ProfileEditWindow() = default;
 
 void ProfileEditWindow::initUI()
 {
-    using namespace ProfileEditUi;
+    using namespace AppUi;
     setWindowTitle(tr("档案编辑"));
-    resize(1100, 760);
-    setMinimumSize(900, 620);
-    setNavigationBarWidth(220);
+    resize(850, 550);
+    setMinimumSize(850, 550);
+    setNavigationBarWidth(180);
+    setNavigationBarDisplayMode(ElaNavigationType::Maximal);
     setUserInfoCardVisible(false);
     setIsAllowPageOpenInNewWindow(false);
     setWindowButtonFlag(ElaAppBarType::StayTopButtonHint, false);
@@ -49,8 +50,8 @@ void ProfileEditWindow::initUI()
     addPageNode(tr("课表管理"), schedules_, ElaIconType::CalendarDays);
     auto* footer = new ElaStatusBar(this);
     footer->setSizeGripEnabled(false);
-    footer->setFixedHeight(72);
-    footer->setContentsMargins(20, 8, 16, 8);
+    footer->setFixedHeight(64);
+    footer->setContentsMargins(20, 4, 16, 4);
     state_ = text({}, footer);
     save_ = button(tr("保存"), footer, true);
     discard_ = button(tr("放弃更改"), footer);
@@ -62,7 +63,7 @@ void ProfileEditWindow::initUI()
     setStatusBar(footer);
     connect(save_, &ElaPushButton::clicked, this, [this] { saveProfile(); });
     connect(discard_, &ElaPushButton::clicked, this, [this] {
-        if (ProfileEditUi::confirm(this, tr("放弃更改"), tr("确定放弃所有未保存的更改？"))) session_->discard();
+        if (AppUi::confirm(this, tr("放弃更改"), tr("确定放弃所有未保存的更改？"))) session_->discard();
     });
     auto* shortcut = new QShortcut(QKeySequence::Save, this);
     connect(shortcut, &QShortcut::activated, this, [this] { if (!resolvingClose_) saveProfile(); });
@@ -94,13 +95,13 @@ bool ProfileEditWindow::saveProfile()
         case ProfileEditSession::Page::TimeLines: timeLines_->focusItem(failure.item, failure.row); break;
         case ProfileEditSession::Page::Schedules: schedules_->focusItem(failure.item, failure.weekday, failure.row); break;
         }
-        ProfileEditUi::error(this, failure.message);
+        AppUi::error(this, failure.message);
         return false;
     }
     QString error;
     QList<QDate> canceled;
     if (!ProfileManager::instance().commit(session_->draft(), &error, &canceled)) {
-        ProfileEditUi::error(this, tr("保存失败：%1").arg(error)); return false;
+        AppUi::error(this, tr("保存失败：%1").arg(error)); return false;
     }
     session_->reset(ProfileManager::instance().profile());
     emit profileSaved();
@@ -119,10 +120,10 @@ bool ProfileEditWindow::prepareToClose()
     if (resolvingClose_) return false;
     if (!session_->isDirty()) return true;
     QScopedValueRollback<bool> guard(resolvingClose_, true);
-    switch (ProfileEditUi::unsaved(this)) {
-    case ProfileEditUi::UnsavedChoice::Cancel: return false;
-    case ProfileEditUi::UnsavedChoice::Discard: session_->discard(); return true;
-    case ProfileEditUi::UnsavedChoice::Save: return saveProfile();
+    switch (AppUi::unsaved(this)) {
+    case AppUi::UnsavedChoice::Cancel: return false;
+    case AppUi::UnsavedChoice::Discard: session_->discard(); return true;
+    case AppUi::UnsavedChoice::Save: return saveProfile();
     }
     return false;
 }

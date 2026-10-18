@@ -1,10 +1,12 @@
 #include "AppComposer.h"
 #include "../../TaskbarTrayMenu/TaskbarTrayMenu.h"
 #include "../../SettingsWindow/SettingsWindow.h"
+#include "../../DesktopCountdown/DesktopCountdown.h"
 #include "../../ProfileEditWindow/ProfileEditWindow.h"
 #include "../../ProfileEditWindow/ProfileEditSession.h"
 #include "../../ScheduleAdjustments/DateScheduleWidgets.h"
 #include "../ThemeManager/ThemeManager.h"
+#include "../WindowInterception/WindowInterceptionService.h"
 #include "../../Utils/UiAccess/UiAccess.h"
 
 #include <QApplication>
@@ -78,8 +80,15 @@ bool AppComposer::initInstances()
     if (createProfile && !ProfileManager::instance().save(&error)) {
         return reportStartupError(QStringLiteral("默认档案保存失败：%1\n%2").arg(profilePath, error));
     }
+    windowInterception_ = std::make_unique<WindowInterceptionService>();
+    connect(windowInterception_.get(), &WindowInterceptionService::errorOccurred, this, [](const QString& message) {
+        Logger::instance().log(Logger::Level::Warning, message);
+        Logger::instance().flush();
+    });
+    if (windowInterception_->supported()) windowInterception_->start();
     // init course bar
     courseBar = std::make_unique<CourseBar>();
+    desktopCountdown_ = std::make_unique<DesktopCountdown>();
     trayMenu_ = std::make_unique<TaskbarTrayMenu>();
     trayMenu_->setExitGuard([this](int exitCode) { return prepareToExit(exitCode); });
     connect(trayMenu_.get(), &TaskbarTrayMenu::exitAccepted, this, [this] {
@@ -130,9 +139,11 @@ void AppComposer::dropInstances()
     swapWindow_.reset();
     rescheduleWindow_.reset();
     settingsWindow_.reset();
+    windowInterception_.reset();
     profileEditorWindow_.reset();
     trayMenu_.reset();
     courseBar.reset();
+    desktopCountdown_.reset();
     QString error;
     if (!ConfigManager::instance().save(&error))
         Logger::instance().log(Logger::Level::Error, QStringLiteral("配置保存失败：%1").arg(error));
@@ -154,13 +165,15 @@ void AppComposer::showSettingsWindow()
     // A click queued by a panel that is already being torn down must not revive the window.
     if (!initialized_) return;
     if (!settingsWindow_) {
-        settingsWindow_ = std::make_unique<SettingsWindow>();
+        settingsWindow_ = std::make_unique<SettingsWindow>(nullptr, windowInterception_.get());
         connect(settingsWindow_.get(), &SettingsWindow::profileEditorRequested,
                 this, &AppComposer::showProfileEditorWindow);
         connect(settingsWindow_.get(), &SettingsWindow::profileSwitchRequested,
                 this, &AppComposer::switchProfile);
         connect(settingsWindow_.get(), &SettingsWindow::courseBarConfigChanged,
                 courseBar.get(), &CourseBar::reloadConfig);
+        connect(settingsWindow_.get(), &SettingsWindow::desktopCountdownConfigChanged,
+                desktopCountdown_.get(), &DesktopCountdown::reloadConfig);
         connect(settingsWindow_.get(), &SettingsWindow::uiAccessChangeRequested,
                 this, &AppComposer::changeUiAccess);
     }
@@ -259,10 +272,11 @@ void AppComposer::showSwapWindow()
     if (!swapWindow_) {
         swapWindow_ = std::make_unique<SwapClassesWindow>();
         connect(swapWindow_.get(), &SwapClassesWindow::swapRequested, this,
-                [this](const QDate& date, const QString& id, int first, int second) {
+                [this](const QDate& firstDate, const QString& firstId, int first,
+                       const QDate& secondDate, const QString& secondId, int second) {
             if (!initialized_) return;
             QString error;
-            if (!ProfileManager::instance().swapDateClasses(date, id, first, second, &error)) {
+            if (!ProfileManager::instance().swapDateClasses(firstDate, firstId, first, secondDate, secondId, second, &error)) {
                 swapWindow_->showError(tr("换课保存失败：%1").arg(error)); return;
             }
             syncDateAdjustments();
@@ -281,8 +295,8 @@ void AppComposer::showSwapWindow()
         auto* screen = trayMenu_ ? trayMenu_->screen() : QGuiApplication::primaryScreen();
         if (screen) {
             const auto available = screen->availableGeometry().size();
-            swapWindow_->setMinimumSize(qMin(430, available.width()), qMin(380, available.height()));
-            swapWindow_->resize(qMin(620, available.width()), qMin(560, available.height()));
+            swapWindow_->setMinimumSize(qMin(680, available.width()), qMin(460, available.height()));
+            swapWindow_->resize(qMin(960, available.width()), qMin(620, available.height()));
         }
         centerOnPanelScreen(swapWindow_.get()); swapWindowPositioned_ = true;
     }
