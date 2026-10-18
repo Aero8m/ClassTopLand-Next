@@ -104,6 +104,7 @@ void repairScheduleIds(Profile& profile)
 
 bool validate(const Profile& profile, QString* error)
 {
+    if (!Reminders::validate(profile.reminderRules, error)) return false;
     for (const Subject& subject : profile.subjects) {
         if (subject.name.trimmed().isEmpty())
             return fail(error, QStringLiteral("Subject name cannot be empty"));
@@ -161,6 +162,7 @@ QJsonObject toJson(const Profile& profile)
 {
     QJsonObject data;
     data.insert(QStringLiteral("name"), profile.name);
+    data.insert(QStringLiteral("reminderRules"), Reminders::toJson(profile.reminderRules));
     if (profile.semesterStartDate.isValid())
         data.insert(QStringLiteral("semesterStartDate"), profile.semesterStartDate.toString(Qt::ISODate));
     data.insert(QStringLiteral("activeWeekScheduleId"), profile.activeWeekScheduleId);
@@ -222,6 +224,7 @@ bool fromJson(const QJsonObject& root, Profile& profile, QString* error)
     const QJsonValue profileValue = root.value(QStringLiteral("profile"));
     if (!profileValue.isObject()) return fail(error, QStringLiteral("profile must be an object"));
     const QJsonObject data = profileValue.toObject();
+    if (!Reminders::fromJson(data.value(QStringLiteral("reminderRules")), profile.reminderRules, error)) return false;
     if (!stringField(data, QStringLiteral("name"), profile.name, error, QStringLiteral("profile"))) return false;
     const auto semesterStart = data.value(QStringLiteral("semesterStartDate"));
     if (!semesterStart.isUndefined()) {
@@ -442,6 +445,8 @@ bool toTables(const Profile& profile, const QString& weekId, QByteArray& content
         messages.append(QStringLiteral("所选课表的单双周规则无法保存，导出后按每周课表使用。"));
     if (profile.semesterStartDate.isValid())
         messages.append(QStringLiteral("学期第一天不会导出；完整备份请使用原生 JSON。"));
+    if (!profile.reminderRules.isEmpty())
+        messages.append(QStringLiteral("自定义提醒不会导出；完整备份请使用原生 JSON。"));
     if (!profile.dateOverrides.isEmpty())
         messages.append(QStringLiteral("指定日期的调休和换课安排不会导出；完整备份请使用原生 JSON。"));
     QJsonObject root;
@@ -777,6 +782,8 @@ bool ProfileExchange::serialize(const Profile& profile, Format format, QByteArra
     QStringList messages;
     if (profile.semesterStartDate.isValid())
         messages.append(QStringLiteral("学期第一天不会导出到 CSES，导入后需重新设置；完整备份请使用原生 JSON。"));
+    if (!profile.reminderRules.isEmpty())
+        messages.append(QStringLiteral("自定义提醒不会导出；完整备份请使用原生 JSON。"));
     if (!profile.dateOverrides.isEmpty())
         messages.append(QStringLiteral("指定日期的调休和换课安排不会导出；完整备份请使用原生 JSON。"));
     exchangeWarnings(candidate, messages, true);

@@ -6,6 +6,7 @@
 #include "tabs/AppearanceSettingsTab.h"
 #include "tabs/CourseBarSettingsTab.h"
 #include "tabs/DesktopCountdownSettingsTab.h"
+#include "tabs/ReminderSettingsTab.h"
 #include "tabs/WindowInterceptionSettingsTab.h"
 
 #include <QScreen>
@@ -54,6 +55,9 @@ void SettingsWindow::initUI()
             this, &SettingsWindow::uiAccessChangeRequested);
 
     auto* desktopCountdownTab = new DesktopCountdownSettingsTab(this);
+    auto* reminderTab = new ReminderSettingsTab(this);
+    addPageNode(QStringLiteral("提醒"), reminderTab, ElaIconType::Bell);
+    connect(reminderTab, &ReminderSettingsTab::previewRequested, this, &SettingsWindow::reminderPreviewRequested);
     addPageNode(QStringLiteral("桌面倒计时"), desktopCountdownTab, ElaIconType::Clock);
     connect(desktopCountdownTab, &DesktopCountdownSettingsTab::configChanged,
             this, &SettingsWindow::desktopCountdownConfigChanged);

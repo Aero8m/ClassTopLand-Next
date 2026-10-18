@@ -11,6 +11,8 @@ bool validRange(const QTime &a, const QTime &b)
 } // namespace
 ProfileValidation::ValidationError ProfileValidation::validate(const Profile &profile)
 {
+    QString reminderError;
+    if (!Reminders::validate(profile.reminderRules, &reminderError)) return {reminderError, Page::Info};
     if (profile.name.trimmed().isEmpty())
         return {QObject::tr("档案名称不能为空"), Page::Info};
     QSet<QString> names;

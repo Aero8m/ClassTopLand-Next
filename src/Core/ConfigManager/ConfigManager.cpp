@@ -59,6 +59,7 @@ QString windowEffectText(AppearanceWindowEffect effect)
 
 bool validate(const Config& config, QString* error)
 {
+    if (!Reminders::validate(config.reminderConfig, error)) return false;
     const auto& countdown = config.desktopCountdownConfig;
     if (countdown.enable && !countdown.targetDateTime.isValid())
         return fail(error, QStringLiteral("config.desktopCountdownConfig.targetDateTime must be valid when enabled"));
@@ -153,6 +154,7 @@ QJsonObject toJson(const Config& config)
             {QStringLiteral("approvedVersion"), it->approvedVersion}, {QStringLiteral("fault"), it->fault}});
     return {{QStringLiteral("version"), kFormatVersion},
             {QStringLiteral("config"), QJsonObject{{QStringLiteral("profileName"), config.profileName},
+                                                   {QStringLiteral("reminderConfig"), Reminders::toJson(config.reminderConfig)},
                                                    {QStringLiteral("pluginConfig"), QJsonObject{{QStringLiteral("plugins"), plugins}, {QStringLiteral("recoveryNextStart"), config.pluginConfig.recoveryNextStart}}},
                                                    {QStringLiteral("desktopCountdownConfig"), desktopCountdown},
                                                    {QStringLiteral("courseBarConfig"), courseBar},
@@ -169,6 +171,7 @@ bool fromJson(const QJsonObject& root, Config& config, QString* error)
     const QJsonValue configValue = root.value(QStringLiteral("config"));
     if (!configValue.isObject()) return fail(error, QStringLiteral("config must be an object"));
     const QJsonObject data = configValue.toObject();
+    if (!Reminders::fromJson(data.value(QStringLiteral("reminderConfig")), config.reminderConfig, error)) return false;
     const QJsonValue profileName = data.value(QStringLiteral("profileName"));
     if (!profileName.isString()) return fail(error, QStringLiteral("config.profileName must be a string"));
     config.profileName = profileName.toString();

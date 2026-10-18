@@ -4,7 +4,6 @@
 #include<QWidget>
 
 #include <QPushButton>
-#include <QPointer>
 #include <QQueue>
 #include <QStringList>
 #include <optional>
@@ -22,6 +21,7 @@ class CourseBarComponentRegistry;
 class QLabel;
 class QPropertyAnimation;
 class QTimer;
+struct ReminderNotification;
 
 class CourseBar : public QWidget
 {
@@ -41,13 +41,16 @@ public slots:
     void showNotification(const QString& message);
     // The first alternative that fits is used, as in the original course bar.
     void showNotification(const QStringList& messages);
+    void showReminder(const ReminderNotification& reminder);
+    void invalidateReminders(const QStringList& keys, bool dismissCurrent);
 
 private:
     struct Notification {
         QStringList messages;
-        QPointer<CourseRefreshService> source;
         quint64 tableRevision = 0;
         QString eventKey;
+        QString reminderKey;
+        quint64 reminderRevision = 0;
     };
     enum class NotificationPhase { Hidden, Entering, Holding, Leaving };
 
@@ -58,12 +61,10 @@ private:
     void initNotifications();
     void updateMetrics();
     void refreshThemeColor();
-    void showCourseNotification(const CourseRefreshService::Event& event);
     void enqueueNotification(const Notification& notification);
     void showNextNotification();
     void dismissNotification();
     void finishNotification();
-    void invalidateNotifications(CourseRefreshService* source);
     void updateNotificationGeometry();
     int notificationMinimumWidth() const;
     QRect notificationHiddenRect() const;

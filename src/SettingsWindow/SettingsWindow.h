@@ -26,6 +26,7 @@ signals:
     void profileSwitchRequested(const QString& id);
     void courseBarConfigChanged();
     void desktopCountdownConfigChanged();
+    void reminderPreviewRequested(const QString& text);
     void uiAccessChangeRequested(bool enabled);
 protected:
     void closeEvent(QCloseEvent* event) override;

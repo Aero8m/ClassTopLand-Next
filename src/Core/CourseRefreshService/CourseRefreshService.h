@@ -36,6 +36,7 @@ public:
         quint64 revision = 0;
         QDate date;
         int weekScheduleIndex = -1;
+        int sourceWeekday = 1;
         QString name;
         QList<Class> classes;
         QList<Subject> subjects;

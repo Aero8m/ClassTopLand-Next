@@ -19,6 +19,7 @@ class RescheduleWindow;
 class QTimer;
 class WindowInterceptionService;
 class DesktopCountdown;
+class ReminderService;
 class PluginManager;
 class PluginUiHost;
 class CourseBarComponentRegistry;
@@ -88,6 +89,7 @@ private:
     std::unique_ptr<CourseBarComponentRegistry> componentRegistry_;
     std::unique_ptr<CourseBar> courseBar;
     std::unique_ptr<DesktopCountdown> desktopCountdown_;
+    std::unique_ptr<ReminderService> reminders_;
     std::unique_ptr<WindowInterceptionService> windowInterception_;
     std::unique_ptr<TaskbarTrayMenu> trayMenu_;
     std::unique_ptr<SettingsWindow> settingsWindow_;

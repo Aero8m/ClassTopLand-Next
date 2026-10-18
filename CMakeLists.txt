@@ -34,6 +34,12 @@ add_subdirectory(third_party/ElaWidgetTools-Plus/ElaWidgetTools)
 
 add_executable(ClassTopLand-Next
         main.cpp
+        src/Core/Model/ReminderConfig.cpp
+        src/Core/Model/ReminderConfig.h
+        src/Core/Reminders/ReminderService.cpp
+        src/Core/Reminders/ReminderService.h
+        src/SettingsWindow/tabs/ReminderSettingsTab.cpp
+        src/SettingsWindow/tabs/ReminderSettingsTab.h
         src/Core/Plugins/PluginIo.cpp
         src/Core/Plugins/PluginIo.h
         src/Core/Plugins/PluginManager.cpp

@@ -4,6 +4,7 @@
 #include <QObject>
 #include "../Core/ProfileValidation/ProfileValidation.h"
 #include <QStringList>
+#include <QHash>
 
 class ProfileEditSession final : public QObject
 {
@@ -23,6 +24,7 @@ public:
     // Apply a separately persisted tray selection without resetting draft edits.
     void syncActiveWeekSchedule(const QString& id);
     void syncDateOverrides(const QList<DateScheduleOverride>& records);
+    void syncReminderRules(const QList<ReminderRule>& rules);
     bool updateSubject(int index, const Subject& subject, QString* error = nullptr);
     bool removeSubject(int index, QString* error = nullptr);
     bool replaceTimePoints(int lineIndex, const QList<TimeLinePoint>& points, QString* error = nullptr);
@@ -39,4 +41,5 @@ private:
     Profile draft_;
     Profile saved_;
     bool dirty_ = false;
+    QHash<QString, QString> subjectRenames_;
 };

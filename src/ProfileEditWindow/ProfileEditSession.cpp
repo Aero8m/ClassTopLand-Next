@@ -12,6 +12,7 @@ bool fail(QString* error, const QString& text)
 
 bool equal(const Profile& a, const Profile& b)
 {
+    if (Reminders::toJson(a.reminderRules) != Reminders::toJson(b.reminderRules)) return false;
     if (a.name != b.name || a.semesterStartDate != b.semesterStartDate ||
         a.activeWeekScheduleId != b.activeWeekScheduleId || a.subjects.size() != b.subjects.size() ||
         a.timeLines.size() != b.timeLines.size() || a.schedules.size() != b.schedules.size() ||
@@ -62,13 +63,14 @@ void ProfileEditSession::notifyChanged()
 
 void ProfileEditSession::reset(const Profile& profile)
 {
+    subjectRenames_.clear();
     saved_ = draft_ = profile;
     dirty_ = false;
     emit changed();
     emit draftReset();
 }
 
-void ProfileEditSession::markSaved() { saved_ = draft_; dirty_ = false; emit changed(); }
+void ProfileEditSession::markSaved() { saved_ = draft_; subjectRenames_.clear(); dirty_ = false; emit changed(); }
 void ProfileEditSession::discard() { reset(saved_); }
 
 void ProfileEditSession::syncActiveWeekSchedule(const QString& id)
@@ -82,6 +84,17 @@ void ProfileEditSession::syncDateOverrides(const QList<DateScheduleOverride>& re
 {
     saved_.dateOverrides = records;
     draft_.dateOverrides = records;
+    notifyChanged();
+}
+
+void ProfileEditSession::syncReminderRules(const QList<ReminderRule>& rules)
+{
+    saved_.reminderRules = rules;
+    draft_.reminderRules = rules;
+    // Remap once against saved names: chained renames and swaps must not cascade.
+    for (auto& rule : draft_.reminderRules)
+        if (rule.course == ReminderRule::Course::Subject && subjectRenames_.contains(rule.subject))
+            rule.subject = subjectRenames_.value(rule.subject);
     notifyChanged();
 }
 
@@ -117,6 +130,12 @@ bool ProfileEditSession::updateSubject(int index, const Subject& subject, QStrin
     if (index == -1) draft_.subjects.append(updated);
     else {
         const QString oldName = draft_.subjects[index].name;
+        bool tracked = false;
+        for (auto it = subjectRenames_.begin(); it != subjectRenames_.end(); ++it) {
+            if (it.value() == oldName) { it.value() = name; tracked = true; }
+        }
+        if (!tracked) subjectRenames_.insert(oldName, name);
+        Reminders::renameSubject(draft_.reminderRules, oldName, name);
         draft_.subjects[index] = updated;
         for (auto& week : draft_.schedules) for (auto& day : week.daySchedules) for (auto& course : day.classes)
             if (course.subject == oldName) course.subject = name;

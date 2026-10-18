@@ -5,6 +5,7 @@
 #include "BuiltinComponents/CourseView/CourseView.h"
 #include "BuiltinComponents/Countdown/Countdown.h"
 #include "../Core/ThemeManager/ThemeManager.h"
+#include "../Core/Reminders/ReminderService.h"
 
 #include <QEvent>
 #include <QGuiApplication>
@@ -171,12 +172,7 @@ void CourseBar::initComponents()
             if (auto* service = componentService(components.last()); service && !connectedSources.contains(service)) {
                 connectedSources.insert(service);
                 disconnect(service, nullptr, this, nullptr);
-                connect(service, &CourseRefreshService::eventOccurred,
-                        this, &CourseBar::showCourseNotification);
-                connect(service, &CourseRefreshService::tableChanged, this, [this, service] {
-                    invalidateNotifications(service);
-                    emit scheduleStatusChanged();
-                });
+                connect(service, &CourseRefreshService::tableChanged, this, &CourseBar::scheduleStatusChanged);
             }
             Logger::instance().log(Logger::Level::Info,QString("Added a course bar component, name: %1").arg(components.last()->getName()));
             Logger::instance().flush();
@@ -429,31 +425,25 @@ void CourseBar::showNotification(const QStringList& messages)
     if (!notification.messages.isEmpty()) enqueueNotification(notification);
 }
 
-void CourseBar::showCourseNotification(const CourseRefreshService::Event& event)
+void CourseBar::showReminder(const ReminderNotification& reminder)
 {
-    auto* source = qobject_cast<CourseRefreshService*>(sender());
-    if (!source || event.tableRevision != source->table().revision) return;
     Notification notification;
-    notification.source = source;
-    notification.tableRevision = event.tableRevision;
-    notification.eventKey = QStringLiteral("%1:%2:%3")
-        .arg(static_cast<int>(event.type)).arg(event.scheduledTime.toMSecsSinceEpoch()).arg(event.subject);
-    using Type = CourseRefreshService::EventType;
-    switch (event.type) {
-    case Type::ClassStarted:
-        notification.messages = {tr("%1 已经上课，请回到座位").arg(event.subject),
-                                 tr("%1 已上课").arg(event.subject), tr("上课时间到")};
-        break;
-    case Type::ClassEnded:
-        notification.messages = {tr("%1 已经下课，请做好下节课上课准备").arg(event.subject),
-                                 tr("%1 已下课").arg(event.subject), tr("下课时间到")};
-        break;
-    case Type::ClassStartingSoon:
-        notification.messages = {tr("%1 即将上课，请做好上课准备").arg(event.subject),
-                                 tr("%1 即将上课").arg(event.subject), tr("即将上课")};
-        break;
-    }
+    notification.reminderKey = reminder.key;
+    notification.reminderRevision = reminder.revision;
+    notification.tableRevision = reminder.tableRevision;
+    notification.eventKey = reminder.occurrence;
+    notification.messages = {reminder.text};
     if (!notification.messages.isEmpty()) enqueueNotification(notification);
+}
+
+void CourseBar::invalidateReminders(const QStringList& keys, bool dismissCurrent)
+{
+    const auto matches = [&](const Notification& n) {
+        return !n.reminderKey.isEmpty() && (keys.contains(QStringLiteral("*")) || keys.contains(n.reminderKey));
+    };
+    for (qsizetype i = pendingNotifications_.size(); i > 0; --i)
+        if (matches(pendingNotifications_[i - 1])) pendingNotifications_.removeAt(i - 1);
+    if (dismissCurrent && currentNotification_ && matches(*currentNotification_)) finishNotification();
 }
 
 void CourseBar::enqueueNotification(const Notification& notification)
@@ -473,11 +463,6 @@ void CourseBar::showNextNotification()
 {
     if (currentNotification_ || transitioning_) return;
     while (!pendingNotifications_.isEmpty()) {
-        const Notification& pending = pendingNotifications_.head();
-        if (pending.tableRevision && (!pending.source || pending.source->table().revision != pending.tableRevision)) {
-            pendingNotifications_.dequeue();
-            continue;
-        }
         // Use animation completion to resume, without a nested event loop.
         if (collapsed_) {
             toggleCollapsed();
@@ -519,17 +504,6 @@ void CourseBar::finishNotification()
     QTimer::singleShot(0, this, &CourseBar::showNextNotification);
 }
 
-void CourseBar::invalidateNotifications(CourseRefreshService* source)
-{
-    for (qsizetype i = pendingNotifications_.size(); i > 0; --i) {
-        const Notification& pending = pendingNotifications_[i - 1];
-        if (pending.source == source && pending.tableRevision != source->table().revision)
-            pendingNotifications_.removeAt(i - 1);
-    }
-    if (currentNotification_ && currentNotification_->source == source &&
-        currentNotification_->tableRevision != source->table().revision) finishNotification();
-}
-
 void CourseBar::updateMetrics()
 {
     metrics_ = CourseBarMetrics(config);
@@ -546,7 +520,6 @@ void CourseBar::updateMetrics()
     notificationIcon_->setPixmap(bell.scaled(iconSize, iconSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     notificationText_->setFont(metrics_.font(true));
     notificationText_->setContentsMargins(metrics_.textGuard(), 0, metrics_.textGuard(), 0);
-    if (courses_) disconnect(courses_, nullptr, this, nullptr);
     for (auto* component : std::as_const(components)) {
         auto componentMetrics = metrics_;
         componentMetrics.baseCourseSpacing = component->metrics().baseCourseSpacing;
@@ -562,8 +535,10 @@ int CourseBar::notificationMinimumWidth() const
     int textWidth = metrics.horizontalAdvance(currentNotification_->messages.first());
     for (const QString& message : currentNotification_->messages)
         textWidth = qMin(textWidth, metrics.horizontalAdvance(message));
-    return margins.left() + margins.right() + notificationIcon_->width() +
-           notificationLayout_->spacing() + textWidth + 2 * metrics_.textGuard();
+    const int desired = margins.left() + margins.right() + notificationIcon_->width() +
+        notificationLayout_->spacing() + textWidth + 2 * metrics_.textGuard();
+    const auto* targetScreen = QGuiApplication::primaryScreen();
+    return targetScreen ? qMin(desired, targetScreen->availableGeometry().width()) : desired;
 }
 
 void CourseBar::selectNotificationText()
@@ -580,7 +555,8 @@ void CourseBar::selectNotificationText()
             break;
         }
     }
-    notificationText_->setText(text);
+    notificationText_->setText(metrics.elidedText(text, Qt::ElideRight, qMax(0, available)));
+    notificationText_->setToolTip(text);
 }
 
 QRect CourseBar::notificationHiddenRect() const

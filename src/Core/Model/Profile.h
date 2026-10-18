@@ -6,6 +6,7 @@
 #include"Schedule.h"
 #include"Subject.h"
 #include"TimeLine.h"
+#include "ReminderConfig.h"
 
 // The source snapshot detects edits without depending on mutable names or row order.
 struct DateScheduleOverride
@@ -28,5 +29,6 @@ struct Profile
     // Empty means automatic date/week matching.
     QString activeWeekScheduleId;
     QList<DateScheduleOverride> dateOverrides;
+    QList<ReminderRule> reminderRules;
 };
 #endif //CLASSTOPLAND_NEXT_PROFILE_H

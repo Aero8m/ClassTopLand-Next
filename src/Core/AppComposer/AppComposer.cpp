@@ -10,6 +10,7 @@
 #include "../../ProfileEditWindow/ProfileEditSession.h"
 #include "../../ScheduleAdjustments/DateScheduleWidgets.h"
 #include "../ThemeManager/ThemeManager.h"
+#include "../Reminders/ReminderService.h"
 #include "../WindowInterception/WindowInterceptionService.h"
 #include "../../Utils/UiAccess/UiAccess.h"
 
@@ -96,6 +97,9 @@ bool AppComposer::initInstances()
     componentRegistry_ = std::make_unique<CourseBarComponentRegistry>(plugins_.get(), pluginUi_.get());
     plugins_->editorDirty = [this] { return profileEditorWindow_ && profileEditorWindow_->session()->isDirty(); };
     courseBar = std::make_unique<CourseBar>(nullptr, componentRegistry_.get(), plugins_->courses());
+    reminders_ = std::make_unique<ReminderService>(plugins_->courses());
+    connect(reminders_.get(), &ReminderService::notification, courseBar.get(), &CourseBar::showReminder);
+    connect(reminders_.get(), &ReminderService::invalidated, courseBar.get(), &CourseBar::invalidateReminders);
     connect(componentRegistry_.get(), &CourseBarComponentRegistry::changed, courseBar.get(), &CourseBar::reloadConfig);
     connect(&ConfigManager::instance(), &ConfigManager::courseBarChanged, courseBar.get(), &CourseBar::reloadConfig);
     connect(plugins_.get(), &PluginManager::notification, this, [this](const QString& title, const QString& message) {
@@ -114,6 +118,8 @@ bool AppComposer::initInstances()
         // Refresh a clean editor synchronously, before another input event can create a stale draft.
         if (profileEditorWindow_ && !profileEditorWindow_->session()->isDirty())
             profileEditorWindow_->session()->reset(ProfileManager::instance().profile());
+        else if (profileEditorWindow_)
+            profileEditorWindow_->session()->syncReminderRules(ProfileManager::instance().profile().reminderRules);
         QTimer::singleShot(0, this, [this] {
             if (!initialized_) return;
             if (profileEditorWindow_ && !profileEditorWindow_->session()->isDirty()) profileEditorWindow_->session()->reset(ProfileManager::instance().profile());
@@ -153,6 +159,7 @@ bool AppComposer::initInstances()
 
     initialized_ = true;
     plugins_->start();
+    reminders_->start();
     cleanupDateOverrides();
     dateCleanupTimer_ = new QTimer(this);
     dateCleanupTimer_->setObjectName(QStringLiteral("dateScheduleCleanupTimer"));
@@ -173,6 +180,8 @@ void AppComposer::dropInstances()
     if (shutdown_) return;
     shutdown_ = true;
     if (dateCleanupTimer_) dateCleanupTimer_->stop();
+    if (reminders_) reminders_->stop();
+    reminders_.reset();
     swapWindow_.reset();
     rescheduleWindow_.reset();
     if (pluginUi_) pluginUi_->closeDialogs();
@@ -215,6 +224,8 @@ void AppComposer::showSettingsWindow()
 
         connect(settingsWindow_.get(), &SettingsWindow::desktopCountdownConfigChanged,
                 desktopCountdown_.get(), &DesktopCountdown::reloadConfig);
+        connect(settingsWindow_.get(), &SettingsWindow::reminderPreviewRequested,
+                courseBar.get(), qOverload<const QString&>(&CourseBar::showNotification));
         connect(settingsWindow_.get(), &SettingsWindow::uiAccessChangeRequested,
                 this, &AppComposer::changeUiAccess);
     }

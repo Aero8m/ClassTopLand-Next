@@ -241,6 +241,10 @@ QJsonObject ProfileMutationService::apply(const QJsonObject &request, QJsonValue
                         weeks[w] = weekItem;
                     }
                     data.insert(QStringLiteral("schedules"), weeks);
+                    QList<ReminderRule> reminders;
+                    if (!Reminders::fromJson(data.value(QStringLiteral("reminderRules")), reminders, &message)) return invalid();
+                    Reminders::renameSubject(reminders, old, current.value(QStringLiteral("name")).toString());
+                    data.insert(QStringLiteral("reminderRules"), Reminders::toJson(reminders));
                 }
             }
             else

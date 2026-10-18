@@ -133,6 +133,7 @@ CourseRefreshService::TableSnapshot CourseRefreshService::resolveTable(const QDa
     TableSnapshot result;
     const Profile& profile = std::as_const(ProfileManager::instance()).profile();
     result.date = date;
+    result.sourceWeekday = date.dayOfWeek();
     result.subjects = profile.subjects;
     auto fail = [&result](const QString& error) {
         result.valid = false;
@@ -142,6 +143,7 @@ CourseRefreshService::TableSnapshot CourseRefreshService::resolveTable(const QDa
     };
 
     if (temporarySchedule_) {
+        result.sourceWeekday = temporarySchedule_->enableDay;
         result.name = temporarySchedule_->name;
         result.classes = DateSchedule::sorted(temporarySchedule_->classes);
         QString error;
@@ -152,6 +154,7 @@ CourseRefreshService::TableSnapshot CourseRefreshService::resolveTable(const QDa
         if (!resolved.valid) return fail(resolved.error);
         result.name = resolved.name;
         result.weekScheduleIndex = resolved.weekScheduleIndex;
+        result.sourceWeekday = resolved.sourceWeekday;
         result.classes = resolved.classes;
     }
     return result;
