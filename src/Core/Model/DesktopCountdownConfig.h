@@ -12,6 +12,7 @@ struct DesktopCountdownConfig
     QString englishTag;
     bool showMilliseconds = true;
     QString screenName; // Empty follows the primary screen.
+    bool useLegacyPlacement = true;
     int rightMargin = 24;
     int bottomMargin = 24;
     int scalePercent = 100;

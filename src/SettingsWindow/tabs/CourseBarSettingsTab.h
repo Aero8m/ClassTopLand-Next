@@ -19,6 +19,8 @@ class CourseBarSettingsTab final : public ElaScrollPage
 public:
     explicit CourseBarSettingsTab(QWidget* parent = nullptr, CourseBarComponentRegistry* registry = nullptr);
     void setUiAccessSwitching(bool switching);
+    // Reload widgets after the configuration was replaced outside this page.
+    void reloadFromConfig();
     bool defaultsResetPending() const { return resetPending_; }
 signals:
     void configChanged();

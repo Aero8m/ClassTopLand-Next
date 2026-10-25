@@ -11,6 +11,7 @@
 #include "../../ScheduleAdjustments/DateScheduleWidgets.h"
 #include "../ThemeManager/ThemeManager.h"
 #include "../Reminders/ReminderService.h"
+#include "../CloudSync/CloudSyncService.h"
 #include "../WindowInterception/WindowInterceptionService.h"
 #include "../../Utils/UiAccess/UiAccess.h"
 
@@ -130,6 +131,25 @@ bool AppComposer::initInstances()
         if (!canceled.isEmpty() && trayMenu_) { QStringList dates; for (const auto& date : canceled) dates.append(date.toString()); trayMenu_->showScheduleError(tr("来源课程变化，已取消特殊安排：%1").arg(dates.join(QStringLiteral("、")))); }
     });
     desktopCountdown_ = std::make_unique<DesktopCountdown>();
+    cloud_ = std::make_unique<CloudSyncService>(dataDirectory_);
+    cloud_->setProfileEditorDirty([this] {
+        return profileEditorWindow_ && profileEditorWindow_->session()->isDirty();
+    });
+    connect(cloud_.get(), &CloudSyncService::displayConfigApplied, this, [this] {
+        ThemeManager::instance().applyConfiguredTheme();
+        if (desktopCountdown_) desktopCountdown_->reloadConfig();
+        if (settingsWindow_) settingsWindow_->refreshCloudConfig();
+    });
+    connect(cloud_.get(), &CloudSyncService::cloudProfileSwitchRequested, this,
+            [this](const QString& id) { switchProfile(id); });
+    connect(cloud_.get(), &CloudSyncService::notification, this,
+            [this](const QString& title, const QString& message) {
+                Logger::instance().log(Logger::Level::Warning, title + QStringLiteral(": ") + message);
+                if (courseBar) courseBar->showNotification(title + QStringLiteral(": ") + message);
+            });
+    connect(cloud_.get(), &CloudSyncService::cloudProfileUpdated, this, [this] {
+        if (settingsWindow_) settingsWindow_->refreshProfiles();
+    });
     trayMenu_ = std::make_unique<TaskbarTrayMenu>();
     trayMenu_->setExitGuard([this](int exitCode) { return prepareToExit(exitCode); });
     connect(trayMenu_.get(), &TaskbarTrayMenu::exitAccepted, this, [this] {
@@ -160,6 +180,12 @@ bool AppComposer::initInstances()
     initialized_ = true;
     plugins_->start();
     reminders_->start();
+    {
+        QString cloudError;
+        if (!cloud_->start(&cloudError))
+            Logger::instance().log(Logger::Level::Warning,
+                                   tr("集控同步未启用：%1").arg(cloudError));
+    }
     cleanupDateOverrides();
     dateCleanupTimer_ = new QTimer(this);
     dateCleanupTimer_->setObjectName(QStringLiteral("dateScheduleCleanupTimer"));
@@ -180,6 +206,11 @@ void AppComposer::dropInstances()
     if (shutdown_) return;
     shutdown_ = true;
     if (dateCleanupTimer_) dateCleanupTimer_->stop();
+    // Stop the cloud service before any manager persists state on exit.
+    if (cloud_) {
+        cloud_->stop();
+        cloud_.reset();
+    }
     if (reminders_) reminders_->stop();
     reminders_.reset();
     swapWindow_.reset();
@@ -216,7 +247,7 @@ void AppComposer::showSettingsWindow()
     // A click queued by a panel that is already being torn down must not revive the window.
     if (!initialized_) return;
     if (!settingsWindow_) {
-        settingsWindow_ = std::make_unique<SettingsWindow>(nullptr, windowInterception_.get(), plugins_.get(), pluginUi_.get(), componentRegistry_.get());
+        settingsWindow_ = std::make_unique<SettingsWindow>(nullptr, windowInterception_.get(), plugins_.get(), pluginUi_.get(), componentRegistry_.get(), cloud_.get());
         connect(settingsWindow_.get(), &SettingsWindow::profileEditorRequested,
                 this, &AppComposer::showProfileEditorWindow);
         connect(settingsWindow_.get(), &SettingsWindow::profileSwitchRequested,

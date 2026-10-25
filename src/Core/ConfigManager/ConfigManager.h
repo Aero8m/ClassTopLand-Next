@@ -23,6 +23,9 @@ public:
     bool load(const QString& filePath, QString* error = nullptr);
     bool save(QString* error = nullptr) const;
     bool commit(const Config& candidate, QString* error = nullptr);
+    // Validate a candidate without writing it, so callers that apply external
+    // content can distinguish validation failures from save failures.
+    static bool validateCandidate(const Config& candidate, QString* error = nullptr);
     quint64 revision() const { return revision_; }
 signals:
     void committed(quint64 revision);

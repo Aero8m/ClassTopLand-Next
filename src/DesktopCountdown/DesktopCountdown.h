@@ -2,6 +2,7 @@
 
 #include "../Core/Model/DesktopCountdownConfig.h"
 #include <QWidget>
+#include <QStringList>
 #include <functional>
 
 class QLabel;
@@ -21,6 +22,7 @@ public slots:
     void refresh();
 
 protected:
+    bool event(QEvent* event) override;
     void showEvent(QShowEvent* event) override;
     void hideEvent(QHideEvent* event) override;
 
@@ -38,6 +40,8 @@ private:
     QLabel* tail_;
     QLabel* english_;
     QWidget* accent_;
-    QString layoutKey_;
+    QStringList layoutKey_;
+    QString displayedEnglish_;
+    QRect contentBounds_;
     bool expired_ = false;
 };

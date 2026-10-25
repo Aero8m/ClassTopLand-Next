@@ -351,6 +351,11 @@ void CourseBarSettingsTab::showEvent(QShowEvent* event)
     refresh();
 }
 
+void CourseBarSettingsTab::reloadFromConfig()
+{
+    refresh();
+}
+
 void CourseBarSettingsTab::refresh()
 {
     using namespace AppUi;

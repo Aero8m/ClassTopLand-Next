@@ -4,6 +4,7 @@
 #include <QCloseEvent>
 #include "AboutDialog.h"
 #include "tabs/AppearanceSettingsTab.h"
+#include "tabs/CloudSettingsTab.h"
 #include "tabs/CourseBarSettingsTab.h"
 #include "tabs/DesktopCountdownSettingsTab.h"
 #include "tabs/ReminderSettingsTab.h"
@@ -11,8 +12,9 @@
 
 #include <QScreen>
 
-SettingsWindow::SettingsWindow(QWidget* parent, WindowInterceptionService* interception, PluginManager* plugins, PluginUiHost* pluginUi, CourseBarComponentRegistry* registry)
-    : ElaWindow(parent), plugins_(plugins), pluginUi_(pluginUi), registry_(registry), interception_(interception)
+SettingsWindow::SettingsWindow(QWidget* parent, WindowInterceptionService* interception, PluginManager* plugins, PluginUiHost* pluginUi, CourseBarComponentRegistry* registry, CloudSyncService* cloud)
+    : ElaWindow(parent), plugins_(plugins), pluginUi_(pluginUi), registry_(registry),
+      cloud_(cloud), interception_(interception)
 {
     setIsDefaultClosed(false);
     connect(this, &ElaWindow::closeButtonClicked, this, [this] { close(); });
@@ -46,7 +48,8 @@ void SettingsWindow::initUI()
             this, &SettingsWindow::profileEditorRequested);
     connect(profileTab_, &ProfileSettingsTab::profileSwitchRequested,
             this, &SettingsWindow::profileSwitchRequested);
-    addPageNode(QStringLiteral("外观"), new AppearanceSettingsTab(this), ElaIconType::Palette);
+    appearanceTab_ = new AppearanceSettingsTab(this);
+    addPageNode(QStringLiteral("外观"), appearanceTab_, ElaIconType::Palette);
     courseBarTab_ = new CourseBarSettingsTab(this, registry_);
     addPageNode(QStringLiteral("课程条"), courseBarTab_, ElaIconType::List);
     connect(courseBarTab_, &CourseBarSettingsTab::configChanged,
@@ -54,13 +57,20 @@ void SettingsWindow::initUI()
     connect(courseBarTab_, &CourseBarSettingsTab::uiAccessChangeRequested,
             this, &SettingsWindow::uiAccessChangeRequested);
 
-    auto* desktopCountdownTab = new DesktopCountdownSettingsTab(this);
+    desktopCountdownTab_ = new DesktopCountdownSettingsTab(this);
     auto* reminderTab = new ReminderSettingsTab(this);
     addPageNode(QStringLiteral("提醒"), reminderTab, ElaIconType::Bell);
     connect(reminderTab, &ReminderSettingsTab::previewRequested, this, &SettingsWindow::reminderPreviewRequested);
-    addPageNode(QStringLiteral("桌面倒计时"), desktopCountdownTab, ElaIconType::Clock);
-    connect(desktopCountdownTab, &DesktopCountdownSettingsTab::configChanged,
+    addPageNode(QStringLiteral("桌面倒计时"), desktopCountdownTab_, ElaIconType::Clock);
+    connect(desktopCountdownTab_, &DesktopCountdownSettingsTab::configChanged,
             this, &SettingsWindow::desktopCountdownConfigChanged);
+
+    if (cloud_) {
+        cloudTab_ = new CloudSettingsTab(cloud_, this);
+        addPageNode(QStringLiteral("集控"), cloudTab_, ElaIconType::Cloud);
+        connect(cloudTab_, &CloudSettingsTab::profileSwitchRequested,
+                this, &SettingsWindow::profileSwitchRequested);
+    }
 
     if (interception_)
         addPageNode(QStringLiteral("窗口拦截"), new WindowInterceptionSettingsTab(interception_, this), ElaIconType::Shield);
@@ -108,6 +118,15 @@ void SettingsWindow::setUiAccessSwitching(bool switching)
 bool SettingsWindow::courseBarDefaultsResetPending() const
 {
     return courseBarTab_->defaultsResetPending();
+}
+
+void SettingsWindow::refreshCloudConfig()
+{
+    // The cloud may replace these sections while a page is open; reload from the
+    // committed config so a later edit cannot write back stale values.
+    if (appearanceTab_) appearanceTab_->reloadFromConfig();
+    if (courseBarTab_) courseBarTab_->reloadFromConfig();
+    if (desktopCountdownTab_) desktopCountdownTab_->reloadFromConfig();
 }
 
 void SettingsWindow::closeEvent(QCloseEvent* event)

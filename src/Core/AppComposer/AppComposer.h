@@ -23,6 +23,7 @@ class ReminderService;
 class PluginManager;
 class PluginUiHost;
 class CourseBarComponentRegistry;
+class CloudSyncService;
 
 #define DATA_PATH (QDir::homePath()+"/ClassTopLand-Next_Data")
 #define CONFIG_FILE_PATH (DATA_PATH+"/MainConfig.json")
@@ -89,6 +90,7 @@ private:
     std::unique_ptr<CourseBarComponentRegistry> componentRegistry_;
     std::unique_ptr<CourseBar> courseBar;
     std::unique_ptr<DesktopCountdown> desktopCountdown_;
+    std::unique_ptr<CloudSyncService> cloud_;
     std::unique_ptr<ReminderService> reminders_;
     std::unique_ptr<WindowInterceptionService> windowInterception_;
     std::unique_ptr<TaskbarTrayMenu> trayMenu_;

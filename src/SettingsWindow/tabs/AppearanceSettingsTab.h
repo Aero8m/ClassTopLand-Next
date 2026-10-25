@@ -12,6 +12,8 @@ class AppearanceSettingsTab final : public ElaScrollPage
     Q_OBJECT
 public:
     explicit AppearanceSettingsTab(QWidget* parent = nullptr);
+    // Reload widgets after the configuration was replaced outside this page.
+    void reloadFromConfig();
 
 private:
     void chooseColor();

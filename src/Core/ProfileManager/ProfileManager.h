@@ -24,6 +24,11 @@ public:
     bool save(QString* error = nullptr) const;
     // Write the candidate atomically before publishing it to readers.
     bool commit(const Profile& candidate, QString* error = nullptr, QList<QDate>* canceledDates = nullptr);
+    // Atomically write a managed profile without selecting it. When the id is the
+    // loaded profile this behaves like commit() and publishes the change; other
+    // ids are written in place so a background source can update its own profile.
+    bool commitManagedProfile(const QString& id, const Profile& candidate,
+                              QString* error = nullptr, QList<QDate>* canceledDates = nullptr);
     // Persist first; a failed write never changes the published selection.
     bool selectWeekSchedule(const QString& id, QString* error = nullptr);
     bool setDateReschedule(const QDate& date, const QString& weekId, int weekday, QString* error = nullptr);
@@ -61,6 +66,8 @@ signals:
 private:
     ProfileManager() = default;
     bool writeProfile(const Profile& candidate, QString* error) const;
+    bool prepareCommit(const Profile& candidate, Profile& committed, QList<QDate>* canceledDates,
+                       QString* error) const;
     QString managedPath(const QString& id, QString* error) const;
 
     Profile profile_{};

@@ -9,17 +9,23 @@ class PluginUiHost;
 class CourseBarComponentRegistry;
 class AboutDialog;
 class CourseBarSettingsTab;
+class CloudSettingsTab;
+class CloudSyncService;
+class AppearanceSettingsTab;
+class DesktopCountdownSettingsTab;
 class WindowInterceptionService;
 
 class SettingsWindow : public ElaWindow
 {
     Q_OBJECT
 public:
-    SettingsWindow(QWidget *parent = nullptr, WindowInterceptionService* interception = nullptr, PluginManager* plugins = nullptr, PluginUiHost* pluginUi = nullptr, CourseBarComponentRegistry* registry = nullptr);
+    SettingsWindow(QWidget *parent = nullptr, WindowInterceptionService* interception = nullptr, PluginManager* plugins = nullptr, PluginUiHost* pluginUi = nullptr, CourseBarComponentRegistry* registry = nullptr, CloudSyncService* cloud = nullptr);
     ~SettingsWindow();
     void refreshProfiles();
     void showProfileError(const QString& message);
     void setUiAccessSwitching(bool switching);
+    // Refresh pages whose configuration may have been replaced by the cloud.
+    void refreshCloudConfig();
     bool courseBarDefaultsResetPending() const;
 signals:
     void profileEditorRequested();
@@ -34,6 +40,7 @@ private:
     PluginManager* plugins_ = nullptr;
     PluginUiHost* pluginUi_ = nullptr;
     CourseBarComponentRegistry* registry_ = nullptr;
+    CloudSyncService* cloud_ = nullptr;
     void initUI();
     WindowInterceptionService* interception_ = nullptr;
     void showAboutDialog();
@@ -41,6 +48,9 @@ private:
     AboutDialog* aboutDialog_ = nullptr;
     ProfileSettingsTab* profileTab_;
     CourseBarSettingsTab* courseBarTab_ = nullptr;
+    AppearanceSettingsTab* appearanceTab_ = nullptr;
+    DesktopCountdownSettingsTab* desktopCountdownTab_ = nullptr;
+    CloudSettingsTab* cloudTab_ = nullptr;
 };
 
 

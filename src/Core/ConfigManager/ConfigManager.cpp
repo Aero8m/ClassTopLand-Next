@@ -145,6 +145,7 @@ QJsonObject toJson(const Config& config)
         {QStringLiteral("englishTag"), desktop.englishTag},
         {QStringLiteral("showMilliseconds"), desktop.showMilliseconds},
         {QStringLiteral("screenName"), desktop.screenName},
+        {QStringLiteral("useLegacyPlacement"), desktop.useLegacyPlacement},
         {QStringLiteral("rightMargin"), desktop.rightMargin},
         {QStringLiteral("bottomMargin"), desktop.bottomMargin},
         {QStringLiteral("scalePercent"), desktop.scalePercent}};
@@ -225,6 +226,7 @@ bool fromJson(const QJsonObject& root, Config& config, QString* error)
         QString target;
         if (!readBool(QStringLiteral("enable"), countdown.enable) ||
             !readBool(QStringLiteral("showMilliseconds"), countdown.showMilliseconds) ||
+            !readBool(QStringLiteral("useLegacyPlacement"), countdown.useLegacyPlacement) ||
             !readString(QStringLiteral("labelTag"), countdown.labelTag) ||
             !readString(QStringLiteral("englishTag"), countdown.englishTag) ||
             !readString(QStringLiteral("screenName"), countdown.screenName) ||
@@ -464,6 +466,12 @@ bool ConfigManager::load(const QString& filePath, QString* error)
 bool ConfigManager::save(QString* error) const
 {
     return writeConfig(config_, error);
+}
+
+bool ConfigManager::validateCandidate(const Config& candidate, QString* error)
+{
+    if (error) error->clear();
+    return validate(candidate, error);
 }
 
 bool ConfigManager::commit(const Config& candidate, QString* error)

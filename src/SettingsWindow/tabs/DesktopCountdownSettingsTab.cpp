@@ -49,6 +49,10 @@ DesktopCountdownSettingsTab::DesktopCountdownSettingsTab(QWidget* parent) : ElaS
     auto* placement = section(layout, tr("位置与大小"));
     screen_ = new ElaComboBox(this); screen_->setFixedWidth(280);
     row(placement, tr("显示屏"), screen_, QStringLiteral("desktopCountdownScreen"));
+    placement_ = new ElaComboBox(this); placement_->setFixedWidth(280);
+    placement_->addItem(tr("默认"), true);
+    placement_->addItem(tr("自定义可见边距"), false);
+    row(placement, tr("布局方式"), placement_, QStringLiteral("desktopCountdownPlacement"));
     const auto spin = [&](const QString& title, const QString& name, int minimum, int maximum, const QString& suffix) {
         auto* control = new ElaSpinBox(this);
         control->setRange(minimum, maximum);
@@ -63,7 +67,7 @@ DesktopCountdownSettingsTab::DesktopCountdownSettingsTab(QWidget* parent) : ElaS
     bottom_ = spin(tr("底部边距"), QStringLiteral("desktopCountdownBottomMargin"), 0,
                    DesktopCountdownConfig::MaximumMargin, QStringLiteral(" px"));
     scale_ = spin(tr("整体缩放"), QStringLiteral("desktopCountdownScale"), 50, 200, QStringLiteral("%"));
-    placement->addWidget(text(tr("相对所选屏幕可用区域的右下角定位；边距按逻辑像素计算。屏幕断开时临时使用主屏。"), this, 12));
+    placement->addWidget(text(tr("默认沿用原版 ClassTopLand 的整体留白和右下角位置。选择自定义可见边距后，可按逻辑像素设置内容到屏幕可用区域的距离。屏幕断开时临时使用主屏。"), this, 12));
     layout->addStretch();
     refresh();
     connect(enable_, &ElaToggleSwitch::toggled, this, &DesktopCountdownSettingsTab::save);
@@ -73,6 +77,7 @@ DesktopCountdownSettingsTab::DesktopCountdownSettingsTab(QWidget* parent) : ElaS
     connect(time_, &TimePicker::timeChanged, this, &DesktopCountdownSettingsTab::save);
     connect(precision_, &ElaComboBox::currentIndexChanged, this, &DesktopCountdownSettingsTab::save);
     connect(screen_, &ElaComboBox::currentIndexChanged, this, &DesktopCountdownSettingsTab::save);
+    connect(placement_, &ElaComboBox::currentIndexChanged, this, &DesktopCountdownSettingsTab::save);
     for (auto* control : {right_, bottom_, scale_})
         connect(control, &ElaSpinBox::valueChanged, this, &DesktopCountdownSettingsTab::save);
     const auto screensChanged = [this] {
@@ -104,7 +109,7 @@ void DesktopCountdownSettingsTab::refresh()
     QScopedValueRollback<bool> guard(refreshing_, true);
     const auto& config = ConfigManager::instance().config().desktopCountdownConfig;
     const QSignalBlocker b1(enable_), b2(label_), b3(english_), b4(date_), b5(time_),
-        b6(precision_), b7(right_), b8(bottom_), b9(scale_);
+        b6(precision_), b7(right_), b8(bottom_), b9(scale_), b10(placement_);
     enable_->setIsToggled(config.enable);
     label_->setText(config.labelTag);
     english_->setText(config.englishTag);
@@ -113,6 +118,9 @@ void DesktopCountdownSettingsTab::refresh()
     date_->setSelectedDate(target.date());
     time_->setTime(target.time());
     precision_->setCurrentIndex(precision_->findData(config.showMilliseconds));
+    placement_->setCurrentIndex(placement_->findData(config.useLegacyPlacement));
+    right_->setEnabled(!config.useLegacyPlacement);
+    bottom_->setEnabled(!config.useLegacyPlacement);
     right_->setValue(config.rightMargin);
     bottom_->setValue(config.bottomMargin);
     scale_->setValue(config.scalePercent);
@@ -130,6 +138,7 @@ void DesktopCountdownSettingsTab::save()
     config.targetDateTime = QDateTime(date_->getSelectedDate(), time_->time());
     config.showMilliseconds = precision_->currentData().toBool();
     config.screenName = screen_->currentData().toString();
+    config.useLegacyPlacement = placement_->currentData().toBool();
     config.rightMargin = right_->value();
     config.bottomMargin = bottom_->value();
     config.scalePercent = scale_->value();
@@ -139,7 +148,14 @@ void DesktopCountdownSettingsTab::save()
         AppUi::error(this, tr("桌面倒计时配置保存失败：%1").arg(error));
         return;
     }
+    right_->setEnabled(!config.useLegacyPlacement);
+    bottom_->setEnabled(!config.useLegacyPlacement);
     emit configChanged();
+}
+
+void DesktopCountdownSettingsTab::reloadFromConfig()
+{
+    refresh();
 }
 
 void DesktopCountdownSettingsTab::showEvent(QShowEvent* event)

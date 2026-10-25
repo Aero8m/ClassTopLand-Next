@@ -92,6 +92,17 @@ add_executable(ClassTopLand-Next
 
         src/Core/AppComposer/AppComposer.cpp
         src/Core/AppComposer/AppComposer.h
+        src/Core/CloudSync/CloudApi.cpp
+        src/Core/CloudSync/CloudApi.h
+        src/Core/CloudSync/CloudDisplayConfig.cpp
+        src/Core/CloudSync/CloudDisplayConfig.h
+        src/Core/CloudSync/CloudEndpoint.cpp
+        src/Core/CloudSync/CloudEndpoint.h
+        src/Core/CloudSync/CloudStateStore.cpp
+        src/Core/CloudSync/CloudStateStore.h
+        src/Core/CloudSync/CloudSyncService.cpp
+        src/Core/CloudSync/CloudSyncService.h
+        src/Core/CloudSync/CloudTypes.h
         src/Core/ConfigManager/ConfigManager.cpp
         src/Core/ConfigManager/ConfigManager.h
         src/Core/CourseRefreshService/CourseRefreshService.cpp
@@ -144,6 +155,8 @@ add_executable(ClassTopLand-Next
         src/SettingsWindow/AboutDialog.h
         src/SettingsWindow/tabs/AppearanceSettingsTab.cpp
         src/SettingsWindow/tabs/AppearanceSettingsTab.h
+        src/SettingsWindow/tabs/CloudSettingsTab.cpp
+        src/SettingsWindow/tabs/CloudSettingsTab.h
         src/SettingsWindow/tabs/CourseBarSettingsTab.cpp
         src/SettingsWindow/tabs/CourseBarSettingsTab.h
         src/SettingsWindow/tabs/ProfileSettingsTab.cpp

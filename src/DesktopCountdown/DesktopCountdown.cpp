@@ -2,12 +2,16 @@
 #include "../Core/ConfigManager/ConfigManager.h"
 
 #include <QFontDatabase>
-#include <QFontMetrics>
+#include <QFontMetricsF>
+#include <QGlyphRun>
 #include <QGuiApplication>
 #include <QHideEvent>
+#include <QImage>
 #include <QLabel>
 #include <QScreen>
 #include <QShowEvent>
+#include <QStyle>
+#include <QTextLayout>
 #include <QTimer>
 #include <QtMath>
 #include <utility>
@@ -35,6 +39,80 @@ QString padded(qint64 value, int width = 2)
 {
     return QStringLiteral("%1").arg(value, width, 10, QLatin1Char('0'));
 }
+
+QRectF labelInkRect(const QLabel* label)
+{
+    if (label->text().isEmpty()) return {};
+    // Match QLabel's plain-text drawing: explicit line breaks, no wrapping,
+    // whole-pixel line positions and vertical alignment of the full line box.
+    QString text = label->text();
+    text.replace(QLatin1Char('\r'), QLatin1Char(' '));
+    text.replace(QLatin1Char('\t'), QLatin1Char(' '));
+    text.replace(QLatin1Char('\n'), QChar::LineSeparator);
+    QTextLayout layout(text, label->font(), label);
+    QTextOption option;
+    const auto direction = text.isRightToLeft() ? Qt::RightToLeft : Qt::LeftToRight;
+    option.setTextDirection(direction);
+    layout.setTextOption(option);
+    const QFontMetricsF metrics(label->font(), label);
+    const qreal leading = metrics.leading();
+    qreal height = -leading;
+    layout.beginLayout();
+    while (true) {
+        QTextLine line = layout.createLine();
+        if (!line.isValid()) break;
+        line.setLineWidth(0x01000000);
+        height = qCeil(height + leading);
+        line.setPosition(QPointF(0, height));
+        height += line.ascent() + line.descent();
+    }
+    layout.endLayout();
+    const QRectF rect = label->contentsRect();
+    const auto alignment = QStyle::visualAlignment(direction, label->alignment());
+    qreal y = rect.y();
+    if (alignment & Qt::AlignVCenter) y += (rect.height() - height) / 2;
+    else if (alignment & Qt::AlignBottom) y += rect.height() - height;
+    QRectF ink;
+    for (int i = 0; i < layout.lineCount(); ++i) {
+        const QTextLine line = layout.lineAt(i);
+        qreal x = rect.x();
+        if (alignment & Qt::AlignRight) x += rect.width() - line.horizontalAdvance();
+        else if (alignment & Qt::AlignHCenter) x += (rect.width() - line.horizontalAdvance()) / 2;
+        for (const auto& run : line.glyphRuns()) {
+            const auto glyphs = run.glyphIndexes();
+            const auto positions = run.positions();
+            const auto font = run.rawFont();
+            for (qsizetype j = 0; j < glyphs.size(); ++j)
+                ink = ink.united(font.boundingRect(glyphs.at(j)).translated(positions.at(j) + QPointF(x, y)));
+        }
+    }
+    // QPainter clips to the text rectangle only when the line box does not fit.
+    QRectF clip = label->rect();
+    if (height > rect.height()) clip = clip.intersected(rect);
+    return ink.intersected(clip).translated(label->pos());
+}
+
+void trimTransparentRight(QWidget* widget)
+{
+    // Font bounds can overestimate rasterized ink at fractional DPI. Use the
+    // final widget's pixel grid (including child clipping), then inspect only
+    // its trailing columns. Cached layouts do not need this calibration again.
+    const qreal dpr = widget->devicePixelRatioF();
+    QImage image(QSize(qCeil(widget->width() * dpr), qCeil(widget->height() * dpr)),
+                 QImage::Format_ARGB32_Premultiplied);
+    if (image.isNull()) return;
+    image.setDevicePixelRatio(dpr);
+    image.fill(Qt::transparent);
+    widget->render(&image);
+    for (int x = image.width() - 1; x >= 0; --x) {
+        for (int y = 0; y < image.height(); ++y) {
+            if (qAlpha(reinterpret_cast<const QRgb*>(image.constScanLine(y))[x])) {
+                widget->resize(qMin(widget->width(), qCeil((x + 1) / dpr)), widget->height());
+                return;
+            }
+        }
+    }
+}
 }
 
 DesktopCountdown::DesktopCountdown(QWidget* parent) : DesktopCountdown(Clock{}, parent) {}
@@ -53,6 +131,8 @@ DesktopCountdown::DesktopCountdown(Clock clock, QWidget* parent)
         auto* item = new QLabel(this);
         item->setObjectName(name);
         item->setTextFormat(Qt::PlainText);
+        item->setMargin(0);
+        item->setIndent(0);
         item->setStyleSheet(QStringLiteral("color: %1; background: transparent;").arg(color));
         return item;
     };
@@ -89,6 +169,7 @@ void DesktopCountdown::watchScreen(QScreen* screen)
 {
     const auto changed = [this] { layoutKey_.clear(); refresh(); };
     connect(screen, &QScreen::availableGeometryChanged, this, changed);
+    connect(screen, &QScreen::geometryChanged, this, changed);
     connect(screen, &QScreen::logicalDotsPerInchChanged, this, changed);
 }
 
@@ -159,68 +240,109 @@ void DesktopCountdown::updateGeometryAndFonts()
 {
     auto* screen = targetScreen();
     if (!screen) return;
+    if (this->screen() != screen) setScreen(screen);
     const QRect available = screen->availableGeometry();
+    const QRect screenGeometry = screen->geometry();
+    if (available.isEmpty()) return;
     const QString title = tr("距离%1").arg(config_.labelTag);
-    // Numeric width is reserved for the widest digit, keeping the layout stable.
-    const QString key = QStringLiteral("%1/%2/%3/%4/%5/%6/%7/%8")
-        .arg(expired_).arg(number_->text().size()).arg(unit_->text(), title, config_.englishTag)
-        .arg(available.width()).arg(available.height()).arg(config_.scalePercent);
+    const QString fullEnglish = english_->text();
+    const QStringList key{title, prefix_->text(), number_->text(), unit_->text(), tail_->text(), fullEnglish,
+        QString::number(available.width()), QString::number(available.height()),
+        QString::number(config_.scalePercent), QString::number(logicalDpiX()),
+        QString::number(logicalDpiY()), QString::number(devicePixelRatioF()),
+        QString::number(config_.useLegacyPlacement)};
     if (layoutKey_ != key) {
         layoutKey_ = key;
         const auto& families = fontFamilies();
-        const auto font = [&](int family, qreal points, qreal scale = 1.0) {
-            QFont result(families.at(family)); result.setPointSizeF(points * scale); return result;
-        };
-        const QFontMetrics numberMetrics(font(expired_ ? 0 : 1, expired_ ? 47 : 110));
-        int digitWidth = 0;
-        for (QChar c : QStringLiteral("0123456789")) digitWidth = qMax(digitWidth, numberMetrics.horizontalAdvance(c));
-        const int numberWidth = expired_ ? numberMetrics.horizontalAdvance(number_->text()) + 2
-            : digitWidth * number_->text().size() + 2;
-        QString tailSample;
-        if (unit_->text() == tr("天")) tailSample = QStringLiteral(":88:88:88");
-        else if (unit_->text() == tr("时")) tailSample = QStringLiteral(":88:88");
-        else if (unit_->text() == tr("分")) tailSample = QStringLiteral(":88");
-        if (config_.showMilliseconds && unit_->text() != tr("毫秒") && !expired_)
-            tailSample += QStringLiteral(".888");
-        const int tailWidth = QFontMetrics(font(1, 20)).horizontalAdvance(tailSample) + 4;
-        const int unitWidth = QFontMetrics(font(0, 48)).horizontalAdvance(unit_->text()) + 4;
-        const int suffixX = 350 + numberWidth + 10;
-        const int baseWidth = qMax(721, expired_ ? 230 + numberWidth + 10
-            : suffixX + qMax(tailWidth, unitWidth) + 10);
-        // Keep the original 721x330 composition and scale every anchor together.
-        // Only extend its right edge when a large day count would be clipped.
-        const qreal scale = qMin(config_.scalePercent / 100.0,
-            qMin(available.width() / qreal(baseWidth), available.height() / 330.0));
-        const auto position = [scale](int value) { return qRound(value * scale); };
-        const auto extent = [scale](int value) { return qMax(1, qRound(value * scale)); };
-        const auto place = [&](QWidget* item, int x, int y, int width, int height) {
-            item->setGeometry(position(x), position(y), extent(width), extent(height));
-        };
-        title_->setFont(font(0, 36, scale)); prefix_->setFont(font(0, 48, scale));
-        unit_->setFont(font(0, 48, scale)); number_->setFont(font(expired_ ? 0 : 1, expired_ ? 47 : 110, scale));
-        tail_->setFont(font(1, 20, scale)); english_->setFont(font(2, 20, scale));
-        // DayTimer's title ends immediately to the left of the large number.
-        // The prefix and unit sit on the lower row; the tail sits above the unit.
-        place(title_, 10, 70, 331, 41);
-        place(prefix_, 220, 120, 141, 61);
-        place(number_, expired_ ? 230 : 350, expired_ ? 100 : 70, numberWidth, 111);
-        place(tail_, suffixX, 100, tailWidth, 21);
-        place(unit_, suffixX, 120, unitWidth, 61);
-        place(english_, 230, 190, 351, 61);
-        place(accent_, 209, 120, 6, 131);
-        title_->setText(title_->fontMetrics().elidedText(title, Qt::ElideRight, title_->width()));
+        qreal scale = config_.scalePercent / 100.0;
+        QRect bounds;
+        const auto labels = {title_, prefix_, number_, unit_, tail_, english_};
+        do {
+            const auto font = [&](int family, qreal points) {
+                QFont result(families.at(family));
+                result.setPointSizeF(points * scale);
+                return result;
+            };
+            title_->setFont(font(0, 36)); prefix_->setFont(font(0, 48));
+            unit_->setFont(font(0, 48)); number_->setFont(font(expired_ ? 0 : 1, expired_ ? 47 : 110));
+            tail_->setFont(font(1, 20)); english_->setFont(font(2, 20));
+            const auto place = [scale](QWidget* item, int x, int y, int width, int height) {
+                item->setGeometry(qRound(x * scale), qRound(y * scale),
+                                  qMax(1, qRound(width * scale)), qMax(1, qRound(height * scale)));
+            };
+            // Measure the final font on this window, without scaling its width again.
+            const QFontMetricsF numberMetrics(number_->font(), number_);
+            const qreal numberAdvance = numberMetrics.horizontalAdvance(number_->text());
+            const int numberX = qRound((expired_ ? 230 : 350) * scale);
+            const int suffixX = qRound(numberX + numberAdvance + 10 * scale);
+            const auto placeText = [scale](QLabel* label, int x, int y, int height) {
+                const QFontMetricsF metrics(label->font(), label);
+                const QRectF ink = metrics.tightBoundingRect(label->text());
+                const qreal advance = metrics.horizontalAdvance(label->text());
+                const int left = qMax(0, qCeil(-ink.left()));
+                const int right = qMax(0, qCeil(ink.right() - advance));
+                label->setContentsMargins(left, 0, right, 0);
+                label->setGeometry(x - left, qRound(y * scale),
+                    qMax(1, left + qCeil(advance) + right), qMax(1, qRound(height * scale)));
+            };
+            // Preserve DayTimer's relative anchors in both placement modes.
+            place(title_, 10, 70, 331, 41);
+            place(prefix_, 220, 120, 141, 61);
+            placeText(number_, numberX, expired_ ? 100 : 70, 111);
+            placeText(tail_, suffixX, 100, 21);
+            placeText(unit_, suffixX, 120, 61);
+            place(english_, 230, 190, 351, 61);
+            place(accent_, 209, 120, 6, 131);
+            title_->setText(QFontMetricsF(title_->font(), title_).elidedText(title, Qt::ElideRight, title_->width()));
+            QStringList lines = fullEnglish.split(QLatin1Char('\n'));
+            const QFontMetricsF englishMetrics(english_->font(), english_);
+            for (auto& line : lines)
+                line = englishMetrics.elidedText(line, Qt::ElideRight, english_->width());
+            english_->setText(lines.join(QLatin1Char('\n')));
+            QRectF ink = accent_->geometry();
+            for (auto* label : labels) ink = ink.united(labelInkRect(label));
+            contentBounds_ = ink.toAlignedRect();
+            if (config_.useLegacyPlacement)
+                ink = ink.united(QRectF(0, 0, qMax(1, qRound(721 * scale)), qMax(1, qRound(330 * scale))));
+            bounds = ink.toAlignedRect();
+            if (bounds.width() <= available.width() && bounds.height() <= available.height()) break;
+            // Re-measure after fitting: font hinting and integer anchors do not scale exactly.
+            scale *= qMin(0.95, qMin(available.width() / qreal(bounds.width()),
+                                    available.height() / qreal(bounds.height())));
+        } while (true);
+        for (auto* label : labels) label->move(label->pos() - bounds.topLeft());
+        accent_->move(accent_->pos() - bounds.topLeft());
+        contentBounds_.translate(-bounds.topLeft());
+        resize(bounds.size());
+        if (!config_.useLegacyPlacement) trimTransparentRight(this);
         title_->setToolTip(title);
-        resize(qMin(available.width(), extent(baseWidth)), qMin(available.height(), extent(330)));
+        english_->setToolTip(fullEnglish);
+        displayedEnglish_ = english_->text();
     }
-    const QString fullEnglish = english_->text();
-    QStringList lines = fullEnglish.split('\n');
-    for (auto& line : lines)
-        line = english_->fontMetrics().elidedText(line, Qt::ElideRight, english_->width());
-    english_->setText(lines.join('\n'));
-    english_->setToolTip(fullEnglish);
-    // Include the screen origin: secondary screens may have negative coordinates.
-    move(qMax(available.left(), available.right() + 1 - width() - config_.rightMargin),
-         qMax(available.top(), available.bottom() + 1 - height() - config_.bottomMargin));
+    english_->setText(displayedEnglish_);
+    // DayTimer positions its whole canvas against the full screen, retaining
+    // its intentional outer whitespace. Only visible content is kept clear of taskbars.
+    if (config_.useLegacyPlacement) {
+        const int x = screenGeometry.right() + 1 - width();
+        const int y = screenGeometry.top() + qRound((screenGeometry.height() - height()) * 0.95);
+        move(qBound(available.left() - contentBounds_.left(), x,
+                    available.right() - contentBounds_.right()),
+             qBound(available.top() - contentBounds_.top(), y,
+                    available.bottom() - contentBounds_.bottom()));
+    } else {
+        // Include the screen origin: secondary screens may have negative coordinates.
+        move(qMax(available.left(), available.right() + 1 - width() - config_.rightMargin),
+             qMax(available.top(), available.bottom() + 1 - height() - config_.bottomMargin));
+    }
+}
+
+bool DesktopCountdown::event(QEvent* event)
+{
+    const bool result = QWidget::event(event);
+    if (event->type() == QEvent::ScreenChangeInternal || event->type() == QEvent::DevicePixelRatioChange) {
+        QTimer::singleShot(0, this, [this] { layoutKey_.clear(); refresh(); });
+    }
+    return result;
 }
 
 void DesktopCountdown::showEvent(QShowEvent* event)

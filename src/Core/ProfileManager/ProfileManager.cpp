@@ -62,12 +62,11 @@ bool ProfileManager::save(QString* error) const
     return writeProfile(profile_, error);
 }
 
-bool ProfileManager::commit(const Profile& candidate, QString* error, QList<QDate>* canceledDates)
+bool ProfileManager::prepareCommit(const Profile& candidate, Profile& committed,
+                                   QList<QDate>* canceledDates, QString* error) const
 {
-    if (error) error->clear();
-    if (canceledDates) canceledDates->clear();
     if (!DateSchedule::validateOverrides(candidate.dateOverrides, error)) return false;
-    Profile committed = candidate;
+    committed = candidate;
     QList<QDate> canceled;
     for (qsizetype i = committed.dateOverrides.size(); i-- > 0;) {
         const auto& record = committed.dateOverrides[i];
@@ -78,12 +77,39 @@ bool ProfileManager::commit(const Profile& candidate, QString* error, QList<QDat
             committed.dateOverrides.removeAt(i);
         }
     }
+    if (canceledDates) {
+        std::sort(canceled.begin(), canceled.end());
+        *canceledDates = canceled;
+    }
+    return true;
+}
+
+bool ProfileManager::commit(const Profile& candidate, QString* error, QList<QDate>* canceledDates)
+{
+    if (error) error->clear();
+    if (canceledDates) canceledDates->clear();
+    Profile committed;
+    if (!prepareCommit(candidate, committed, canceledDates, error)) return false;
     if (!writeProfile(committed, error)) return false;
     profile_ = std::move(committed);
     emit this->committed(++revision_);
-    std::sort(canceled.begin(), canceled.end());
-    if (canceledDates) *canceledDates = canceled;
     return true;
+}
+
+bool ProfileManager::commitManagedProfile(const QString& id, const Profile& candidate,
+                                          QString* error, QList<QDate>* canceledDates)
+{
+    if (error) error->clear();
+    if (canceledDates) canceledDates->clear();
+    const QString path = managedPath(id, error);
+    if (path.isEmpty()) return false;
+    // The loaded profile must follow the normal publication path so readers
+    // observe the change; other managed profiles are only rewritten on disk.
+    if (path.compare(filePath_, Qt::CaseInsensitive) == 0)
+        return commit(candidate, error, canceledDates);
+    Profile committed;
+    if (!prepareCommit(candidate, committed, canceledDates, error)) return false;
+    return writeProfileFile(path, committed, error);
 }
 
 bool ProfileManager::setDateReschedule(const QDate& date, const QString& weekId, int weekday, QString* error)

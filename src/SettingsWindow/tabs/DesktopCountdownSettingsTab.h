@@ -15,6 +15,8 @@ class DesktopCountdownSettingsTab final : public ElaScrollPage
     Q_OBJECT
 public:
     explicit DesktopCountdownSettingsTab(QWidget* parent = nullptr);
+    // Reload widgets after the configuration was replaced outside this page.
+    void reloadFromConfig();
 signals:
     void configChanged();
 protected:
@@ -31,6 +33,7 @@ private:
     AppUi::TimePicker* time_;
     ElaComboBox* precision_;
     ElaComboBox* screen_;
+    ElaComboBox* placement_;
     ElaSpinBox* right_;
     ElaSpinBox* bottom_;
     ElaSpinBox* scale_;

@@ -100,6 +100,13 @@ AppearanceSettingsTab::AppearanceSettingsTab(QWidget* parent) : ElaScrollPage(pa
     refreshWindowEffect();
 }
 
+void AppearanceSettingsTab::reloadFromConfig()
+{
+    refreshColor();
+    refreshMode();
+    refreshWindowEffect();
+}
+
 void AppearanceSettingsTab::refreshColor()
 {
     const QColor color = ThemeManager::instance().themeColor();
