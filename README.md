@@ -222,6 +222,8 @@ Windows 构建会复制 ElaWidgetTools 动态库，并自动调用同套件的 `
 ClassTopLand-Next-setup_build_<7位提交号>-amd64.exe
 ```
 
+简体中文安装语言文件随仓库保存在 [packaging/windows/languages/ChineseSimplified.isl](./packaging/windows/languages/ChineseSimplified.isl)，安装脚本直接按相对路径引用，不依赖本机或 runner 额外安装中文文件。文件取自 [Inno Setup 上游固定提交](https://github.com/jrsoftware/issrc/blob/6ef32198ef1f7b7b375cd4b6b90896c2a58eb4c2/Files/Languages/ChineseSimplified.isl)，保留原作者说明及 [许可证](./packaging/windows/languages/LICENSE.txt)。
+
 安装包可在该次 Actions 运行页面的 Artifacts 下载，保留 14 天；自动发布成功后也可从 Releases 下载。安装脚本沿用现有安装包的 AppId、可选桌面快捷方式和所有用户开机启动快捷方式，使用管理员安装到 Program Files，并静默安装随包附带的 Visual C++ x64 运行库。
 
 发布任务独立运行，仅该任务申请 `contents: write`，通过 GitHub 自动提供的 `GITHUB_TOKEN` 认证，无需保存个人 PAT。tag 为 7 位提交号，标题为 `build <构建号>`，更新日志取本次提交信息。新版本标记为 prerelease，不设为 Latest。重跑同一提交时上传替换同名安装包，不删除已有 Release 或 tag；已有 tag 指向其他提交时直接失败。现存 Release 的说明与发布类型保持不变。
