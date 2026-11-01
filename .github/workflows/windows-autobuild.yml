@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       publish_release:
-        description: Publish an automatic prerelease (main branch only)
+        description: Publish an automatic release as Latest (main branch only)
         type: boolean
         default: false
 
@@ -116,7 +116,7 @@ jobs:
           compression-level: 0
 
   release:
-    name: Publish automatic prerelease
+    name: Publish automatic release as Latest
     needs: build
     if: >-
       github.repository == 'Aero8m/ClassTopLand-Next' &&
@@ -163,14 +163,16 @@ jobs:
           {
             printf '## 更新日志\n\n'
             git log -1 --format=%B | sed '/^[[:space:]]*$/d; s/^/- /'
-            printf '\n本 Release 为自动构建版本，可能会有不稳定现象。\n\n提交：%s\n' "$GITHUB_SHA"
+            printf '\n本 Release 为自动构建版本，可能会有不稳定现象。\n'
           } > "$notes_file"
           installer="out/setupExe/ClassTopLand-Next-setup_build_${BUILD_NUMBER}-amd64.exe"
           if gh release view "$BUILD_NUMBER" > /dev/null 2>&1; then
             gh release upload "$BUILD_NUMBER" "$installer" --clobber
+            gh release edit "$BUILD_NUMBER" --title "build $BUILD_NUMBER" \
+              --notes-file "$notes_file" --draft=false --prerelease=false --latest
           else
             gh release create "$BUILD_NUMBER" "$installer" --target "$GITHUB_SHA" \
-              --title "build $BUILD_NUMBER" --notes-file "$notes_file" --prerelease --latest=false
+              --title "build $BUILD_NUMBER" --notes-file "$notes_file" --latest
           fi
 
   mirror:

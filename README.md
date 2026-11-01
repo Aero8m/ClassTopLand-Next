@@ -210,9 +210,9 @@ Windows 构建会复制 ElaWidgetTools 动态库，并自动调用同套件的 `
 
 仓库提供 [Windows Autobuild](./.github/workflows/windows-autobuild.yml) 工作流：
 
-- 推送到 `main`：编译 Windows x64 Release、制作安装包、上传 Actions artifact，并在原仓库 `Aero8m/ClassTopLand-Next` 发布自动构建预发布版本（prerelease）。
+- 推送到 `main`：编译 Windows x64 Release、制作安装包、上传 Actions artifact，并在原仓库 `Aero8m/ClassTopLand-Next` 发布自动构建正式版本并设为 Latest。
 - 向 `main` 提交 PR：编译、打包并上传 artifact，不发布 Release。
-- 手动构建：在 Actions → Windows Autobuild → Run workflow 选择分支；默认只生成 artifact。在 `main` 上勾选 `publish_release` 可同时发布预发布版本。
+- 手动构建：在 Actions → Windows Autobuild → Run workflow 选择分支；默认只生成 artifact。在 `main` 上勾选 `publish_release` 可同时发布正式版本并设为 Latest。
 
 流程使用 `windows-2022`、MSVC 2022 x64、Qt 6.9.3、CMake 4.0.3 和 Ninja。runner 自带的 CMake 可能低于项目最低要求，因此工作流会单独安装固定版本。Qt 安装结果通过 Actions cache 复用；源码及两个子模块每次按对应提交检出。
 
@@ -226,7 +226,7 @@ ClassTopLand-Next-setup_build_<7位提交号>-amd64.exe
 
 安装包可在该次 Actions 运行页面的 Artifacts 下载，保留 14 天；自动发布成功后也可从 Releases 下载。安装脚本沿用现有安装包的 AppId、可选桌面快捷方式和所有用户开机启动快捷方式，使用管理员安装到 Program Files，并静默安装随包附带的 Visual C++ x64 运行库。
 
-发布任务独立运行，仅该任务申请 `contents: write`，通过 GitHub 自动提供的 `GITHUB_TOKEN` 认证，无需保存个人 PAT。tag 为 7 位提交号，标题为 `build <构建号>`，更新日志取本次提交信息。新版本标记为 prerelease，不设为 Latest。重跑同一提交时上传替换同名安装包，不删除已有 Release 或 tag；已有 tag 指向其他提交时直接失败。现存 Release 的说明与发布类型保持不变。
+发布任务独立运行，仅该任务申请 `contents: write`，通过 GitHub 自动提供的 `GITHUB_TOKEN` 认证，无需保存个人 PAT。tag 为 7 位提交号，标题为 `build <构建号>`，更新日志取本次提交信息。每次发布均为正式 Release，并设为 Latest；GitHub 同时只保留一个 Latest 标记，因此历史版本不会同时显示 Latest。重跑同一提交时上传替换同名安装包，不删除已有 Release 或 tag；已有 tag 指向其他提交时直接失败。重跑已有版本时同步更新发布说明、取消 prerelease 并设为 Latest。发布说明保留提交信息生成的更新日志和自动构建提示，不再额外附加完整提交 SHA 行。
 
 Release 发布成功后，独立的 `mirror` job 使用 WebDAV + rclone 主动上传安装包到 `https://autobuild.aero8m.cn/dav/` 下的 `/ClassTopLand-Next/`。该路径相对于上传账号的基本路径；无需继续使用原服务器的 `main.py`、代理或 Samba 复制步骤。
 
