@@ -42,6 +42,7 @@ public:
     ~WindowInterceptionService() override;
     bool supported() const;
     bool start(QString* error = nullptr);
+    bool reloadFromConfig(QString* error = nullptr);
     void stop();
     const QString& monitoringError() const { return monitoringError_; }
     const QString& lastError() const { return lastError_; }

@@ -1,4 +1,5 @@
 #include "CloudDisplayConfig.h"
+#include "../Plugins/PluginManifest.h"
 
 #include <QJsonArray>
 #include <QJsonValue>
@@ -219,8 +220,13 @@ bool CloudDisplay::buildConfig(const QJsonObject& payload, const Config& current
 {
     if (error) error->clear();
     const QJsonValue version = payload.value(QStringLiteral("schema_version"));
-    if (!version.isUndefined() && (!version.isDouble() || version.toInt() != 1))
-        return fail(error, QStringLiteral("仅支持展示配置 schema_version 1"));
+    if (!version.isUndefined() && (!version.isDouble() ||
+        (version.toDouble() != 1 && version.toDouble() != 2)))
+        return fail(error, QStringLiteral("仅支持展示配置 schema_version 1 或 2"));
+    const int schemaVersion = version.toInt(1);
+    if (schemaVersion == 1 && (payload.contains(QStringLiteral("windowInterceptionConfig")) ||
+                               payload.contains(QStringLiteral("pluginConfig"))))
+        return fail(error, QStringLiteral("窗口拦截与插件偏好需要 schema_version 2"));
     const QJsonValue courseBarValue = payload.value(QStringLiteral("courseBarConfig"));
     if (!courseBarValue.isObject())
         return fail(error, QStringLiteral("展示配置缺少 courseBarConfig"));
@@ -250,6 +256,50 @@ bool CloudDisplay::buildConfig(const QJsonObject& payload, const Config& current
         return false;
 
     Config candidate = current;
+    if (payload.contains(QStringLiteral("windowInterceptionConfig"))) {
+        const auto section = payload.value(QStringLiteral("windowInterceptionConfig"));
+        if (!section.isObject() || section.toObject().keys() != QStringList{QStringLiteral("rules")} ||
+            !section.toObject().value(QStringLiteral("rules")).isArray())
+            return fail(error, QStringLiteral("windowInterceptionConfig 必须仅包含 rules 数组"));
+        const auto rules = section.toObject().value(QStringLiteral("rules")).toArray();
+        if (rules.size() > 256) return fail(error, QStringLiteral("窗口规则最多 256 条"));
+        candidate.windowInterceptionConfig.rules.clear();
+        const QSet<QString> allowed{QStringLiteral("exePath"), QStringLiteral("className"),
+            QStringLiteral("titleContains"), QStringLiteral("enabled")};
+        for (const auto& value : rules) {
+            if (!value.isObject()) return fail(error, QStringLiteral("窗口规则必须为对象"));
+            const auto item = value.toObject();
+            for (auto it = item.begin(); it != item.end(); ++it)
+                if (!allowed.contains(it.key())) return fail(error, QStringLiteral("窗口规则包含未知字段"));
+            WindowInterceptionRule rule;
+            if (!readString(item, QStringLiteral("exePath"), {}, 32768, rule.exePath, error, QStringLiteral("exePath")) ||
+                !readString(item, QStringLiteral("className"), {}, 256, rule.className, error, QStringLiteral("className")) ||
+                !readString(item, QStringLiteral("titleContains"), {}, 1000, rule.titleContains, error, QStringLiteral("titleContains")) ||
+                !readBool(item, QStringLiteral("enabled"), true, rule.enabled, error, QStringLiteral("enabled")))
+                return false;
+            if (rule.exePath.trimmed().isEmpty() || rule.className.trimmed().isEmpty())
+                return fail(error, QStringLiteral("窗口规则的程序路径和窗口类名不能为空"));
+            rule.exePath = normalizedWindowPath(rule.exePath);
+            candidate.windowInterceptionConfig.rules.append(rule);
+        }
+    }
+    if (payload.contains(QStringLiteral("pluginConfig"))) {
+        const auto section = payload.value(QStringLiteral("pluginConfig"));
+        if (!section.isObject() || section.toObject().keys() != QStringList{QStringLiteral("plugins")} ||
+            !section.toObject().value(QStringLiteral("plugins")).isObject())
+            return fail(error, QStringLiteral("pluginConfig 必须仅包含 plugins 对象"));
+        const auto plugins = section.toObject().value(QStringLiteral("plugins")).toObject();
+        if (plugins.size() > 256) return fail(error, QStringLiteral("插件偏好最多 256 项"));
+        for (auto it = plugins.begin(); it != plugins.end(); ++it) {
+            if (!Plugins::validId(it.key()) || !it.value().isObject())
+                return fail(error, QStringLiteral("插件 ID 或启用偏好无效"));
+            const auto preference = it.value().toObject();
+            if (preference.keys() != QStringList{QStringLiteral("enabled")} ||
+                !preference.value(QStringLiteral("enabled")).isBool())
+                return fail(error, QStringLiteral("插件偏好必须仅包含 enabled 布尔值"));
+            candidate.pluginConfig.plugins[it.key()].enabled = preference.value(QStringLiteral("enabled")).toBool();
+        }
+    }
     candidate.courseBarConfig.enable = bar.enable;
     candidate.courseBarConfig.height = bar.height;
     candidate.courseBarConfig.componentSpacing = bar.componentSpacing;

@@ -176,6 +176,36 @@ bool WindowInterceptionService::start(QString* error)
     return true;
 }
 
+bool WindowInterceptionService::reloadFromConfig(QString* error)
+{
+    if (error) error->clear();
+    rules_ = ConfigManager::instance().config().windowInterceptionConfig.rules;
+    emit rulesChanged();
+    if (!supported()) return fail(error, tr("窗口拦截仅支持 Windows。"));
+    bool restored = true;
+    // Copy because successfully restored windows are removed from hidden_.
+    const auto hidden = hidden_;
+    for (const auto& expected : hidden) {
+        const auto current = backend_->inspect(expected.handle);
+        if (!current || !sameWindow(expected, *current)) { hidden_.remove(expected.handle); continue; }
+        if (!blocked(*current)) {
+            QString message;
+            if (current->visible || backend_->setVisible(current->handle, true, &message)) {
+                hidden_.remove(current->handle);
+                recovery_.remove(current->handle);
+            } else { fail(error, message); restored = false; }
+        }
+    }
+    bool applied;
+    if (!running_ || !monitoringError_.isEmpty()) {
+        backend_->unwatch();
+        running_ = false;
+        applied = start(error);
+    } else applied = applyRules(error);
+    emit windowsChanged();
+    return restored && applied;
+}
+
 bool WindowInterceptionService::sameWindow(const InterceptedWindow& a, const InterceptedWindow& b)
 {
     return a.handle == b.handle && a.processId == b.processId && a.processStarted == b.processStarted

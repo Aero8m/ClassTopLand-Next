@@ -7,7 +7,8 @@
 
 // Maps the server's display_config payload onto a local Config candidate. Only
 // the whitelisted fields are replaced; device-local settings such as UI access,
-// plugins, window interception, reminders and the countdown screen stay as-is.
+// plugin authorization, reminders and the countdown screen stay as-is.
+// v2 optionally manages window rules and plugin enabled preferences.
 namespace CloudDisplay {
 
 bool hasPluginComponent(const CourseBarConfig& config);

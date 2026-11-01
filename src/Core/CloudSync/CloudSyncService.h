@@ -29,6 +29,7 @@ public:
     // Used to report blocked/local_edit only when the cloud profile is the
     // profile currently being edited.
     void setProfileEditorDirty(std::function<bool()> dirty) { profileEditorDirty_ = std::move(dirty); }
+    void setWindowRulesReload(std::function<bool(QString*)> reload) { windowRulesReload_ = std::move(reload); }
 
     // Loads the private state, takes the single-instance lock and schedules the
     // first sync. Configuration errors never abort application startup.
@@ -104,6 +105,7 @@ private:
     Cloud::Status status_ = Cloud::Status::Unbound;
     QString statusError_;
     std::function<bool()> profileEditorDirty_;
+    std::function<bool(QString*)> windowRulesReload_;
     bool started_ = false;
     bool inFlight_ = false;
     bool pairing_ = false;

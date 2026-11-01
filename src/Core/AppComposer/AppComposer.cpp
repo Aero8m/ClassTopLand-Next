@@ -132,6 +132,9 @@ bool AppComposer::initInstances()
     });
     desktopCountdown_ = std::make_unique<DesktopCountdown>();
     cloud_ = std::make_unique<CloudSyncService>(dataDirectory_);
+    cloud_->setWindowRulesReload([this](QString* error) {
+        return windowInterception_ && windowInterception_->reloadFromConfig(error);
+    });
     cloud_->setProfileEditorDirty([this] {
         return profileEditorWindow_ && profileEditorWindow_->session()->isDirty();
     });

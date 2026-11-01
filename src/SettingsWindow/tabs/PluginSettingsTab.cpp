@@ -25,6 +25,9 @@ PluginSettingsTab::PluginSettingsTab(PluginManager *manager, PluginUiHost *ui, Q
     : ElaScrollPage(parent), manager_(manager), ui_(ui)
 {
     auto *layout = AppUi::page(this, QStringLiteral("插件"));
+    auto *cloudHint = AppUi::text(QStringLiteral("集控下发的启用偏好在下次启动生效，运行状态以当前会话为准。"), this, 12);
+    cloudHint->setWordWrap(true);
+    layout->addWidget(cloudHint);
     auto *tools = new QHBoxLayout;
     search_ = new ElaLineEdit(this);
     search_->setPlaceholderText(QStringLiteral("搜索插件名称或 ID"));
@@ -80,6 +83,7 @@ PluginSettingsTab::PluginSettingsTab(PluginManager *manager, PluginUiHost *ui, Q
                                    });
             });
     refresh();
+    connect(&ConfigManager::instance(), &ConfigManager::committed, this, [this] { refresh(); });
 }
 void PluginSettingsTab::refresh()
 {

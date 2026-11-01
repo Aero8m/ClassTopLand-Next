@@ -248,6 +248,7 @@ QJsonObject CloudSyncService::syncBody() const
     QJsonArray profileFormats;
     profileFormats.append(Cloud::kProfileFormatVersion);
     QJsonArray displayFormats;
+    displayFormats.append(1);
     displayFormats.append(Cloud::kDisplayFormatVersion);
     return {{QStringLiteral("client_version"), clientVersion()},
             {QStringLiteral("supported_formats"),
@@ -847,9 +848,10 @@ void CloudSyncService::processChannel(quint64 token, const Cloud::Target& target
 {
     if (token != cycleToken_) return;
     const QString kind = target.kind;
-    const int expectedFormat =
-        kind == Cloud::profileKey() ? Cloud::kProfileFormatVersion : Cloud::kDisplayFormatVersion;
-    if (!target.present || !target.compatible || target.formatVersion != expectedFormat) {
+    const bool supportedFormat = kind == Cloud::profileKey()
+        ? target.formatVersion == Cloud::kProfileFormatVersion
+        : (target.formatVersion == 1 || target.formatVersion == Cloud::kDisplayFormatVersion);
+    if (!target.present || !target.compatible || !supportedFormat) {
         blockSignature_.remove(kind);
         done();
         return;
@@ -1046,6 +1048,11 @@ void CloudSyncService::applyContent(quint64 token, const Cloud::Target& target, 
     }
     Config candidate;
     QString error;
+    if (document.object().value(QStringLiteral("schema_version")).toInt(1) != target.formatVersion) {
+        failChannel(token, target, attempt, QStringLiteral("validation_failed"),
+                    tr("配置内容与发布格式版本不一致"), done);
+        return;
+    }
     if (!CloudDisplay::buildConfig(document.object(), ConfigManager::instance().config(),
                                    candidate, &error)) {
         failChannel(token, target, attempt, QStringLiteral("validation_failed"), error, done);
@@ -1060,6 +1067,12 @@ void CloudSyncService::applyContent(quint64 token, const Cloud::Target& target, 
         return;
     }
     emit displayConfigApplied();
+    if (document.object().contains(QStringLiteral("windowInterceptionConfig")) &&
+        (!windowRulesReload_ || !windowRulesReload_(&error))) {
+        failChannel(token, target, attempt, QStringLiteral("window_rules_apply_failed"),
+                    error.isEmpty() ? tr("窗口规则重新加载失败") : error, done);
+        return;
+    }
     completeChannel(token, target, attempt, QStringLiteral("applied"), {}, true, done);
 }
 
@@ -1071,7 +1084,8 @@ void CloudSyncService::failChannel(quint64 token, const Cloud::Target& target, i
     const QString label = target.kind == Cloud::profileKey() ? tr("课表档案") : tr("展示配置");
     notifyOnce(target.kind + QLatin1Char('|') + target.assignmentId + QLatin1Char('|') + result,
                tr("集控同步失败"), tr("%1：%2").arg(label, reason.left(200)));
-    completeChannel(token, target, attempt, result, reason, false, done);
+    completeChannel(token, target, attempt, QStringLiteral("failed"),
+                    result + QStringLiteral(": ") + reason, false, done);
 }
 
 void CloudSyncService::completeChannel(quint64 token, const Cloud::Target& target, int attempt,

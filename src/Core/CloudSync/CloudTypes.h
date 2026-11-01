@@ -12,7 +12,7 @@ namespace Cloud {
 
 constexpr char kDefaultOrigin[] = "https://ctx.aero8m.cn";
 constexpr int kProfileFormatVersion = 1;
-constexpr int kDisplayFormatVersion = 1;
+constexpr int kDisplayFormatVersion = 2;
 
 // Channel identifiers exactly as used by the HTTP contract.
 inline const QString& profileKey()

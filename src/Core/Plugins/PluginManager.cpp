@@ -243,7 +243,7 @@ void PluginManager::startRecord(const std::shared_ptr<Record> &record)
         return;
     const auto preference =
         ConfigManager::instance().config().pluginConfig.plugins.value(record->manifest.id);
-    if (preference.grantedPermissions != record->manifest.permissions)
+    if (preference.approvedVersion.isEmpty() || preference.grantedPermissions != record->manifest.permissions)
     {
         record->state = QStringLiteral("待重新授权");
         record->failure = QStringLiteral("插件权限已变化，请重新确认并启用");
