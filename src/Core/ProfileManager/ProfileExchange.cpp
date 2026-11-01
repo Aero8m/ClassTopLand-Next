@@ -448,7 +448,7 @@ bool toTables(const Profile& profile, const QString& weekId, QByteArray& content
     if (!profile.reminderRules.isEmpty())
         messages.append(QStringLiteral("自定义提醒不会导出；完整备份请使用原生 JSON。"));
     if (!profile.dateOverrides.isEmpty())
-        messages.append(QStringLiteral("指定日期的调休和换课安排不会导出；完整备份请使用原生 JSON。"));
+        messages.append(QStringLiteral("指定日期的调休、换课和代课安排不会导出；完整备份请使用原生 JSON。"));
     QJsonObject root;
     for (const auto& key : kTableDays) root.insert(key, QJsonArray{});
     root.insert(QStringLiteral("appendixTables"), QJsonObject{});
@@ -785,7 +785,7 @@ bool ProfileExchange::serialize(const Profile& profile, Format format, QByteArra
     if (!profile.reminderRules.isEmpty())
         messages.append(QStringLiteral("自定义提醒不会导出；完整备份请使用原生 JSON。"));
     if (!profile.dateOverrides.isEmpty())
-        messages.append(QStringLiteral("指定日期的调休和换课安排不会导出；完整备份请使用原生 JSON。"));
+        messages.append(QStringLiteral("指定日期的调休、换课和代课安排不会导出；完整备份请使用原生 JSON。"));
     exchangeWarnings(candidate, messages, true);
     if (!validateTransfer(candidate, error)) return false;
     YAML::Emitter out;

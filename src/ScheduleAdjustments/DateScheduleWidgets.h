@@ -7,11 +7,14 @@
 
 class ElaComboBox;
 class ElaPushButton;
+class ElaPivot;
 class ElaText;
 class CompactScheduleText;
 class QButtonGroup;
 class QCloseEvent;
 class QListWidget;
+class QStackedWidget;
+class QLabel;
 
 class FutureDatePicker final : public ElaCalendarPicker {
     Q_OBJECT
@@ -61,6 +64,7 @@ public:
 signals:
     void swapRequested(const QDate& firstDate, const QString& firstWeekId, int first,
                        const QDate& secondDate, const QString& secondWeekId, int second);
+    void substituteRequested(const QDate& date, const QString& weekId, int classIndex, const QString& subject);
     void restoreRequested(const QDate& date);
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -77,9 +81,16 @@ private:
     void rebuildClasses(int side);
     void rebuildBoth();
     void synchronizeSource(int side);
+    void selectMode(int index);
+    QString selectedSubject() const;
     void updateSelection();
     Profile profile_;
     CourseSide sides_[2];
+    ElaPivot* pivot_;
+    QStackedWidget* rightStack_;
+    QListWidget* subjects_;
+    CompactScheduleText* subjectHint_;
+    QLabel* arrow_;
     CompactScheduleText* summary_;
     ElaText* error_;
     ElaPushButton* confirm_;

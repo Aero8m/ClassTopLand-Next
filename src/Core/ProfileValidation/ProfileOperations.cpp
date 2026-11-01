@@ -9,6 +9,20 @@ bool fail(QString *e, const QString &m)
         *e = m;
     return false;
 }
+// Preserve the original source snapshot when composing date-specific edits.
+void replaceDate(Profile &candidate, const Profile &original, const QDate &date,
+                 const DateSchedule::Result &table, const DaySchedule &day)
+{
+    const auto *existing = DateSchedule::find(original, date);
+    DateScheduleOverride record{date, table.sourceWeekScheduleId, table.sourceWeekday,
+                                existing && table.special ? existing->sourceClasses
+                                                          : DateSchedule::sorted(day.classes),
+                                table.classes};
+    for (qsizetype i = candidate.dateOverrides.size(); i-- > 0;)
+        if (candidate.dateOverrides[i].date == date)
+            candidate.dateOverrides.removeAt(i);
+    candidate.dateOverrides.append(record);
+}
 } // namespace
 bool ProfileOperations::reschedule(Profile &profile, const QDate &date, const QString &weekId, int weekday,
                                    QString *error)
@@ -63,23 +77,38 @@ bool ProfileOperations::swap(Profile &profile, const QDate &firstDate, const QSt
         std::swap(left.classes[first].subject, right.classes[second].subject);
 
     Profile candidate = profile;
-    auto replace = [&](const QDate &date, const DateSchedule::Result &table, const DaySchedule &day)
-    {
-        // Keep an existing source snapshot; only the effective subjects change.
-        const auto *existing = DateSchedule::find(profile, date);
-        DateScheduleOverride record{date, table.sourceWeekScheduleId, table.sourceWeekday,
-                                    existing && table.special ? existing->sourceClasses
-                                                              : DateSchedule::sorted(day.classes),
-                                    table.classes};
-        for (qsizetype i = candidate.dateOverrides.size(); i-- > 0;)
-            if (candidate.dateOverrides[i].date == date)
-                candidate.dateOverrides.removeAt(i);
-        candidate.dateOverrides.append(record);
-    };
-    replace(firstDate, left, *leftDay);
+    replaceDate(candidate, profile, firstDate, left, *leftDay);
     if (!sameDate)
-        replace(secondDate, right, *rightDay);
+        replaceDate(candidate, profile, secondDate, right, *rightDay);
     // Both endpoints are published only after the single atomic write succeeds.
+    profile = std::move(candidate);
+    return true;
+}
+
+bool ProfileOperations::substitute(Profile &profile, const QDate &date, const QString &weekId,
+                                   int classIndex, const QString &subject, QString *error)
+{
+    if (error) error->clear();
+    if (!date.isValid() || date < QDate::currentDate())
+        return fail(error, QStringLiteral("请选择今天或未来日期"));
+    bool subjectExists = false;
+    for (const auto &item : profile.subjects)
+        if (!item.name.trimmed().isEmpty() && item.name == subject) { subjectExists = true; break; }
+    if (!subjectExists)
+        return fail(error, QStringLiteral("请选择当前档案中已有的科目"));
+    auto table = DateSchedule::resolve(profile, date, weekId);
+    if (!table.valid)
+        return fail(error, table.error);
+    if (classIndex < 0 || classIndex >= table.classes.size())
+        return fail(error, QStringLiteral("请选择有效的课程"));
+    if (table.classes[classIndex].subject == subject)
+        return fail(error, QStringLiteral("科目相同，无需代课"));
+    const auto *day = DateSchedule::sourceDay(profile, table.sourceWeekScheduleId, table.sourceWeekday);
+    if (!day)
+        return fail(error, QStringLiteral("来源日课表不存在"));
+    table.classes[classIndex].subject = subject;
+    Profile candidate = profile;
+    replaceDate(candidate, profile, date, table, *day);
     profile = std::move(candidate);
     return true;
 }

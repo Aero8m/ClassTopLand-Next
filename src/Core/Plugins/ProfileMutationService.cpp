@@ -198,6 +198,13 @@ QJsonObject ProfileMutationService::apply(const QJsonObject &request, QJsonValue
                                     message = QStringLiteral("科目正在被课程引用");
                                     return invalid();
                                 }
+                    for (const auto& record : data.value(QStringLiteral("dateOverrides")).toArray())
+                        for (const auto& course : record.toObject().value(QStringLiteral("classes")).toArray())
+                            if (course.toObject().value(QStringLiteral("subject")).toString() == old)
+                            {
+                                message = QStringLiteral("科目正在被特殊安排引用");
+                                return invalid();
+                            }
                 }
                 list.removeAt(index);
                 if (week && data.value(QStringLiteral("activeWeekScheduleId")).toString() == ref)
@@ -241,6 +248,22 @@ QJsonObject ProfileMutationService::apply(const QJsonObject &request, QJsonValue
                         weeks[w] = weekItem;
                     }
                     data.insert(QStringLiteral("schedules"), weeks);
+                    auto records = data.value(QStringLiteral("dateOverrides")).toArray();
+                    for (int r = 0; r < records.size(); ++r)
+                    {
+                        auto record = records[r].toObject();
+                        auto classes = record.value(QStringLiteral("classes")).toArray();
+                        for (int c = 0; c < classes.size(); ++c)
+                        {
+                            auto course = classes[c].toObject();
+                            if (course.value(QStringLiteral("subject")).toString() == old)
+                                course.insert(QStringLiteral("subject"), current.value(QStringLiteral("name")));
+                            classes[c] = course;
+                        }
+                        record.insert(QStringLiteral("classes"), classes);
+                        records[r] = record;
+                    }
+                    data.insert(QStringLiteral("dateOverrides"), records);
                     QList<ReminderRule> reminders;
                     if (!Reminders::fromJson(data.value(QStringLiteral("reminderRules")), reminders, &message)) return invalid();
                     Reminders::renameSubject(reminders, old, current.value(QStringLiteral("name")).toString());

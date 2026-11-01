@@ -31,6 +31,7 @@ public:
     static bool validateTimePoints(const QList<TimeLinePoint>& points, QString* error = nullptr);
     bool applyTimeLine(int weekIndex, int weekday, int lineIndex, QString* error = nullptr);
     static ValidationError validate(const Profile& profile);
+    ValidationError validateForSave() const;
     QStringList warnings() const;
 
 signals:

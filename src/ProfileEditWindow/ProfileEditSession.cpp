@@ -84,6 +84,10 @@ void ProfileEditSession::syncDateOverrides(const QList<DateScheduleOverride>& re
 {
     saved_.dateOverrides = records;
     draft_.dateOverrides = records;
+    // Apply pending draft renames once to the newly persisted effective subjects.
+    for (auto& record : draft_.dateOverrides) for (auto& course : record.classes)
+        if (subjectRenames_.contains(course.subject))
+            course.subject = subjectRenames_.value(course.subject);
     notifyChanged();
 }
 
@@ -139,6 +143,8 @@ bool ProfileEditSession::updateSubject(int index, const Subject& subject, QStrin
         draft_.subjects[index] = updated;
         for (auto& week : draft_.schedules) for (auto& day : week.daySchedules) for (auto& course : day.classes)
             if (course.subject == oldName) course.subject = name;
+        for (auto& record : draft_.dateOverrides) for (auto& course : record.classes)
+            if (course.subject == oldName) course.subject = name;
     }
     notifyChanged();
     return true;
@@ -149,6 +155,9 @@ bool ProfileEditSession::removeSubject(int index, QString* error)
     if (index < 0 || index >= draft_.subjects.size()) return fail(error, tr("科目不存在"));
     for (const auto& week : draft_.schedules) for (const auto& day : week.daySchedules) for (const auto& course : day.classes)
         if (course.subject == draft_.subjects[index].name) return fail(error, tr("科目正在被课表使用，请先修改对应课程"));
+    for (const auto& record : draft_.dateOverrides) for (const auto& course : record.classes)
+        if (course.subject == draft_.subjects[index].name)
+            return fail(error, tr("科目正在被特殊安排使用，请先修改对应课程或恢复日期安排"));
     draft_.subjects.removeAt(index);
     notifyChanged();
     return true;
@@ -179,6 +188,22 @@ bool ProfileEditSession::applyTimeLine(int weekIndex, int weekday, int lineIndex
 ProfileEditSession::ValidationError ProfileEditSession::validate(const Profile& profile)
 {
     return ProfileValidation::validate(profile);
+}
+
+ProfileEditSession::ValidationError ProfileEditSession::validateForSave() const
+{
+    if (auto failure = validate(draft_)) return failure;
+    QSet<QString> known, available;
+    for (const auto& subject : saved_.subjects) known.insert(subject.name);
+    for (const auto& name : subjectRenames_) known.insert(name);
+    for (const auto& subject : draft_.subjects) available.insert(subject.name);
+    // A date edit can arrive after a subject was deleted in this draft. Keep the
+    // draft intact, but prevent saving that deletion over a newly persisted use.
+    // Pre-existing undefined names remain compatible with imported profiles.
+    for (const auto& record : draft_.dateOverrides) for (const auto& course : record.classes)
+        if (known.contains(course.subject) && !available.contains(course.subject))
+            return {tr("科目“%1”正在被特殊安排使用，请恢复该科目或修改对应日期安排").arg(course.subject), Page::Subjects};
+    return {};
 }
 
 QStringList ProfileEditSession::warnings() const

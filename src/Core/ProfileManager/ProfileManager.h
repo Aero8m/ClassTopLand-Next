@@ -37,6 +37,8 @@ public:
     bool swapDateClasses(const QDate& firstDate, const QString& firstWeekId, int first,
                          const QDate& secondDate, const QString& secondWeekId, int second,
                          QString* error = nullptr);
+    bool substituteDateClass(const QDate& date, const QString& weekId, int classIndex,
+                             const QString& subject, QString* error = nullptr);
     bool restoreDate(const QDate& date, QString* error = nullptr);
     // Remove overrides before the supplied date. No write when unchanged.
     bool cleanPastDateOverrides(const QDate& today, QString* error = nullptr,

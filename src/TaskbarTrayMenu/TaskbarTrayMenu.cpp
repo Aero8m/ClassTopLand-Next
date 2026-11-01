@@ -312,7 +312,7 @@ void TaskbarTrayMenu::initUI()
     connect(profileEditorButton, &ElaIconButton::clicked, this,
             &TaskbarTrayMenu::profileEditorRequested);
     auto* reschedule = addShortcut(ElaIconType::CalendarDays, tr("调休"), QStringLiteral("rescheduleButton"));
-    auto* swap = addShortcut(ElaIconType::ArrowRightArrowLeft, tr("换课"), QStringLiteral("swapClassesButton"));
+    auto* swap = addShortcut(ElaIconType::ArrowRightArrowLeft, tr("换课 / 代课"), QStringLiteral("swapClassesButton"));
     connect(reschedule, &ElaIconButton::clicked, this, &TaskbarTrayMenu::rescheduleWindowRequested);
     connect(swap, &ElaIconButton::clicked, this, &TaskbarTrayMenu::swapWindowRequested);
     shortcuts->addLayout(cards);

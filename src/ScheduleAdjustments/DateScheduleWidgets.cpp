@@ -4,6 +4,7 @@
 #include <ElaComboBox.h>
 #include <ElaIcon.h>
 #include <ElaPushButton.h>
+#include <ElaPivot.h>
 #include <ElaScrollArea.h>
 #include <ElaScrollBar.h>
 #include <ElaText.h>
@@ -14,13 +15,18 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QListWidget>
+#include <QListView>
+#include <QItemSelectionModel>
 #include <QLabel>
 #include <QPainter>
 #include <QResizeEvent>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QStyledItemDelegate>
+#include <QStackedWidget>
+#include <QTimer>
 #include <QVBoxLayout>
 
 // Keep long schedule/subject names from taking space away from the course lists.
@@ -132,6 +138,77 @@ public:
             painter->drawRoundedRect(rect.adjusted(1, 1, -1, -1), 7, 7);
         }
         painter->restore();
+    }
+};
+
+class SubjectDelegate final : public QStyledItemDelegate {
+public:
+    explicit SubjectDelegate(QListWidget* view) : QStyledItemDelegate(view), view_(view) {}
+    QSize sizeHint(const QStyleOptionViewItem&, const QModelIndex&) const override { return view_->gridSize(); }
+    void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override
+    {
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+        const auto mode = eTheme->getThemeMode();
+        const bool selected = option.state & QStyle::State_Selected;
+        const bool hovered = option.state & QStyle::State_MouseOver;
+        const QRect rect = option.rect.adjusted(4, 4, -4, -4);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(selected ? ElaThemeColor(mode, PrimaryNormal)
+                                  : hovered ? ElaThemeColor(mode, BasicHover) : ElaThemeColor(mode, BasicBase));
+        painter->drawRoundedRect(rect, 7, 7);
+        painter->setPen(selected && mode == ElaThemeType::Light ? Qt::white : ElaThemeColor(mode, BasicText));
+        QFont font = option.font;
+        font.setPixelSize(15); font.setBold(selected); painter->setFont(font);
+        const QRect textRect = rect.adjusted(10, 0, -10, 0);
+        painter->drawText(textRect, Qt::AlignCenter,
+            QFontMetrics(font).elidedText(index.data().toString(), Qt::ElideRight, qMax(0, textRect.width())));
+        if (option.state & QStyle::State_HasFocus) {
+            painter->setBrush(Qt::NoBrush); painter->setPen(ElaThemeColor(mode, BasicText));
+            painter->drawRoundedRect(rect.adjusted(1, 1, -1, -1), 7, 7);
+        }
+        painter->restore();
+    }
+private:
+    QListWidget* view_;
+};
+
+class SubjectGrid final : public QListWidget {
+public:
+    explicit SubjectGrid(QWidget* parent) : QListWidget(parent)
+    {
+        setViewMode(QListView::IconMode);
+        setFlow(QListView::LeftToRight);
+        setWrapping(true);
+        setResizeMode(QListView::Adjust);
+        setMovement(QListView::Static);
+        setSelectionMode(QAbstractItemView::SingleSelection);
+        setEditTriggers(QAbstractItemView::NoEditTriggers);
+        setUniformItemSizes(true);
+        setWordWrap(false);
+        setMouseTracking(true);
+        setSpacing(0);
+        setMinimumSize(0, 68);
+        setFrameShape(QFrame::NoFrame);
+        setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        setVerticalScrollBar(new ElaScrollBar(Qt::Vertical, this));
+        setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+        setStyleSheet(QStringLiteral("QListWidget { background: transparent; border: 0; }"));
+        setGridSize(QSize(120, 60));
+        setItemDelegate(new SubjectDelegate(this));
+    }
+protected:
+    void resizeEvent(QResizeEvent* event) override
+    {
+        QListWidget::resizeEvent(event);
+        // Wait for scrollbar visibility to settle before fitting the columns.
+        QTimer::singleShot(0, this, [this] {
+            // Reserve scrollbar space to keep wrapped columns stable when it appears.
+            const int width = qMax(1, maximumViewportSize().width() - verticalScrollBar()->sizeHint().width() - 2);
+            const int columns = qMax(1, width / 120);
+            const QSize size(width / columns, 60);
+            if (gridSize() != size) setGridSize(size);
+        });
     }
 };
 
@@ -309,7 +386,7 @@ RescheduleWindow::RescheduleWindow(QWidget* parent) : ElaDialog(parent)
     restore_ = action(tr("恢复原课表"), footer);
     restore_->setObjectName(QStringLiteral("restoreReschedule"));
     restore_->setMinimumWidth(100);
-    restore_->setToolTip(tr("移除所选日期的全部调休和换课安排"));
+    restore_->setToolTip(tr("移除所选日期的全部调休、换课和代课安排"));
     auto* cancel = action(tr("取消"), footer);
     cancel->setObjectName(QStringLiteral("cancelReschedule"));
     confirm_ = action(tr("应用调休"), footer, true);
@@ -350,7 +427,7 @@ void RescheduleWindow::updateActions()
     QString validation;
     const bool valid = day && DateSchedule::validateClasses(day->classes, &validation);
     confirm_->setEnabled(date_->date() >= QDate::currentDate() && valid);
-    if (record) status_->setText(tr("已有特殊安排（%1）。确定将替换该日期全部调休和换课。").arg(sourceText(profile_, *record)));
+    if (record) status_->setText(tr("已有特殊安排（%1）。确定将替换该日期全部调休、换课和代课。").arg(sourceText(profile_, *record)));
     else if (!day) status_->setText(tr("请选择来源课表及其中已建立的星期。"));
     else if (!valid) status_->setText(tr("来源日课程无效：%1").arg(validation));
     else status_->setText(day->classes.isEmpty() ? tr("来源日无课程，确认后该日期将无课。") : tr("仅对所选日期生效，重启后保留。"));
@@ -365,7 +442,7 @@ void RescheduleWindow::reject() { hide(); }
 
 SwapClassesWindow::SwapClassesWindow(QWidget* parent) : ElaWidget(parent)
 {
-    setObjectName(QStringLiteral("SwapClassesWindow")); setWindowTitle(tr("换课"));
+    setObjectName(QStringLiteral("SwapClassesWindow")); setWindowTitle(tr("换课 / 代课"));
     // ElaWidget's background selector uses its original object name. Keep the
     // native backdrop visible after renaming, independently of the OS palette.
     setStyleSheet(QStringLiteral("#SwapClassesWindow { background-color: transparent; }"));
@@ -376,8 +453,21 @@ SwapClassesWindow::SwapClassesWindow(QWidget* parent) : ElaWidget(parent)
     resize(960, 620); setMinimumSize(680, 460);
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0); root->setSpacing(0);
+    auto* pivotPanel = new QWidget(this);
+    auto* pivotLayout = new QHBoxLayout(pivotPanel);
+    pivotLayout->setContentsMargins(20, 12, 20, 0);
+    pivot_ = new ElaPivot(pivotPanel);
+    pivot_->setObjectName(QStringLiteral("adjustmentMode"));
+    pivot_->setAccessibleName(tr("课程调整方式"));
+    pivot_->setTextPixelSize(16);
+    pivot_->appendPivot(tr("换课"));
+    pivot_->appendPivot(tr("代课"));
+    pivot_->setFixedHeight(40);
+    pivotLayout->addWidget(pivot_);
+    root->addWidget(pivotPanel);
     auto* scroll = new ElaScrollArea(this);
     scroll->setObjectName(QStringLiteral("swapContentScroll"));
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setMinimumSize(0, 0);
     scroll->setWidgetResizable(true);
@@ -390,6 +480,10 @@ SwapClassesWindow::SwapClassesWindow(QWidget* parent) : ElaWidget(parent)
     body->setContentsMargins(20, 16, 20, 18); body->setSpacing(12);
     auto* columns = new QHBoxLayout;
     columns->setSpacing(12);
+    rightStack_ = new QStackedWidget(content);
+    rightStack_->setObjectName(QStringLiteral("adjustmentTarget"));
+    rightStack_->setMinimumSize(0, 0);
+    rightStack_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
     for (int i = 0; i < 2; ++i) {
         auto& side = sides_[i];
         auto* panel = new QWidget(content);
@@ -399,7 +493,9 @@ SwapClassesWindow::SwapClassesWindow(QWidget* parent) : ElaWidget(parent)
         layout->setContentsMargins(0, 0, 0, 0); layout->setSpacing(10);
         const QString title = i == 0 ? tr("来源课程") : tr("要换的课程");
         const QString prefix = i == 0 ? QStringLiteral("swapLeft") : QStringLiteral("swapRight");
-        layout->addWidget(AppUi::text(title, panel, 18));
+        auto* heading = AppUi::text(title, panel, 18);
+        heading->setWordWrap(false);
+        layout->addWidget(heading);
         auto* dateRow = new QHBoxLayout;
         side.date = new FutureDatePicker(panel);
         side.date->setObjectName(prefix + QStringLiteral("Date"));
@@ -431,16 +527,19 @@ SwapClassesWindow::SwapClassesWindow(QWidget* parent) : ElaWidget(parent)
         layout->addWidget(side.courses, 1);
         side.restore = action(tr("恢复此日期安排"), panel);
         side.restore->setObjectName(prefix + QStringLiteral("Restore"));
-        side.restore->setToolTip(tr("清除此日期全部调休和换课安排，另一日期的安排继续保留。"));
+        side.restore->setToolTip(tr("清除此日期全部调休、换课和代课安排，另一日期的安排继续保留。"));
         layout->addWidget(side.restore);
-        columns->addWidget(panel, 1);
+        if (i == 0) columns->addWidget(panel, 1);
+        else { rightStack_->addWidget(panel); columns->addWidget(rightStack_, 1); }
         if (i == 0) {
-            auto* arrow = new QLabel(content);
+            arrow_ = new QLabel(content);
+            auto* arrow = arrow_;
             arrow->setObjectName(QStringLiteral("swapArrow"));
             arrow->setFixedSize(40, 40);
             arrow->setAccessibleName(tr("交换科目"));
-            auto refreshArrow = [arrow] {
-                arrow->setPixmap(ElaIcon::getInstance()->getElaIcon(ElaIconType::ArrowRightArrowLeft, 28,
+            auto refreshArrow = [this, arrow] {
+                arrow->setPixmap(ElaIcon::getInstance()->getElaIcon(
+                    rightStack_->currentIndex() == 1 ? ElaIconType::ArrowRight : ElaIconType::ArrowRightArrowLeft, 28,
                     ElaThemeColor(eTheme->getThemeMode(), BasicText)).pixmap(QSize(40, 40), arrow->devicePixelRatioF()));
             };
             refreshArrow();
@@ -473,22 +572,42 @@ SwapClassesWindow::SwapClassesWindow(QWidget* parent) : ElaWidget(parent)
         connect(side.restore, &ElaPushButton::clicked, this, [this, i] {
             const auto date = sides_[i].date->date();
             if (AppUi::confirm(this, tr("恢复此日期安排"),
-                tr("清除 %1 的全部调休和换课安排？其他日期的安排继续保留。")
+                tr("清除 %1 的全部调休、换课和代课安排？其他日期的安排继续保留。")
                     .arg(date.toString(Qt::ISODate))))
                 emit restoreRequested(date);
         });
     }
+    auto* substitutePanel = new QWidget(rightStack_);
+    auto* substituteLayout = new QVBoxLayout(substitutePanel);
+    substituteLayout->setContentsMargins(0, 0, 0, 0);
+    substituteLayout->setSpacing(10);
+    auto* subjectHeading = AppUi::text(tr("代课科目"), substitutePanel, 18);
+    subjectHeading->setWordWrap(false);
+    substituteLayout->addWidget(subjectHeading);
+    subjects_ = new SubjectGrid(substitutePanel);
+    subjects_->setObjectName(QStringLiteral("substituteSubjects"));
+    subjects_->setAccessibleName(tr("代课科目，点击选择一个科目"));
+    subjectHint_ = new CompactScheduleText(substitutePanel, 13, 2);
+    subjectHint_->setObjectName(QStringLiteral("substituteHint"));
+    substituteLayout->addWidget(subjectHint_);
+    substituteLayout->addWidget(subjects_, 1);
+    rightStack_->addWidget(substitutePanel);
     body->addLayout(columns, 1);
-    summary_ = new CompactScheduleText(content, 16, 2);
+    auto* statusPanel = new QWidget(this);
+    auto* statusLayout = new QVBoxLayout(statusPanel);
+    statusLayout->setContentsMargins(20, 8, 20, 10);
+    statusLayout->setSpacing(6);
+    summary_ = new CompactScheduleText(statusPanel, 16, 2);
     summary_->setObjectName(QStringLiteral("swapSummary"));
-    summary_->setFullText(tr("请选择两节课程")); body->addWidget(summary_);
-    error_ = AppUi::text({}, content, 13); error_->setObjectName(QStringLiteral("swapError"));
-    error_->hide(); body->addWidget(error_);
+    summary_->setFullText(tr("请选择两节课程")); statusLayout->addWidget(summary_);
+    error_ = AppUi::text({}, statusPanel, 13); error_->setObjectName(QStringLiteral("swapError"));
+    error_->hide(); statusLayout->addWidget(error_);
     scroll->setWidget(content);
     content->setAutoFillBackground(false);
     scroll->setAutoFillBackground(false);
     scroll->viewport()->setAutoFillBackground(false);
     root->addWidget(scroll, 1);
+    root->addWidget(statusPanel);
     auto* footerPanel = new DialogFooter(this);
     footerPanel->setFixedHeight(72);
     auto* footer = new QHBoxLayout(footerPanel);
@@ -502,6 +621,11 @@ SwapClassesWindow::SwapClassesWindow(QWidget* parent) : ElaWidget(parent)
         updateSelection();
         if (!confirm_->isEnabled()) return;
         const auto& left = sides_[0]; const auto& right = sides_[1];
+        if (rightStack_->currentIndex() == 1) {
+            emit substituteRequested(left.date->date(), left.table.sourceWeekScheduleId,
+                left.courses->row(left.courses->selectedItems().first()), selectedSubject());
+            return;
+        }
         emit swapRequested(left.date->date(), left.table.sourceWeekScheduleId,
             left.courses->row(left.courses->selectedItems().first()),
             right.date->date(), right.table.sourceWeekScheduleId,
@@ -511,15 +635,65 @@ SwapClassesWindow::SwapClassesWindow(QWidget* parent) : ElaWidget(parent)
     connect(this, &ElaWidget::closeButtonClicked, this, &QWidget::close);
     auto* escape = new QShortcut(QKeySequence(Qt::Key_Escape), this);
     connect(escape, &QShortcut::activated, this, &QWidget::close);
-    auto refreshCourses = [this] { for (auto& side : sides_) side.courses->viewport()->update(); };
+    auto refreshCourses = [this] {
+        for (auto& side : sides_) side.courses->viewport()->update();
+        subjects_->viewport()->update();
+    };
     connect(eTheme, &ElaTheme::themeModeChanged, this, refreshCourses);
     connect(&ThemeManager::instance(), &ThemeManager::themeColorChanged, this, refreshCourses);
-    confirm_->setEnabled(false);
+    connect(subjects_, &QListWidget::itemSelectionChanged, this, [this] {
+        error_->hide(); updateSelection();
+    });
+    connect(pivot_, &ElaPivot::pivotClicked, this, &SwapClassesWindow::selectMode);
+    if (auto* view = pivot_->findChild<QListView*>()) {
+        connect(view->selectionModel(), &QItemSelectionModel::currentChanged, this, [this, view] {
+            // ElaPivot only emits pivotClicked for mouse input.
+            QTimer::singleShot(0, this, [this, view] { selectMode(view->currentIndex().row()); });
+        });
+    }
+    selectMode(0);
+}
+
+void SwapClassesWindow::selectMode(int index)
+{
+    if (index < 0 || index >= rightStack_->count()) return;
+    pivot_->setCurrentIndex(index);
+    if (auto* view = pivot_->findChild<QListView*>()) {
+        const QSignalBlocker blocker(view->selectionModel());
+        view->setCurrentIndex(view->model()->index(index, 0));
+    }
+    rightStack_->setCurrentIndex(index);
+    const bool substitute = index == 1;
+    confirm_->setText(substitute ? tr("确认代课") : tr("确认换课"));
+    confirm_->setAccessibleName(confirm_->text());
+    arrow_->setAccessibleName(substitute ? tr("替换科目") : tr("交换科目"));
+    arrow_->setPixmap(ElaIcon::getInstance()->getElaIcon(
+        substitute ? ElaIconType::ArrowRight : ElaIconType::ArrowRightArrowLeft, 28,
+        ElaThemeColor(eTheme->getThemeMode(), BasicText)).pixmap(QSize(40, 40), arrow_->devicePixelRatioF()));
+    error_->hide();
+    updateSelection();
 }
 
 void SwapClassesWindow::refreshProfile(const Profile& profile)
 {
     profile_ = profile;
+    {
+        QSignalBlocker blocker(subjects_);
+        const QString preferred = selectedSubject();
+        subjects_->clear();
+        for (const auto& subject : profile_.subjects) {
+            if (subject.name.trimmed().isEmpty()) continue;
+            auto* item = new QListWidgetItem(subject.name, subjects_);
+            item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            item->setToolTip(subject.name);
+            item->setData(Qt::AccessibleTextRole, subject.name);
+            if (subject.name == preferred) subjects_->setCurrentItem(item);
+        }
+        subjects_->setEnabled(subjects_->count() > 0);
+        subjectHint_->setFullText(subjects_->isEnabled()
+            ? tr("点击下方科目，仅替换所选日期的这一节课，\n保留原上课时间。")
+            : tr("暂无科目，请先到档案编辑中\n添加科目并保存。"));
+    }
     for (auto& side : sides_) {
         QString preferred = side.source->isEnabled() ? side.source->currentData().toString() : QString();
         {
@@ -571,7 +745,7 @@ void SwapClassesWindow::rebuildClasses(int index)
         side.status->setFullText(tr("无法读取课程，请选择有效的周课表：%1").arg(side.table.error));
     else if (side.table.classes.isEmpty()) side.status->setFullText(tr("该日期无课程。"));
     else if (side.table.special)
-        side.status->setFullText(tr("已有特殊安排（%1），将在当前结果上换课。").arg(sourceText(profile_, *record)));
+        side.status->setFullText(tr("已有特殊安排（%1），将在当前结果上调整科目。").arg(sourceText(profile_, *record)));
     else side.status->setFullText(tr("当前课表：%1 · %2").arg(side.table.name, side.weekday->text()));
     if (side.table.valid) for (const auto& course : side.table.classes) {
         auto* item = new QListWidgetItem(course.subject, side.courses);
@@ -582,11 +756,18 @@ void SwapClassesWindow::rebuildClasses(int index)
     }
 }
 
+QString SwapClassesWindow::selectedSubject() const
+{
+    const auto selected = subjects_->selectedItems();
+    return selected.isEmpty() ? QString() : selected.first()->text();
+}
+
 void SwapClassesWindow::updateSelection()
 {
     int rows[2] = {-1, -1};
     bool valid = true;
-    for (int i = 0; i < 2; ++i) {
+    const bool substitute = rightStack_->currentIndex() == 1;
+    for (int i = 0; i < (substitute ? 1 : 2); ++i) {
         const auto& side = sides_[i];
         const auto selected = side.courses->selectedItems();
         if (!selected.isEmpty()) rows[i] = side.courses->row(selected.first());
@@ -594,8 +775,24 @@ void SwapClassesWindow::updateSelection()
             rows[i] >= 0 && rows[i] < side.table.classes.size();
     }
     confirm_->setEnabled(false);
-    if (!valid) { summary_->setFullText(tr("请在左右两侧各选择一节今天或未来的课程。")); return; }
+    if (!valid) {
+        summary_->setFullText(substitute ? tr("请在左侧选择一节今天或未来的课程，并选择代课科目。")
+                                         : tr("请在左右两侧各选择一节今天或未来的课程。"));
+        return;
+    }
     const auto& left = sides_[0]; const auto& right = sides_[1];
+    if (substitute) {
+        const QString subject = selectedSubject();
+        const auto& course = left.table.classes[rows[0]];
+        if (subject.isEmpty()) { summary_->setFullText(tr("请选择代课科目。")); return; }
+        const bool different = course.subject != subject;
+        summary_->setFullText(tr("%1 第 %2 节 %3–%4\n%5 → %6%7").arg(
+            left.date->date().toString(QStringLiteral("yyyy-MM-dd"))).arg(rows[0] + 1).arg(
+            course.startTime.toString(QStringLiteral("HH:mm")), course.endTime.toString(QStringLiteral("HH:mm")),
+            course.subject, subject, different ? QString() : tr("（科目相同，无需代课）")));
+        confirm_->setEnabled(different && subjects_->isEnabled());
+        return;
+    }
     if (left.date->date() == right.date->date() && rows[0] == rows[1]) {
         summary_->setFullText(tr("请选择两节不同的课程。")); return;
     }

@@ -367,6 +367,15 @@ void AppComposer::showSwapWindow()
             }
             syncDateAdjustments();
         });
+        connect(swapWindow_.get(), &SwapClassesWindow::substituteRequested, this,
+                [this](const QDate& date, const QString& weekId, int classIndex, const QString& subject) {
+            if (!initialized_) return;
+            QString error;
+            if (!ProfileManager::instance().substituteDateClass(date, weekId, classIndex, subject, &error)) {
+                swapWindow_->showError(tr("代课保存失败：%1").arg(error)); return;
+            }
+            syncDateAdjustments();
+        });
         connect(swapWindow_.get(), &SwapClassesWindow::restoreRequested, this, [this](const QDate& date) {
             if (!initialized_) return;
             QString error;
@@ -420,7 +429,7 @@ void AppComposer::cleanupDateOverrides()
     if (!canceled.isEmpty() && trayMenu_) {
         QStringList dates;
         for (const auto& date : canceled) dates.append(date.toString(Qt::ISODate));
-        trayMenu_->showScheduleError(tr("来源日课程已变化，已取消调休和换课：%1").arg(dates.join(QStringLiteral("、"))));
+        trayMenu_->showScheduleError(tr("来源日课程已变化，已取消调休、换课和代课：%1").arg(dates.join(QStringLiteral("、"))));
     }
 }
 

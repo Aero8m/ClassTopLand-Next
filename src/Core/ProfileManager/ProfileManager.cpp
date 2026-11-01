@@ -132,6 +132,14 @@ bool ProfileManager::swapDateClasses(const QDate& firstDate, const QString& firs
     return commit(candidate, error);
 }
 
+bool ProfileManager::substituteDateClass(const QDate& date, const QString& weekId, int classIndex,
+                                        const QString& subject, QString* error)
+{
+    Profile candidate = profile_;
+    if (!ProfileOperations::substitute(candidate, date, weekId, classIndex, subject, error)) return false;
+    return commit(candidate, error);
+}
+
 bool ProfileManager::restoreDate(const QDate& date, QString* error)
 {
     if (error) error->clear();

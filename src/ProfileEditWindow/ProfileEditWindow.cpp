@@ -79,7 +79,7 @@ void ProfileEditWindow::updateState()
 }
 bool ProfileEditWindow::saveProfile()
 {
-    const auto failure = ProfileEditSession::validate(session_->draft());
+    const auto failure = session_->validateForSave();
     if (failure) {
         QWidget* target = info_;
         switch (failure.page) {
@@ -109,7 +109,7 @@ bool ProfileEditWindow::saveProfile()
     if (!canceled.isEmpty()) {
         QStringList dates;
         for (const auto& date : canceled) dates.append(date.toString(Qt::ISODate));
-        warnings.append(tr("来源日课程已变化，已取消以下日期的调休和换课：%1").arg(dates.join(QStringLiteral("、"))));
+        warnings.append(tr("来源日课程已变化，已取消以下日期的调休、换课和代课：%1").arg(dates.join(QStringLiteral("、"))));
     }
     if (warnings.isEmpty()) ElaMessageBar::success(ElaMessageBarType::TopRight, tr("保存成功"), {}, 2500, this);
     else ElaMessageBar::warning(ElaMessageBarType::TopRight, tr("已保存"), warnings.join(QLatin1Char('\n')), 8000, this);
