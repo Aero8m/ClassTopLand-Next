@@ -53,6 +53,8 @@ Q_SIGNALS:
     // The user asked for one of the AppComposer-owned windows. The panel never creates
     // or owns them, so it stays a pure presentation layer.
     void settingsRequested();
+    void agentRequested();
+    void pluginsRequested();
     void profileEditorRequested();
     void weekScheduleRequested(const QString& id);
     void scheduleListRefreshRequested();

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ElaContentDialog.h>
+#include <QSize>
 #include <QTime>
 #include <functional>
 
@@ -15,6 +16,8 @@ class QStandardItemModel;
 class QVBoxLayout;
 
 namespace AppUi {
+inline constexpr QSize defaultWindowSize{850, 550};
+
 // Touch gestures only; mouse selection, editing and drag/drop remain available.
 void enableTouchScrolling(QAbstractScrollArea* area, Qt::Orientations directions = Qt::Vertical);
 // Let an interactive canvas handle touches without ancestor scrolling or tap buffering.

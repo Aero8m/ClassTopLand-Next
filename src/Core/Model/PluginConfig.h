@@ -9,6 +9,8 @@ struct PluginPreference
     QJsonObject grantedPermissions;
     QString approvedVersion;
     QString fault;
+    QString activeRevision;
+    QString sourceName;
 };
 struct PluginConfig
 {

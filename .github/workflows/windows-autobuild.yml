@@ -89,9 +89,9 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path out/setupBuild -Force | Out-Null
           Copy-Item build/ClassTopLand-Next.exe, build/ElaWidgetTools.dll out/setupBuild/
-          & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --release --force --no-quick-import --no-translations out/setupBuild/ClassTopLand-Next.exe
+          & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --release --force --no-quick-import --no-translations --no-compiler-runtime out/setupBuild/ClassTopLand-Next.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          foreach ($file in @('ClassTopLand-Next.exe', 'ElaWidgetTools.dll', 'Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'Qt6Qml.dll', 'Qt6Network.dll', 'platforms/qwindows.dll', 'tls/qschannelbackend.dll', 'vc_redist.x64.exe')) {
+          foreach ($file in @('ClassTopLand-Next.exe', 'ElaWidgetTools.dll', 'Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'Qt6Qml.dll', 'Qt6Network.dll', 'platforms/qwindows.dll', 'tls/qschannelbackend.dll')) {
             if (-not (Test-Path "out/setupBuild/$file" -PathType Leaf)) {
               throw "Deployment is missing $file"
             }

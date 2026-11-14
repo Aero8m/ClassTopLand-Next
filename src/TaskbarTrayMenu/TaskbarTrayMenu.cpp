@@ -315,6 +315,10 @@ void TaskbarTrayMenu::initUI()
     auto* swap = addShortcut(ElaIconType::ArrowRightArrowLeft, tr("换课 / 代课"), QStringLiteral("swapClassesButton"));
     connect(reschedule, &ElaIconButton::clicked, this, &TaskbarTrayMenu::rescheduleWindowRequested);
     connect(swap, &ElaIconButton::clicked, this, &TaskbarTrayMenu::swapWindowRequested);
+    auto* plugins = addShortcut(ElaIconType::PuzzlePiece, tr("插件中心"), QStringLiteral("pluginsButton"));
+    connect(plugins, &QAbstractButton::clicked, this, &TaskbarTrayMenu::pluginsRequested);
+    auto* agent = addShortcut(ElaIconType::Robot, tr("AI Agent"), QStringLiteral("agentButton"));
+    connect(agent, &ElaIconButton::clicked, this, &TaskbarTrayMenu::agentRequested);
     shortcuts->addLayout(cards);
     bodyLayout->addLayout(shortcuts);
 

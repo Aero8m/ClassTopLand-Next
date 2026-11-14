@@ -1,0 +1,959 @@
+{
+  "QWidget": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet"
+    ],
+    "signals": [],
+    "operations": []
+  },
+  "QLabel": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "text"
+    ],
+    "signals": [],
+    "operations": []
+  },
+  "QPushButton": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "text",
+      "checked",
+      "checkable"
+    ],
+    "signals": [
+      "clicked",
+      "toggled"
+    ],
+    "operations": [
+      "click"
+    ]
+  },
+  "QToolButton": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "text",
+      "checked",
+      "checkable"
+    ],
+    "signals": [
+      "clicked",
+      "toggled"
+    ],
+    "operations": [
+      "click"
+    ]
+  },
+  "QCheckBox": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "text",
+      "checked",
+      "checkable"
+    ],
+    "signals": [
+      "clicked",
+      "toggled"
+    ],
+    "operations": [
+      "click"
+    ]
+  },
+  "QRadioButton": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "text",
+      "checked",
+      "checkable"
+    ],
+    "signals": [
+      "clicked",
+      "toggled"
+    ],
+    "operations": [
+      "click"
+    ]
+  },
+  "QGroupBox": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet"
+    ],
+    "signals": [],
+    "operations": []
+  },
+  "QFrame": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet"
+    ],
+    "signals": [],
+    "operations": []
+  },
+  "QLineEdit": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "text",
+      "placeholderText",
+      "readOnly",
+      "maxLength",
+      "echoMode"
+    ],
+    "signals": [
+      "textChanged",
+      "editingFinished"
+    ],
+    "operations": []
+  },
+  "QTextEdit": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "plainText",
+      "readOnly",
+      "placeholderText"
+    ],
+    "signals": [
+      "textChanged"
+    ],
+    "operations": []
+  },
+  "QPlainTextEdit": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "plainText",
+      "readOnly",
+      "placeholderText"
+    ],
+    "signals": [
+      "textChanged"
+    ],
+    "operations": []
+  },
+  "QSpinBox": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "value",
+      "minimum",
+      "maximum"
+    ],
+    "signals": [
+      "valueChanged"
+    ],
+    "operations": []
+  },
+  "QDoubleSpinBox": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "value",
+      "minimum",
+      "maximum"
+    ],
+    "signals": [
+      "valueChanged"
+    ],
+    "operations": []
+  },
+  "QComboBox": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "currentIndex",
+      "currentText",
+      "editable"
+    ],
+    "signals": [
+      "currentIndexChanged"
+    ],
+    "operations": [
+      "setItems"
+    ]
+  },
+  "QSlider": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "value",
+      "minimum",
+      "maximum"
+    ],
+    "signals": [
+      "valueChanged"
+    ],
+    "operations": []
+  },
+  "QProgressBar": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "value",
+      "minimum",
+      "maximum"
+    ],
+    "signals": [],
+    "operations": []
+  },
+  "QScrollArea": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet"
+    ],
+    "signals": [],
+    "operations": []
+  },
+  "QTabWidget": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "currentIndex"
+    ],
+    "signals": [
+      "currentChanged"
+    ],
+    "operations": [
+      "addPage"
+    ]
+  },
+  "QStackedWidget": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "currentIndex"
+    ],
+    "signals": [
+      "currentChanged"
+    ],
+    "operations": [
+      "addPage"
+    ]
+  },
+  "QListWidget": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet"
+    ],
+    "signals": [
+      "activated",
+      "selectionChanged"
+    ],
+    "operations": [
+      "setItems",
+      "select"
+    ]
+  },
+  "QTreeWidget": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet"
+    ],
+    "signals": [
+      "activated",
+      "selectionChanged"
+    ],
+    "operations": [
+      "setItems",
+      "select"
+    ]
+  },
+  "QTableWidget": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet"
+    ],
+    "signals": [
+      "activated",
+      "selectionChanged"
+    ],
+    "operations": [
+      "setItems",
+      "select"
+    ]
+  },
+  "QDateEdit": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "date",
+      "time",
+      "dateTime",
+      "displayFormat"
+    ],
+    "signals": [
+      "dateTimeChanged"
+    ],
+    "operations": []
+  },
+  "QTimeEdit": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "date",
+      "time",
+      "dateTime",
+      "displayFormat"
+    ],
+    "signals": [
+      "dateTimeChanged"
+    ],
+    "operations": []
+  },
+  "QDateTimeEdit": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "date",
+      "time",
+      "dateTime",
+      "displayFormat"
+    ],
+    "signals": [
+      "dateTimeChanged"
+    ],
+    "operations": []
+  },
+  "QSplitter": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet"
+    ],
+    "signals": [],
+    "operations": []
+  },
+  "QListView": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet"
+    ],
+    "signals": [
+      "activated",
+      "selectionChanged"
+    ],
+    "operations": [
+      "setItems",
+      "select"
+    ]
+  },
+  "QTreeView": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet"
+    ],
+    "signals": [
+      "activated",
+      "selectionChanged"
+    ],
+    "operations": [
+      "setItems",
+      "select"
+    ]
+  },
+  "QTableView": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet"
+    ],
+    "signals": [
+      "activated",
+      "selectionChanged"
+    ],
+    "operations": [
+      "setItems",
+      "select"
+    ]
+  },
+  "ElaText": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "text",
+      "TextPixelSize",
+      "TextPointSize",
+      "IsWrapAnywhere"
+    ],
+    "signals": [],
+    "operations": []
+  },
+  "ElaPushButton": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "text",
+      "checked",
+      "checkable"
+    ],
+    "signals": [
+      "clicked",
+      "toggled"
+    ],
+    "operations": [
+      "click"
+    ]
+  },
+  "ElaToolButton": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "text",
+      "checked",
+      "checkable"
+    ],
+    "signals": [
+      "clicked",
+      "toggled"
+    ],
+    "operations": [
+      "click"
+    ]
+  },
+  "ElaCheckBox": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "text",
+      "checked",
+      "checkable"
+    ],
+    "signals": [
+      "clicked",
+      "toggled"
+    ],
+    "operations": [
+      "click"
+    ]
+  },
+  "ElaRadioButton": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "text",
+      "checked",
+      "checkable"
+    ],
+    "signals": [
+      "clicked",
+      "toggled"
+    ],
+    "operations": [
+      "click"
+    ]
+  },
+  "ElaLineEdit": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "text",
+      "placeholderText",
+      "readOnly",
+      "maxLength",
+      "echoMode"
+    ],
+    "signals": [
+      "textChanged",
+      "editingFinished"
+    ],
+    "operations": []
+  },
+  "ElaPlainTextEdit": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "plainText",
+      "readOnly",
+      "placeholderText"
+    ],
+    "signals": [
+      "textChanged"
+    ],
+    "operations": []
+  },
+  "ElaSpinBox": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "value",
+      "minimum",
+      "maximum"
+    ],
+    "signals": [
+      "valueChanged"
+    ],
+    "operations": []
+  },
+  "ElaDoubleSpinBox": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "value",
+      "minimum",
+      "maximum"
+    ],
+    "signals": [
+      "valueChanged"
+    ],
+    "operations": []
+  },
+  "ElaComboBox": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "currentIndex",
+      "currentText",
+      "editable"
+    ],
+    "signals": [
+      "currentIndexChanged"
+    ],
+    "operations": [
+      "setItems"
+    ]
+  },
+  "ElaSlider": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "value",
+      "minimum",
+      "maximum"
+    ],
+    "signals": [
+      "valueChanged"
+    ],
+    "operations": []
+  },
+  "ElaProgressBar": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "value",
+      "minimum",
+      "maximum"
+    ],
+    "signals": [],
+    "operations": []
+  },
+  "ElaScrollArea": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet"
+    ],
+    "signals": [],
+    "operations": []
+  },
+  "ElaTabWidget": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "currentIndex"
+    ],
+    "signals": [
+      "currentChanged"
+    ],
+    "operations": [
+      "addPage"
+    ]
+  },
+  "ElaToggleSwitch": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet",
+      "checked"
+    ],
+    "signals": [
+      "toggled"
+    ],
+    "operations": []
+  },
+  "ElaListView": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet"
+    ],
+    "signals": [
+      "activated",
+      "selectionChanged"
+    ],
+    "operations": [
+      "setItems",
+      "select"
+    ]
+  },
+  "ElaTreeView": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet"
+    ],
+    "signals": [
+      "activated",
+      "selectionChanged"
+    ],
+    "operations": [
+      "setItems",
+      "select"
+    ]
+  },
+  "ElaTableView": {
+    "kind": "widget",
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "minimumWidth",
+      "minimumHeight",
+      "maximumWidth",
+      "maximumHeight",
+      "styleSheet"
+    ],
+    "signals": [
+      "activated",
+      "selectionChanged"
+    ],
+    "operations": [
+      "setItems",
+      "select"
+    ]
+  },
+  "QVBoxLayout": {
+    "kind": "layout"
+  },
+  "QHBoxLayout": {
+    "kind": "layout"
+  },
+  "QGridLayout": {
+    "kind": "layout"
+  },
+  "QFormLayout": {
+    "kind": "layout"
+  }
+}

@@ -592,14 +592,22 @@ void CourseBarSettingsTab::showComponentSettings(int index)
     spacing->setFocus();
 }
 
-bool CourseBarSettingsTab::save(const CourseBarConfig& candidate, int selection, bool refreshComponents, bool resetAll)
+bool CourseBarSettingsTab::save(const CourseBarConfig& candidate, int selection, bool refreshComponents, bool resetAll, bool prepared)
 {
-    if (registry_) {
+    if (registry_ && !prepared) {
+        QStringList removed;
         for (const auto& previous : config_.components) {
             bool retained = false;
             for (const auto& next : candidate.components)
                 if (next.instanceId == previous.instanceId) { retained = true; break; }
-            if (!retained && !registry_->prepareRemoval(previous.instanceId)) return false;
+            if (!retained) removed.append(previous.instanceId);
+        }
+        if (!removed.isEmpty()) {
+            const QPointer<CourseBarSettingsTab> self(this);
+            registry_->prepareRemoval(removed, [self,candidate,selection,refreshComponents,resetAll](bool allowed) {
+                if(self && allowed) self->save(candidate,selection,refreshComponents,resetAll,true);
+            });
+            return false;
         }
     }
     Config latest = ConfigManager::instance().config();

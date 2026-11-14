@@ -1,18 +1,13 @@
 export function activate(ctx) {
-    ctx.ui.registerSettingsPage("profile", { name: "写入演示", tree: { type: "column", children: [
-        { type: "text", text: "点击下方按钮会立即修改并保存活动档案：添加“插件示例科目”。请先备份，建议仅在测试档案使用。" },
-        { type: "button", id: "addSubject", text: "添加示例科目并保存档案" },
-        { type: "text", id: "status", text: "尚未修改档案" }
-    ] } });
-    ctx.events.on("ui.action", function (event) {
-        if (event.actionId !== "addSubject") return;
-        ctx.profiles.getCurrent(function (error, snapshot) {
-            if (error) { ctx.ui.update(event.instanceId, { status: { text: error.message } }); return; }
-            ctx.profiles.applyChanges({ session: snapshot.session, expectedRevision: snapshot.revision,
-                operations: [{ op: "subject.add", value: { name: "插件示例科目", simplifiedName: "示", teacher: "" } }]
-            }, function (error) {
-                ctx.ui.update(event.instanceId, { status: { text: error ? error.code + ": " + error.message : "科目已添加并保存" } });
-            });
+    ctx.actions.register("addSubject",function(args,done){
+        if(!args.name.trim()){done({code:"INVALID_ARGUMENT",message:"科目名称不能为空"},null);return;}
+        ctx.profiles.getCurrent(function(error,snapshot){
+            if(error){done(error,null);return;}
+            ctx.profiles.applyChanges({session:snapshot.session,expectedRevision:snapshot.revision,operations:[{op:"subject.add",value:{name:args.name,simplifiedName:"示",teacher:""}}]},function(error,result){done(error,error?null:{revision:result.revision});});
         });
+    });
+    ctx.ui.registerPage("profile",function(view){
+        view.on("addSubject","clicked",function(){view.get("name","text",function(error,name){if(error)return;ctx.actions.invoke("addSubject",{name:name},function(error,result){view.set("status",{text:error?error.code+": "+error.message:"已保存，revision="+result.revision});});});});
+        return {};
     });
 }

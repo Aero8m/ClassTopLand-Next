@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+  <class>PluginPage</class>
+  <widget class="QWidget" name="root">
+    <layout class="QVBoxLayout" name="pageLayout">
+      <item>
+        <widget class="ElaText" name="title">
+          <property name="text">
+            <string>常规前缀</string>
+          </property>
+          <property name="TextPixelSize">
+            <number>20</number>
+          </property>
+        </widget>
+      </item>
+      <item>
+        <widget class="ElaLineEdit" name="input">
+          <property name="placeholderText">
+            <string>请输入文字</string>
+          </property>
+        </widget>
+      </item>
+      <item>
+        <widget class="ElaPushButton" name="save">
+          <property name="text">
+            <string>保存</string>
+          </property>
+        </widget>
+      </item>
+      <item>
+        <widget class="ElaText" name="status">
+          <property name="text">
+            <string>正在加载配置…</string>
+          </property>
+        </widget>
+      </item>
+    </layout>
+  </widget>
+  <resources />
+  <connections />
+</ui>

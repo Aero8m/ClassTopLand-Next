@@ -14,14 +14,17 @@ class CloudSyncService;
 class AppearanceSettingsTab;
 class DesktopCountdownSettingsTab;
 class WindowInterceptionService;
+class AgentService;
+class AgentSettingsTab;
 
 class SettingsWindow : public ElaWindow
 {
     Q_OBJECT
 public:
-    SettingsWindow(QWidget *parent = nullptr, WindowInterceptionService* interception = nullptr, PluginManager* plugins = nullptr, PluginUiHost* pluginUi = nullptr, CourseBarComponentRegistry* registry = nullptr, CloudSyncService* cloud = nullptr);
+    SettingsWindow(QWidget *parent = nullptr, WindowInterceptionService* interception = nullptr, PluginManager* plugins = nullptr, PluginUiHost* pluginUi = nullptr, CourseBarComponentRegistry* registry = nullptr, CloudSyncService* cloud = nullptr, AgentService* agent = nullptr);
     ~SettingsWindow();
     void refreshProfiles();
+    void openAgentPage(const QString &draftSession);
     void showProfileError(const QString& message);
     void setUiAccessSwitching(bool switching);
     // Refresh pages whose configuration may have been replaced by the cloud.
@@ -41,6 +44,7 @@ private:
     PluginUiHost* pluginUi_ = nullptr;
     CourseBarComponentRegistry* registry_ = nullptr;
     CloudSyncService* cloud_ = nullptr;
+    AgentService* agent_ = nullptr;
     void initUI();
     WindowInterceptionService* interception_ = nullptr;
     void showAboutDialog();
@@ -51,6 +55,7 @@ private:
     AppearanceSettingsTab* appearanceTab_ = nullptr;
     DesktopCountdownSettingsTab* desktopCountdownTab_ = nullptr;
     CloudSettingsTab* cloudTab_ = nullptr;
+    AgentSettingsTab* agentTab_ = nullptr;
 };
 
 

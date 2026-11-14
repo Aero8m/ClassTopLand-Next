@@ -1,10 +1,39 @@
 {
-  "manifestVersion": 1,
+  "manifestVersion": 2,
+  "apiVersion": 2,
   "id": "org.classtopland.background-demo",
-  "name": "插件示例：纯后台",
-  "version": "1.0.0",
-  "apiVersion": 1,
+  "name": "插件示例：后台任务",
+  "version": "2.0.0",
   "entry": "main.mjs",
-  "description": "不创建窗口或组件，只订阅课程并记录日志。",
-  "permissions": { "courses": "read" }
+  "description": "无页面后台订阅，演示页面关闭后后台仍然工作及 Agent 读取状态。",
+  "permissions": {
+    "courses": "read"
+  },
+  "contributions": {
+    "actions": [
+      {
+        "id": "status",
+        "name": "后台状态",
+        "description": "返回本次运行接收到的课程刷新次数。",
+        "requiredPermissions": [],
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "updates": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "updates"
+          ]
+        }
+      }
+    ]
+  }
 }

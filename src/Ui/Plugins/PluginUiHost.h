@@ -1,31 +1,64 @@
 #pragma once
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QMap>
 #include <QObject>
 #include <QPointer>
-#include <QMap>
-#include <QByteArray>
-#include <QJsonObject>
+#include <functional>
 class PluginManager;
-class PluginSettingsDialog;
-class PluginView;
+class PluginNativeView;
 class QWidget;
+class QDialog;
 class PluginUiHost final : public QObject
 {
     Q_OBJECT
   public:
+    using GuardCompletion = std::function<void(bool)>;
     explicit PluginUiHost(PluginManager *manager, QObject *parent = nullptr);
     ~PluginUiHost() override;
-    void openSettings(const QString &plugin, QWidget *parent);
-    void openComponent(const QString &instance, QWidget *parent);
-    void openWindow(const QString &plugin, const QString &contribution, QWidget *parent);
-    bool prepareAll(const QString &plugin = {});
-    bool prepareComponentRemoval(const QString &instance);
-    void closeDialogs();
+    void openSettings(const QString &plugin, QWidget *parent = nullptr);
+    void openComponent(const QString &instance, QWidget *parent = nullptr);
+    PluginNativeView *createPage(const QString &plugin, const QString &contribution, QWidget *parent);
+    PluginNativeView *createComponentSettings(const QString &instance, QWidget *parent);
     QWidget *createComponent(const QString &typeId, const QString &instance, const QJsonObject &settings,
                              QWidget *parent);
+    void prepareAll(GuardCompletion completion, const QString &plugin = {});
+    void prepareComponents(const QStringList &instances, GuardCompletion completion);
+    void closeDialogs();
+    void closePages();
+    bool guarding() const
+    {
+        return guarding_;
+    }
+    QJsonArray snapshots() const;
+    QJsonValue inspect(const QString &instance, const QString &method, const QJsonObject &args,
+                       QString *error);
+  signals:
+    void guardStateChanged(bool guarding);
+    void navigationRequested(const QString &plugin, const QString &contribution,
+                             const QString &componentInstance);
 
   private:
+    struct View
+    {
+        QPointer<PluginNativeView> widget;
+        QString plugin, kind, contribution, component;
+        quint64 generation;
+    };
+    PluginNativeView *create(const QString &plugin, const QString &kind, const QString &contribution,
+                             const QString &file, const QString &component, const QJsonObject &settings,
+                             QWidget *parent);
+    void prepare(QStringList instances, GuardCompletion completion);
+    void guardNext();
+    void guardReady();
+    void finishGuard(bool success);
+    void request(const QString &plugin, const QString &method, const QJsonObject &args,
+                 std::function<void(const QJsonObject &, const QJsonValue &)> completion);
     PluginManager *manager_;
-    QMap<QString, QPointer<PluginSettingsDialog>> dialogs_;
-    QMap<QString, QByteArray> geometries_;
-    QList<QPointer<QWidget>> windows_;
+    QMap<QString, View> views_;
+    QStringList guardQueue_;
+    QString guardToken_, guardInstance_;
+    GuardCompletion completion_;
+    bool guarding_ = false;
+    QPointer<QDialog> prompt_;
 };

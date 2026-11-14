@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+  <class>PluginPage</class>
+  <widget class="QWidget" name="root">
+    <layout class="QVBoxLayout" name="pageLayout">
+      <item>
+        <widget class="ElaText" name="title">
+          <property name="text">
+            <string>课程详情</string>
+          </property>
+          <property name="TextPixelSize">
+            <number>22</number>
+          </property>
+        </widget>
+      </item>
+      <item>
+        <widget class="QTableWidget" name="courses" />
+      </item>
+      <item>
+        <widget class="ElaPushButton" name="addNote">
+          <property name="text">
+            <string>动态添加说明</string>
+          </property>
+        </widget>
+      </item>
+      <item>
+        <widget class="ElaText" name="status">
+          <property name="text">
+            <string>等待读取课程…</string>
+          </property>
+        </widget>
+      </item>
+    </layout>
+  </widget>
+  <resources />
+  <connections />
+</ui>

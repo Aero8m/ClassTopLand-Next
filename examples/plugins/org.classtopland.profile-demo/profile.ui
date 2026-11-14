@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+  <class>PluginPage</class>
+  <widget class="QWidget" name="root">
+    <layout class="QVBoxLayout" name="pageLayout">
+      <item>
+        <widget class="ElaText" name="title">
+          <property name="text">
+            <string>添加科目并保存当前档案，建议仅在测试档案使用。</string>
+          </property>
+        </widget>
+      </item>
+      <item>
+        <widget class="ElaLineEdit" name="name">
+          <property name="text">
+            <string>插件示例科目</string>
+          </property>
+        </widget>
+      </item>
+      <item>
+        <widget class="ElaPushButton" name="addSubject">
+          <property name="text">
+            <string>添加科目并保存档案</string>
+          </property>
+        </widget>
+      </item>
+      <item>
+        <widget class="ElaText" name="status">
+          <property name="text">
+            <string>尚未修改档案</string>
+          </property>
+        </widget>
+      </item>
+    </layout>
+  </widget>
+  <resources />
+  <connections />
+</ui>

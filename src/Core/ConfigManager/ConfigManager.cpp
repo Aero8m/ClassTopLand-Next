@@ -152,10 +152,12 @@ QJsonObject toJson(const Config& config)
     QJsonObject plugins;
     for (auto it = config.pluginConfig.plugins.cbegin(); it != config.pluginConfig.plugins.cend(); ++it)
         plugins.insert(it.key(), QJsonObject{{QStringLiteral("enabled"), it->enabled}, {QStringLiteral("grantedPermissions"), it->grantedPermissions},
-            {QStringLiteral("approvedVersion"), it->approvedVersion}, {QStringLiteral("fault"), it->fault}});
+            {QStringLiteral("approvedVersion"), it->approvedVersion}, {QStringLiteral("fault"), it->fault},
+            {QStringLiteral("activeRevision"), it->activeRevision}, {QStringLiteral("sourceName"), it->sourceName}});
     return {{QStringLiteral("version"), kFormatVersion},
             {QStringLiteral("config"), QJsonObject{{QStringLiteral("profileName"), config.profileName},
                                                    {QStringLiteral("reminderConfig"), Reminders::toJson(config.reminderConfig)},
+                                                   {QStringLiteral("agentConfig"), config.agentConfig},
                                                    {QStringLiteral("pluginConfig"), QJsonObject{{QStringLiteral("plugins"), plugins}, {QStringLiteral("recoveryNextStart"), config.pluginConfig.recoveryNextStart}}},
                                                    {QStringLiteral("desktopCountdownConfig"), desktopCountdown},
                                                    {QStringLiteral("courseBarConfig"), courseBar},
@@ -176,6 +178,9 @@ bool fromJson(const QJsonObject& root, Config& config, QString* error)
     const QJsonValue profileName = data.value(QStringLiteral("profileName"));
     if (!profileName.isString()) return fail(error, QStringLiteral("config.profileName must be a string"));
     config.profileName = profileName.toString();
+    const auto agent = data.value(QStringLiteral("agentConfig"));
+    if (!agent.isUndefined() && !agent.isObject()) return fail(error, QStringLiteral("agentConfig must be an object"));
+    config.agentConfig = agent.toObject();
     const auto pluginsValue = data.value(QStringLiteral("pluginConfig"));
     if (!pluginsValue.isUndefined()) {
         if (!pluginsValue.isObject()) return fail(error, QStringLiteral("pluginConfig must be an object"));
@@ -189,11 +194,16 @@ bool fromJson(const QJsonObject& root, Config& config, QString* error)
         for (auto it = plugins.begin(); it != plugins.end(); ++it) {
             if (!it.value().isObject()) return fail(error, QStringLiteral("Invalid plugin preference"));
             const auto value = it.value().toObject();
+            const auto activeRevision = value.value(QStringLiteral("activeRevision"));
+            const auto sourceName = value.value(QStringLiteral("sourceName"));
             if (!value.value(QStringLiteral("enabled")).isBool() || !value.value(QStringLiteral("grantedPermissions")).isObject() ||
-                !value.value(QStringLiteral("approvedVersion")).isString() || !value.value(QStringLiteral("fault")).isString())
+                !value.value(QStringLiteral("approvedVersion")).isString() || !value.value(QStringLiteral("fault")).isString() ||
+                (!activeRevision.isUndefined() && !activeRevision.isString()) ||
+                (!sourceName.isUndefined() && !sourceName.isString()))
                 return fail(error, QStringLiteral("Invalid plugin preference fields"));
             config.pluginConfig.plugins.insert(it.key(), {value.value(QStringLiteral("enabled")).toBool(), value.value(QStringLiteral("grantedPermissions")).toObject(),
-                value.value(QStringLiteral("approvedVersion")).toString(), value.value(QStringLiteral("fault")).toString()});
+                value.value(QStringLiteral("approvedVersion")).toString(), value.value(QStringLiteral("fault")).toString(),
+                activeRevision.toString(), sourceName.toString()});
         }
     }
 

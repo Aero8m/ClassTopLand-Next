@@ -1,6 +1,7 @@
 #pragma once
 #include <QObject>
 #include <QMap>
+#include <functional>
 #include "../Core/Model/CourseBarConfig.h"
 class PluginManager;
 class PluginUiHost;
@@ -20,7 +21,7 @@ class CourseBarComponentRegistry final : public QObject
     ICourseBarComponent *create(const CourseBarComponentConfig &config, CourseRefreshService *courses,
                                 QWidget *parent) const;
     void openSettings(const QString &instance, QWidget *parent);
-    bool prepareRemoval(const QString &instance);
+    void prepareRemoval(const QStringList &instances, std::function<void(bool)> completion);
   signals:
     void changed();
 

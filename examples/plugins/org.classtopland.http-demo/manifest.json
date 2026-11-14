@@ -1,11 +1,57 @@
 {
-  "manifestVersion": 1,
+  "manifestVersion": 2,
+  "apiVersion": 2,
   "id": "org.classtopland.http-demo",
   "name": "插件示例：HTTP",
-  "version": "1.0.0",
-  "apiVersion": 1,
+  "version": "2.0.0",
   "entry": "main.mjs",
-  "description": "点击按钮后才请求示例地址，不发送档案或课程信息。",
-  "permissions": { "network": { "origins": ["https://example.com"] } },
-  "contributions": { "settingsPages": [{ "id": "network", "name": "连接测试" }] }
+  "description": "原生页面按钮与 Agent 共享 HTTP 动作，隔离预览会拒绝网络。",
+  "permissions": {
+    "network": {
+      "origins": [
+        "https://example.com"
+      ]
+    }
+  },
+  "contributions": {
+    "pages": [
+      {
+        "id": "network",
+        "name": "连接测试",
+        "purpose": "function",
+        "ui": "network.ui"
+      }
+    ],
+    "actions": [
+      {
+        "id": "request",
+        "name": "请求示例地址",
+        "description": "向 https://example.com 发起 GET，不发送档案或课程数据。",
+        "requiredPermissions": [
+          "network"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "integer"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "text"
+          ]
+        }
+      }
+    ]
+  }
 }

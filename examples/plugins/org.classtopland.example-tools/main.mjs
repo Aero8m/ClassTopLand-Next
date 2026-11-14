@@ -1,60 +1,27 @@
+import { settingsFactory } from "./settings.mjs";
 export function activate(ctx) {
-    let instances = {}, prefix = "课程助手", snapshot = null;
-    ctx.ui.registerSettingsPage("general", {
-        name: "常规",
-        tree: { type: "column", children: [
-            { type: "text", text: "这里的设置保存在本插件的私有存储，保存后生效。" },
-            { type: "input", id: "prefix", label: "显示前缀", value: prefix, required: true, maxLength: 40 },
-            { type: "toggle", id: "showName", label: "显示课表名称", value: true }
-        ] }
+    ctx.ui.registerPage("general",settingsFactory(ctx,"general","prefix","课程"));
+    ctx.ui.registerPage("display",settingsFactory(ctx,"display","caption","今日课程"));
+    ctx.ui.registerPage("details",function(view) {
+        let notes=0;
+        function refresh(snapshot) {
+            view.invoke("courses","setItems",{columns:["科目","开始","结束"],items:snapshot.classes.map(function(item){return [item.subject,item.startTime,item.endTime];})});
+            view.set("status",{text:snapshot.valid?snapshot.name:snapshot.error});
+        }
+        ctx.courses.getSnapshot(function(error,snapshot){if(error)view.set("status",{text:error.message});else refresh(snapshot);});
+        const subscription=ctx.events.on("courses.tableChanged",refresh);
+        view.on("addNote","clicked",function(){const name="note"+(++notes);view.create("root","ElaText",name,function(error){if(error)return;view.set(name,{text:"这是插件动态创建的原生控件"});view.insert("pageLayout",name,{});});});
+        return {destroy:function(){subscription.dispose();}};
     });
-    ctx.ui.registerSettingsPage("display", {
-        name: "显示",
-        tree: { type: "column", children: [
-            { type: "number", id: "maxCourses", label: "详情最多显示课程数", value: 8, min: 1, max: 32 },
-            { type: "select", id: "style", label: "展示方式", value: "compact", items: [
-                { label: "紧凑", value: "compact" }, { label: "详细", value: "full" }
-            ] }
-        ] }
+    ctx.ui.registerComponent("status",{
+        create:function(view){
+            view.set("label",{text:view.initialSettings.label||"课程"});
+            function refresh(snapshot){const index=snapshot.currentClassIndex;view.set("subject",{text:index>=0&&snapshot.classes[index]?snapshot.classes[index].subject:"课间"});view.setAvailable(snapshot.valid);}
+            ctx.courses.getSnapshot(function(error,snapshot){if(!error)refresh(snapshot);});
+            const subscription=ctx.events.on("courses.stateChanged",refresh);
+            return {destroy:function(){subscription.dispose();}};
+        },
+        createSettings:settingsFactory(ctx,"","label","课程")
     });
-    ctx.ui.registerComponent("status", {
-        name: "课程状态", previewText: "课程助手 · 示例课表", displayPolicy: "expandedOnly",
-        tree: { type: "row", children: [
-            { type: "text", id: "status", text: "课程助手" },
-            { type: "button", id: "details", text: "详情", action: "openDetails" }
-        ] },
-        settings: { tree: { type: "column", children: [
-            { type: "input", id: "label", label: "该组件的显示名称", value: "", maxLength: 40 }
-        ] } }
-    });
-    ctx.ui.registerWindow("details", {
-        name: "课程详情",
-        tree: { type: "column", children: [{ type: "text", id: "summary", text: "等待读取课程…" }] }
-    });
-    function refresh() {
-        Object.keys(instances).forEach(function (id) {
-            const instance = instances[id];
-            if (instance.kind === "component") {
-                const label = instance.settings.label || prefix;
-                ctx.ui.update(id, { status: { text: label + (snapshot ? " · " + (snapshot.name || "无课表") : "") } });
-            } else if (instance.kind === "window") {
-                const courses = snapshot ? snapshot.classes.map(function (course) { return course.startTime + "  " + course.subject; }).join("\n") : "暂无课程";
-                ctx.ui.update(id, { summary: { text: courses } });
-            }
-        });
-    }
-    ctx.events.on("ui.created", function (event) { instances[event.instanceId] = event; refresh(); });
-    ctx.events.on("ui.destroyed", function (event) { delete instances[event.instanceId]; });
-    ctx.events.on("ui.action", function (event) { if (event.actionId === "openDetails") ctx.ui.openWindow("details"); });
-    ctx.events.on("settings.saved", function (values) {
-        if (values.general) { prefix = values.general.prefix; refresh(); }
-    });
-    ctx.storage.get("settings", function (error, values) {
-        if (error) { ctx.log.warn(error.message); return; }
-        if (values && values.general) prefix = values.general.prefix;
-        refresh();
-    });
-    ctx.events.on("courses.tableChanged", function (value) { snapshot = value; refresh(); });
-    ctx.courses.getSnapshot(function (error, value) { if (!error) { snapshot = value; refresh(); } });
-    ctx.timers.every(300000, function () { ctx.log.info("后台任务仍在运行，打开或关闭设置弹窗不影响此任务。 "); });
+    ctx.actions.register("summary",function(args,done){ctx.courses.getSnapshot(function(error,snapshot){done(error,error?null:{text:snapshot.name+"："+snapshot.classes.map(function(item){return item.subject;}).join("、")});});});
 }

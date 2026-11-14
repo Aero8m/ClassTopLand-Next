@@ -1,6 +1,7 @@
 #include "SettingsWindow.h"
-#include "tabs/PluginSettingsTab.h"
+#include "tabs/AgentSettingsTab.h"
 #include "../Ui/Plugins/PluginUiHost.h"
+#include "../Ui/UiWidgets.h"
 #include <QCloseEvent>
 #include "AboutDialog.h"
 #include "tabs/AppearanceSettingsTab.h"
@@ -12,9 +13,9 @@
 
 #include <QScreen>
 
-SettingsWindow::SettingsWindow(QWidget* parent, WindowInterceptionService* interception, PluginManager* plugins, PluginUiHost* pluginUi, CourseBarComponentRegistry* registry, CloudSyncService* cloud)
+SettingsWindow::SettingsWindow(QWidget* parent, WindowInterceptionService* interception, PluginManager* plugins, PluginUiHost* pluginUi, CourseBarComponentRegistry* registry, CloudSyncService* cloud, AgentService* agent)
     : ElaWindow(parent), plugins_(plugins), pluginUi_(pluginUi), registry_(registry),
-      cloud_(cloud), interception_(interception)
+      cloud_(cloud), agent_(agent), interception_(interception)
 {
     setIsDefaultClosed(false);
     connect(this, &ElaWindow::closeButtonClicked, this, [this] { close(); });
@@ -40,8 +41,8 @@ void SettingsWindow::initUI()
     setNavigationBarWidth(180);
     setNavigationBarDisplayMode(ElaNavigationType::Maximal);
     setIsAllowPageOpenInNewWindow(false);
-    resize(850, 550);
-    setMinimumSize(850, 550);
+    resize(AppUi::defaultWindowSize);
+    setMinimumSize(AppUi::defaultWindowSize);
     profileTab_ = new ProfileSettingsTab(this);
     addPageNode("档案管理", profileTab_, ElaIconType::FileLines);
     connect(profileTab_, &ProfileSettingsTab::profileEditorRequested,
@@ -74,12 +75,23 @@ void SettingsWindow::initUI()
 
     if (interception_)
         addPageNode(QStringLiteral("窗口拦截"), new WindowInterceptionSettingsTab(interception_, this), ElaIconType::Shield);
-    if (plugins_ && pluginUi_) addPageNode(QStringLiteral("插件"), new PluginSettingsTab(plugins_, pluginUi_, this), ElaIconType::PuzzlePiece);
+    if (agent_) {
+        agentTab_ = new AgentSettingsTab(agent_, this);
+        addPageNode(QStringLiteral("AI Agent"), agentTab_, ElaIconType::Robot);
+    }
     addFooterNode(QStringLiteral("关于"), aboutNodeKey_, 0, ElaIconType::CircleInfo);
     connect(this, &ElaWindow::navigationNodeClicked, this,
             [this](ElaNavigationType::NavigationNodeType, const QString& nodeKey) {
         if (nodeKey == aboutNodeKey_) showAboutDialog();
     });
+}
+
+void SettingsWindow::openAgentPage(const QString &draftSession)
+{
+    if (!agentTab_) return;
+    navigation(agentTab_->property("ElaPageKey").toString());
+    if (!draftSession.isEmpty()) agentTab_->openDraft(draftSession);
+    else agentTab_->openProviders();
 }
 
 void SettingsWindow::showAboutDialog()
@@ -131,7 +143,5 @@ void SettingsWindow::refreshCloudConfig()
 
 void SettingsWindow::closeEvent(QCloseEvent* event)
 {
-    if (pluginUi_ && !pluginUi_->prepareAll()) { event->ignore(); return; }
-    if (pluginUi_) pluginUi_->closeDialogs();
     ElaWindow::closeEvent(event);
 }

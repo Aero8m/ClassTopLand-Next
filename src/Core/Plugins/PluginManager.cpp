@@ -1,6 +1,9 @@
 #include "PluginManager.h"
 #include "PluginRuntime.h"
 #include "PluginIo.h"
+#include "PluginWorkspace.h"
+#include "PluginContracts.h"
+#include "PluginActionRegistry.h"
 #include "../ConfigManager/ConfigManager.h"
 #include "../ProfileManager/ProfileManager.h"
 #include "../ThemeManager/ThemeManager.h"
@@ -16,9 +19,10 @@
 
 PluginManager::Record::~Record() = default;
 PluginManager::PluginManager(const QString &directory, bool recovery, QObject *parent)
-    : QObject(parent), directory_(directory), io_(new PluginIo(directory)),
+    : QObject(parent), directory_(directory), workspace_(new PluginWorkspace(directory, this)), actions_(new PluginActionRegistry(this)), io_(new PluginIo(directory)),
       courses_(new CourseRefreshService(this)), recovery_(recovery)
 {
+    connect(actions_, &PluginActionRegistry::dispatch, this, &PluginManager::viewEvent);
     io_->moveToThread(&ioThread_);
     connect(&ioThread_, &QThread::finished, io_, &QObject::deleteLater);
     ioThread_.start();
@@ -97,6 +101,11 @@ QString PluginManager::pluginsDirectory() const
 }
 void PluginManager::start()
 {
+    QString recoveryError;
+    if (!workspace_->recover(&recoveryError)) {
+        recovery_ = true;
+        emit notification(QStringLiteral("插件恢复失败，已进入恢复模式"), recoveryError);
+    }
     auto candidate = ConfigManager::instance().config();
     if (candidate.pluginConfig.recoveryNextStart)
     {
@@ -113,13 +122,19 @@ void PluginManager::start()
         {
             const auto preference =
                 ConfigManager::instance().config().pluginConfig.plugins.value(record->manifest.id);
-            if (preference.enabled && preference.fault.isEmpty())
-                startRecord(record);
+            if (preference.enabled && preference.fault.isEmpty() && record->manifest.valid() &&
+                record->key == record->manifest.id) {
+                QString error;
+                if (pin(record, false, &error))
+                    startRecord(record);
+                else
+                    record->failure = error;
+            }
         }
 }
 void PluginManager::scan()
 {
-    if (stopped_)
+    if (stopped_ || publication_)
         return;
     if (!QDir().mkpath(pluginsDirectory()) || !Plugins::within(directory_, pluginsDirectory()))
     {
@@ -127,6 +142,8 @@ void PluginManager::scan()
         return;
     }
     QMap<QString, Plugins::Manifest> discovered;
+    QMap<QString, QString> sources;
+    const auto preferences = ConfigManager::instance().config().pluginConfig.plugins;
     for (const auto &entry :
          QDir(pluginsDirectory()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
     {
@@ -134,6 +151,12 @@ void PluginManager::scan()
         if (!Plugins::within(pluginsDirectory(), entry.absoluteFilePath()))
             manifest.failure = QStringLiteral("插件目录路径越界");
         auto key = manifest.id.isEmpty() ? entry.fileName() : manifest.id;
+        if (!manifest.valid())
+            for (auto it = preferences.cbegin(); it != preferences.cend(); ++it)
+                if (it->sourceName == entry.fileName()) {
+                    key = it.key();
+                    break;
+                }
         if (discovered.contains(key))
         {
             auto original = discovered.value(key);
@@ -144,30 +167,37 @@ void PluginManager::scan()
         }
         else
             discovered.insert(key, manifest);
+        if (!sources.contains(key)) sources.insert(key, entry.canonicalFilePath());
     }
     for (auto it = discovered.begin(); it != discovered.end(); ++it)
     {
+        const auto preference = preferences.value(it.key());
+        const auto source = sources.value(it.key());
         if (auto existing = records_.value(it.key());
-            existing && (existing->runtime || existing->updatePending ||
-                         existing->manifest.fingerprint != it->fingerprint))
+            existing && existing->runtime)
         {
-            if (existing->manifest.fingerprint != it->fingerprint || !it->valid())
-            {
-                existing->updatePending = true;
-                existing->failure = QStringLiteral("检测到版本 %1；当前版本 %2，更新需重启。%3")
-                                        .arg(it->version, existing->manifest.version, it->failure);
-            }
+            existing->updatePending = existing->manifest.fingerprint != it->fingerprint || !it->valid();
+            existing->failure = existing->updatePending
+                ? QStringLiteral("检测到插件更新，可在详情中热重载。%1").arg(it->failure) : QString();
             continue;
         }
         auto record = std::make_shared<Record>();
         record->key = it.key();
+        record->source = source;
         record->manifest = it.value();
-        record->failure = it->failure;
-        if (!it->valid())
-            record->state = QStringLiteral("不可用");
+        if (!preference.activeRevision.isEmpty() &&
+            !it->failure.startsWith(QStringLiteral("存在重复插件 ID"))) {
+            auto installed = installedRevision(preference.activeRevision);
+            if (installed.valid() && installed.id != record->key)
+                installed.failure = QStringLiteral("已发布版本的插件 ID 不匹配");
+            record->updatePending = !it->valid() || installed.fingerprint != it->fingerprint;
+            record->manifest = installed;
+        }
+        record->failure = record->manifest.failure;
+        if (!record->manifest.valid())
+            record->state = record->failure.startsWith(QStringLiteral("需要升级")) ? QStringLiteral("需要升级") : QStringLiteral("不可用");
         else
         {
-            auto preference = ConfigManager::instance().config().pluginConfig.plugins.value(it->id);
             if (!preference.fault.isEmpty())
             {
                 record->state = QStringLiteral("运行故障");
@@ -184,14 +214,14 @@ void PluginManager::scan()
             if (record->runtime)
             {
                 record->updatePending = true;
-                record->failure = QStringLiteral("插件目录已移除；重启后卸载");
+                record->failure = QStringLiteral("插件目录已移除；停用后可卸载");
             }
             else
                 records_.remove(key);
         }
     emit changed();
 }
-bool PluginManager::setEnabled(const QString &id, bool enabled, QString *error)
+bool PluginManager::setEnabled(const QString &id, bool enabled, QString *error, bool prepared)
 {
     auto record = records_.value(id);
     auto fail = [&](const QString &message)
@@ -202,10 +232,10 @@ bool PluginManager::setEnabled(const QString &id, bool enabled, QString *error)
     };
     if (!record || !record->manifest.valid() || record->key != record->manifest.id)
         return fail(QStringLiteral("插件不可用"));
-    if (writesBlocked_ || stopped_)
+    if (writesBlocked_ || quiescing_ || stopped_ || publication_)
         return fail(QStringLiteral("应用正在退出"));
     if (enabled && record->updatePending)
-        return fail(QStringLiteral("插件文件已更新，请先重启"));
+        return fail(QStringLiteral("插件文件已更新，请先审阅并热重载"));
     if (enabled && record->runtime)
         return true;
     if (enabled)
@@ -217,23 +247,24 @@ bool PluginManager::setEnabled(const QString &id, bool enabled, QString *error)
         if (count >= Plugins::MaxPlugins)
             return fail(QStringLiteral("最多同时运行 16 个插件"));
     }
-    if (!enabled && preparePluginStop && !preparePluginStop(id))
-        return false;
-    auto candidate = ConfigManager::instance().config();
-    auto &preference = candidate.pluginConfig.plugins[id];
-    preference.enabled = enabled;
+    if (!enabled && preparePluginStop && !prepared) {
+        preparePluginStop(id, [this, id](bool allowed) {
+            if (!allowed) return;
+            QString error;
+            if (!setEnabled(id, false, &error, true) && !error.isEmpty()) emit notification(QStringLiteral("停用插件失败"),error);
+        });
+        return true;
+    }
     if (enabled)
     {
-        preference.grantedPermissions = record->manifest.permissions;
-        preference.approvedVersion = record->manifest.version;
-        preference.fault.clear();
-    }
-    if (!ConfigManager::instance().commit(candidate, error))
-        return false;
-    if (enabled)
+        if (!pin(record, true, error)) return false;
         startRecord(record);
-    else
+    } else {
+        auto candidate = ConfigManager::instance().config();
+        candidate.pluginConfig.plugins[id].enabled = false;
+        if (!ConfigManager::instance().commit(candidate, error)) return false;
         stopRecord(record, false);
+    }
     emit changed();
     return true;
 }
@@ -243,7 +274,8 @@ void PluginManager::startRecord(const std::shared_ptr<Record> &record)
         return;
     const auto preference =
         ConfigManager::instance().config().pluginConfig.plugins.value(record->manifest.id);
-    if (preference.approvedVersion.isEmpty() || preference.grantedPermissions != record->manifest.permissions)
+    const bool staged = publication_ && publication_->candidate == record;
+    if (!staged && (preference.approvedVersion.isEmpty() || preference.grantedPermissions != record->manifest.permissions))
     {
         record->state = QStringLiteral("待重新授权");
         record->failure = QStringLiteral("插件权限已变化，请重新确认并启用");
@@ -266,7 +298,7 @@ void PluginManager::startRecord(const std::shared_ptr<Record> &record)
     record->failure.clear();
     const auto id = record->manifest.id;
     const auto generation = record->generation;
-    const auto permissions = preference.grantedPermissions;
+    const auto permissions = staged ? record->manifest.permissions : preference.grantedPermissions;
     QMetaObject::invokeMethod(io_, [=] { io_->attach(id, generation, permissions); }, Qt::QueuedConnection);
     record->runtime = std::make_unique<PluginRuntime>(record->manifest, generation);
     connect(
@@ -281,6 +313,7 @@ void PluginManager::startRecord(const std::shared_ptr<Record> &record)
             {
                 QMetaObject::invokeMethod(
                     io_, [=] { io_->cancel(id, generation, requestId); }, Qt::QueuedConnection);
+                actions_->cancel(actionRequests_.take(id + QLatin1Char('/') + requestId));
             });
     connect(record->runtime.get(), &PluginRuntime::started, this,
             [this, record, generation]
@@ -288,6 +321,12 @@ void PluginManager::startRecord(const std::shared_ptr<Record> &record)
                 if (record->generation != generation || !record->runtime ||
                     record->state != QStringLiteral("启动中"))
                     return;
+                if (publication_ && publication_->candidate == record) {
+                    finishPublication({});
+                    return;
+                }
+                const auto registrationError = Plugins::contributionRegistrationError(record->manifest.contributions,record->pages,record->components,record->actions);
+                if (!registrationError.isEmpty()) { fault(record,registrationError); return; }
                 record->state = QStringLiteral("运行中");
                 emit changed();
                 emit contributionsChanged();
@@ -295,8 +334,12 @@ void PluginManager::startRecord(const std::shared_ptr<Record> &record)
     connect(record->runtime.get(), &PluginRuntime::failed, this,
             [this, record, generation](const QString &error)
             {
-                if (record->generation == generation && record->runtime)
-                    fault(record, error);
+                if (record->generation == generation && record->runtime) {
+                    if (publication_ && publication_->candidate == record)
+                        finishPublication(error);
+                    else
+                        fault(record, error);
+                }
             });
     record->runtime->start();
     emit changed();
@@ -317,6 +360,7 @@ void PluginManager::stopRecord(const std::shared_ptr<Record> &record, bool fault
 {
     if (record->state == QStringLiteral("停止中"))
         return;
+    actions_->cancelPlugin(record->manifest.id);
     record->stopFault = fault;
     record->state = QStringLiteral("停止中");
     emit changed();
@@ -337,8 +381,10 @@ void PluginManager::stopRecord(const std::shared_ptr<Record> &record, bool fault
         connect(record->runtime.get(), &PluginRuntime::stopped, this,
                 [this, record, generation]
                 {
-                    if (record->generation == generation && record->runtime)
-                        finishStop(record);
+                    QTimer::singleShot(0, this, [this, record, generation] {
+                        if (record->generation == generation && record->runtime)
+                            finishStop(record);
+                    });
                 });
         record->runtime->beginStop();
     }
@@ -354,9 +400,9 @@ void PluginManager::finishStop(const std::shared_ptr<Record> &record)
         record->runtime.reset();
     }
     const auto id = record->manifest.id;
-    record->settingsPages.clear();
+    record->pages.clear();
     record->components.clear();
-    record->windows.clear();
+    record->actions.clear();
     record->subscriptions.clear();
     const auto instances = views_.keys();
     for (const auto &view : instances)
@@ -374,6 +420,12 @@ void PluginManager::finishStop(const std::shared_ptr<Record> &record)
     record->state = record->stopFault ? QStringLiteral("运行故障") : QStringLiteral("已停用");
     emit contributionsChanged();
     emit changed();
+    if (!stopped_ && publication_) {
+        if (publication_->candidate == record)
+            finishPublication(publication_->failure);
+        else if (publication_->previous == record && publication_->prepared)
+            QTimer::singleShot(0, this, &PluginManager::activatePublication);
+    }
 }
 void PluginManager::stopAll()
 {
@@ -391,6 +443,7 @@ void PluginManager::stopAll()
             finishStop(record);
         }
     QMetaObject::invokeMethod(io_, [] {}, Qt::BlockingQueuedConnection);
+    publication_.reset();
 }
 bool PluginManager::requestRecovery(QString *error)
 {
@@ -403,6 +456,13 @@ bool PluginManager::requestRecovery(QString *error)
 }
 QJsonObject PluginManager::courseSnapshot() const
 {
+    if(previewMode_) return {
+        {QStringLiteral("profileSession"),QStringLiteral("preview")},{QStringLiteral("profileRevision"),QStringLiteral("0")},
+        {QStringLiteral("tableRevision"),QStringLiteral("preview")},{QStringLiteral("date"),QDate::currentDate().toString(Qt::ISODate)},
+        {QStringLiteral("name"),QStringLiteral("模拟课程")},{QStringLiteral("valid"),true},{QStringLiteral("error"),QString()},
+        {QStringLiteral("classes"),QJsonArray{QJsonObject{{QStringLiteral("subject"),QStringLiteral("语文")},{QStringLiteral("startTime"),QStringLiteral("08:00:00")},{QStringLiteral("endTime"),QStringLiteral("08:45:00")}},QJsonObject{{QStringLiteral("subject"),QStringLiteral("数学")},{QStringLiteral("startTime"),QStringLiteral("09:00:00")},{QStringLiteral("endTime"),QStringLiteral("09:45:00")}}}},
+        {QStringLiteral("phase"),2},{QStringLiteral("currentClassIndex"),0},{QStringLiteral("nextClassIndex"),1},
+        {QStringLiteral("remainingSeconds"),1200},{QStringLiteral("countdownTarget"),QStringLiteral("preview")}};
     const auto &table = courses_->table();
     const auto &state = courses_->state();
     QJsonArray classes;
@@ -441,9 +501,7 @@ QJsonObject PluginManager::definition(const QString &plugin, const QString &kind
     const auto record = records_.value(plugin);
     if (!record || record->state != QStringLiteral("运行中"))
         return {};
-    return kind == QStringLiteral("settings")    ? record->settingsPages.value(id)
-           : kind == QStringLiteral("component") ? record->components.value(id)
-                                                 : record->windows.value(id);
+    return kind == QStringLiteral("page") ? record->pages.value(id) : record->components.value(id);
 }
 QMap<QString, QString> PluginManager::componentTypes() const
 {
@@ -457,7 +515,7 @@ QMap<QString, QString> PluginManager::componentTypes() const
     return types;
 }
 void PluginManager::createView(const QString &plugin, const QString &kind, const QString &contribution,
-                               const QString &instance, const QJsonObject &settings)
+                               const QString &instance, const QJsonObject &settings, const QString &componentInstance)
 {
     auto record = records_.value(plugin);
     if (!record || !record->runtime || record->state != QStringLiteral("运行中"))
@@ -467,7 +525,8 @@ void PluginManager::createView(const QString &plugin, const QString &kind, const
                            QJsonObject{{QStringLiteral("instanceId"), instance},
                                        {QStringLiteral("kind"), kind},
                                        {QStringLiteral("contributionId"), contribution},
-                                       {QStringLiteral("settings"), settings}});
+                                       {QStringLiteral("settings"), settings},
+                                       {QStringLiteral("componentInstance"), componentInstance}});
 }
 void PluginManager::releaseView(const QString &instance)
 {
@@ -476,23 +535,14 @@ void PluginManager::releaseView(const QString &instance)
         record->runtime->event(QStringLiteral("ui.destroyed"),
                                QJsonObject{{QStringLiteral("instanceId"), instance}});
 }
-void PluginManager::action(const QString &instance, const QString &action, const QJsonValue &value)
+void PluginManager::viewEvent(const QString &plugin, const QString &name, const QJsonObject &event)
 {
-    auto record = records_.value(views_.value(instance));
-    if (record && record->runtime)
-    {
-        record->lastUserAction = QDateTime::currentMSecsSinceEpoch();
-        record->runtime->event(QStringLiteral("ui.action"),
-                               QJsonObject{{QStringLiteral("instanceId"), instance},
-                                           {QStringLiteral("actionId"), action},
-                                           {QStringLiteral("value"), value}});
-    }
+    const auto record=records_.value(plugin);
+    if(record && record->runtime && record->state==QStringLiteral("运行中")) record->runtime->event(name,event);
 }
-void PluginManager::saved(const QString &id, const QJsonObject &values)
+void PluginManager::dispatchGuard(const QString &instance, const QString &operation, const QString &token)
 {
-    auto record = records_.value(id);
-    if (record && record->runtime)
-        record->runtime->event(QStringLiteral("settings.saved"), values);
+    viewEvent(views_.value(instance),QStringLiteral("ui.guard"),{{QStringLiteral("instanceId"),instance},{QStringLiteral("operation"),operation},{QStringLiteral("token"),token}});
 }
 void PluginManager::storage(const QString &plugin, const QString &method, const QJsonObject &args,
                             QObject *context, Completion callback)
@@ -536,8 +586,8 @@ void PluginManager::request(const std::shared_ptr<Record> &record, const QString
         if (record->runtime)
             record->runtime->deliver(id, error, result);
     };
-    const auto permissions =
-        ConfigManager::instance().config().pluginConfig.plugins.value(record->manifest.id).grantedPermissions;
+    const auto permissions = publication_ && publication_->candidate == record ? record->manifest.permissions
+        : ConfigManager::instance().config().pluginConfig.plugins.value(record->manifest.id).grantedPermissions;
     auto denied = [&]
     { reply(Plugins::error(QStringLiteral("PERMISSION_DENIED"), QStringLiteral("未授予此能力"))); };
     const bool starting = record->state == QStringLiteral("启动中");
@@ -546,6 +596,16 @@ void PluginManager::request(const std::shared_ptr<Record> &record, const QString
         reply(Plugins::error(QStringLiteral("PLUGIN_STOPPED"), QStringLiteral("宿主或插件正在停止")));
         return;
     }
+    const bool guardSave = guardRequest && guardRequest(record->manifest.id,args);
+    if (quiescing_ && !guardSave && (method == QStringLiteral("profiles.applyChanges") || method == QStringLiteral("settings.update") ||
+        method == QStringLiteral("storage.set") || method == QStringLiteral("storage.remove") || method == QStringLiteral("storage.commit") ||
+        method == QStringLiteral("http.request") || method == QStringLiteral("notifications.show") || method == QStringLiteral("actions.invoke"))) {
+        reply(Plugins::error(QStringLiteral("CANCELED"),QStringLiteral("正在处理未保存更改"))); return;
+    }
+    if(previewMode_ && (method==QStringLiteral("http.request") || method==QStringLiteral("notifications.show"))) {
+        reply(Plugins::error(QStringLiteral("PERMISSION_DENIED"),QStringLiteral("隔离预览禁止外部网络和系统通知")));return;
+    }
+    if (contributionRequest(record,id,method,args)) return;
     if (method == QStringLiteral("log"))
     {
         const auto line = QDateTime::currentDateTime().toString(Qt::ISODate) + QLatin1Char(' ') +
@@ -568,7 +628,7 @@ void PluginManager::request(const std::shared_ptr<Record> &record, const QString
         else
             allowed = QStringList{QStringLiteral("theme.changed"), QStringLiteral("ui.created"),
                                   QStringLiteral("ui.destroyed"), QStringLiteral("ui.action"),
-                                  QStringLiteral("settings.saved")}
+                                  QStringLiteral("ui.signal")}
                           .contains(name);
         if (!allowed)
         {
@@ -714,7 +774,7 @@ void PluginManager::request(const std::shared_ptr<Record> &record, const QString
     }
     if (method.startsWith(QStringLiteral("storage.")) || method == QStringLiteral("http.request"))
     {
-        if (starting && method != QStringLiteral("storage.get"))
+        if ((writesBlocked_ || starting) && method != QStringLiteral("storage.get") && method != QStringLiteral("storage.read"))
         {
             reply(Plugins::error(QStringLiteral("CANCELED"),
                                  QStringLiteral("激活阶段仅允许读取存储；在定时任务或事件中发起其他操作")));
@@ -742,120 +802,6 @@ void PluginManager::request(const std::shared_ptr<Record> &record, const QString
         record->lastNotification = now;
         emit notification(args.value(QStringLiteral("title")).toString().left(128),
                           args.value(QStringLiteral("message")).toString().left(512));
-        reply();
-        return;
-    }
-    if (method.startsWith(QStringLiteral("ui.register")))
-    {
-        const auto local = args.value(QStringLiteral("id")).toString();
-        const auto definition = args.value(QStringLiteral("definition")).toObject();
-        const auto kind =
-            method == QStringLiteral("ui.registerSettingsPage") ? QStringLiteral("settingsPages")
-            : method == QStringLiteral("ui.registerComponent")  ? QStringLiteral("courseBarComponents")
-            : method == QStringLiteral("ui.registerWindow")     ? QStringLiteral("windows")
-                                                                : QString();
-        bool declared = false;
-        for (const auto &contribution : record->manifest.contributions.value(kind).toArray())
-            if (contribution.toObject().value(QStringLiteral("id")).toString() == local)
-                declared = true;
-        if (kind.isEmpty() || !declared || !args.value(QStringLiteral("definition")).isObject())
-        {
-            reply(Plugins::error(QStringLiteral("INVALID_ARGUMENT"),
-                                 QStringLiteral("视图未在清单声明或定义无效")));
-            return;
-        }
-        auto validation = Plugins::validateView(definition);
-        if (validation.isEmpty() && definition.contains(QStringLiteral("settings")))
-            validation = Plugins::validateView(definition.value(QStringLiteral("settings")).toObject());
-        if (!validation.isEmpty())
-        {
-            reply(Plugins::error(QStringLiteral("INVALID_ARGUMENT"), validation));
-            fault(record, validation);
-            return;
-        }
-        auto *target = kind == QStringLiteral("settingsPages") ? &record->settingsPages
-                       : kind == QStringLiteral("windows")     ? &record->windows
-                                                               : &record->components;
-        if (target->contains(local))
-        {
-            reply(Plugins::error(QStringLiteral("CONFLICT"), QStringLiteral("贡献已注册")));
-            return;
-        }
-        target->insert(local, definition);
-        reply();
-        if (!starting)
-            emit contributionsChanged();
-        return;
-    }
-    if (method == QStringLiteral("ui.update"))
-    {
-        if (!record->uiClock.isValid() || record->uiClock.elapsed() >= 1000)
-        {
-            record->uiClock.start();
-            record->uiUpdates = record->uiTrees = 0;
-        }
-        if (++record->uiUpdates > 30)
-        {
-            reply(
-                Plugins::error(QStringLiteral("RATE_LIMITED"), QStringLiteral("界面属性更新每秒最多 30 次")));
-            return;
-        }
-        const auto instance = args.value(QStringLiteral("instanceId")).toString();
-        if (views_.value(instance) != record->manifest.id || !args.value(QStringLiteral("patch")).isObject())
-        {
-            reply(Plugins::error(QStringLiteral("NOT_FOUND"), QStringLiteral("视图实例不存在")));
-            return;
-        }
-        emit viewUpdated(instance, args.value(QStringLiteral("patch")).toObject());
-        reply();
-        return;
-    }
-    if (method == QStringLiteral("ui.setTree"))
-    {
-        if (!record->uiClock.isValid() || record->uiClock.elapsed() >= 1000)
-        {
-            record->uiClock.start();
-            record->uiUpdates = record->uiTrees = 0;
-        }
-        if (++record->uiTrees > 2)
-        {
-            reply(
-                Plugins::error(QStringLiteral("RATE_LIMITED"), QStringLiteral("界面结构更新每秒最多 2 次")));
-            return;
-        }
-        const auto instance = args.value(QStringLiteral("instanceId")).toString();
-        if (views_.value(instance) != record->manifest.id)
-        {
-            reply(Plugins::error(QStringLiteral("NOT_FOUND"), QStringLiteral("视图实例不存在")));
-            return;
-        }
-        const auto tree = args.value(QStringLiteral("tree")).toObject();
-        const auto error = Plugins::validateView(QJsonObject{{QStringLiteral("tree"), tree}});
-        if (!error.isEmpty())
-        {
-            reply(Plugins::error(QStringLiteral("INVALID_ARGUMENT"), error));
-            return;
-        }
-        emit viewTreeReplaced(instance, tree);
-        reply();
-        return;
-    }
-    if (method == QStringLiteral("ui.openWindow"))
-    {
-        const auto local = args.value(QStringLiteral("id")).toString();
-        if (starting || !record->windows.contains(local))
-        {
-            reply(Plugins::error(QStringLiteral("NOT_FOUND"), QStringLiteral("窗口不可用")));
-            return;
-        }
-        if (QDateTime::currentMSecsSinceEpoch() - record->lastUserAction > 3000)
-        {
-            reply(
-                Plugins::error(QStringLiteral("PERMISSION_DENIED"), QStringLiteral("打开窗口需要用户交互")));
-            return;
-        }
-        record->lastUserAction = 0;
-        emit windowRequested(record->manifest.id, local);
         reply();
         return;
     }

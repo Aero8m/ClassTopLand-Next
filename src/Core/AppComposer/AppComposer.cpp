@@ -1,10 +1,13 @@
 #include "AppComposer.h"
 #include "../Plugins/PluginManager.h"
 #include "../../Ui/Plugins/PluginUiHost.h"
+#include "../../Ui/Plugins/PluginCenterWindow.h"
 #include "../../CourseBar/CourseBarComponentRegistry.h"
 #include <QScopeGuard>
 #include "../../TaskbarTrayMenu/TaskbarTrayMenu.h"
 #include "../../SettingsWindow/SettingsWindow.h"
+#include "../../AgentWindow/AgentWindow.h"
+#include "../../Ui/UiWidgets.h"
 #include "../../DesktopCountdown/DesktopCountdown.h"
 #include "../../ProfileEditWindow/ProfileEditWindow.h"
 #include "../../ProfileEditWindow/ProfileEditSession.h"
@@ -95,6 +98,10 @@ bool AppComposer::initInstances()
     // init course bar
     plugins_ = std::make_unique<PluginManager>(dataDirectory_, pluginsDisabled_);
     pluginUi_ = std::make_unique<PluginUiHost>(plugins_.get());
+    connect(pluginUi_.get(), &PluginUiHost::navigationRequested, this, [this](const QString &plugin,const QString &page,const QString &component) {
+        showPluginCenter();
+        if(pluginCenter_) pluginCenter_->navigate(plugin,page,component);
+    });
     componentRegistry_ = std::make_unique<CourseBarComponentRegistry>(plugins_.get(), pluginUi_.get());
     plugins_->editorDirty = [this] { return profileEditorWindow_ && profileEditorWindow_->session()->isDirty(); };
     courseBar = std::make_unique<CourseBar>(nullptr, componentRegistry_.get(), plugins_->courses());
@@ -154,6 +161,7 @@ bool AppComposer::initInstances()
         if (settingsWindow_) settingsWindow_->refreshProfiles();
     });
     trayMenu_ = std::make_unique<TaskbarTrayMenu>();
+    connect(trayMenu_.get(), &TaskbarTrayMenu::pluginsRequested, this, &AppComposer::showPluginCenter);
     trayMenu_->setExitGuard([this](int exitCode) { return prepareToExit(exitCode); });
     connect(trayMenu_.get(), &TaskbarTrayMenu::exitAccepted, this, [this] {
         exitAccepted_ = true;
@@ -166,6 +174,8 @@ bool AppComposer::initInstances()
     });
     connect(trayMenu_.get(), &TaskbarTrayMenu::settingsRequested,
             this, &AppComposer::showSettingsWindow);
+    connect(trayMenu_.get(), &TaskbarTrayMenu::agentRequested,
+            this, &AppComposer::showAgentWindow);
     connect(trayMenu_.get(), &TaskbarTrayMenu::profileEditorRequested,
             this, &AppComposer::showProfileEditorWindow);
     connect(trayMenu_.get(), &TaskbarTrayMenu::weekScheduleRequested,
@@ -218,9 +228,13 @@ void AppComposer::dropInstances()
     reminders_.reset();
     swapWindow_.reset();
     rescheduleWindow_.reset();
+    if (agent_) agent_->stop();
+    agentWindow_.reset();
+    pluginCenter_.reset();
     if (pluginUi_) pluginUi_->closeDialogs();
     if (plugins_) plugins_->stopAll();
     settingsWindow_.reset();
+    agent_.reset();
     windowInterception_.reset();
     profileEditorWindow_.reset();
     trayMenu_.reset();
@@ -245,12 +259,41 @@ bool AppComposer::startApp()
     return initialized_;
 }
 
+void AppComposer::showPluginCenter()
+{
+    if(!initialized_) return;
+    if(!pluginCenter_) {pluginCenter_=std::make_unique<PluginCenterWindow>(plugins_.get(),pluginUi_.get());centerOnPanelScreen(pluginCenter_.get());}
+    presentWindow(pluginCenter_.get());
+}
+
+void AppComposer::showAgentWindow()
+{
+    if (!initialized_ || restartPreparing_ || restartAccepted_) return;
+    if (!agent_) agent_ = std::make_unique<AgentService>(dataDirectory_, plugins_.get());
+    if (!agentWindow_) {
+        agentWindow_ = std::make_unique<AgentWindow>(agent_.get());
+        connect(agentWindow_.get(), &AgentWindow::settingsRequested, this, &AppComposer::showAgentSettings);
+        centerOnPanelScreen(agentWindow_.get());
+        presentWindow(agentWindow_.get());
+        return;
+    }
+    presentWindow(agentWindow_.get());
+}
+
+void AppComposer::showAgentSettings(const QString &draftSession)
+{
+    if (!initialized_ || restartPreparing_ || restartAccepted_) return;
+    showSettingsWindow();
+    if (settingsWindow_) settingsWindow_->openAgentPage(draftSession);
+}
+
 void AppComposer::showSettingsWindow()
 {
     // A click queued by a panel that is already being torn down must not revive the window.
     if (!initialized_) return;
     if (!settingsWindow_) {
-        settingsWindow_ = std::make_unique<SettingsWindow>(nullptr, windowInterception_.get(), plugins_.get(), pluginUi_.get(), componentRegistry_.get(), cloud_.get());
+        if (!agent_) agent_ = std::make_unique<AgentService>(dataDirectory_, plugins_.get());
+        settingsWindow_ = std::make_unique<SettingsWindow>(nullptr, windowInterception_.get(), plugins_.get(), pluginUi_.get(), componentRegistry_.get(), cloud_.get(), agent_.get());
         connect(settingsWindow_.get(), &SettingsWindow::profileEditorRequested,
                 this, &AppComposer::showProfileEditorWindow);
         connect(settingsWindow_.get(), &SettingsWindow::profileSwitchRequested,
@@ -390,8 +433,8 @@ void AppComposer::showSwapWindow()
         auto* screen = trayMenu_ ? trayMenu_->screen() : QGuiApplication::primaryScreen();
         if (screen) {
             const auto available = screen->availableGeometry().size();
-            swapWindow_->setMinimumSize(qMin(680, available.width()), qMin(460, available.height()));
-            swapWindow_->resize(qMin(960, available.width()), qMin(620, available.height()));
+            swapWindow_->setMinimumSize(swapWindow_->minimumSize().boundedTo(available));
+            swapWindow_->resize(swapWindow_->size().boundedTo(available));
         }
         centerOnPanelScreen(swapWindow_.get()); swapWindowPositioned_ = true;
     }
@@ -435,7 +478,7 @@ void AppComposer::cleanupDateOverrides()
 
 void AppComposer::switchProfile(const QString& id)
 {
-    if (!initialized_ || !trayMenu_ || switchingProfile_ || id.isEmpty()) return;
+    if (!initialized_ || !trayMenu_ || switchingProfile_ || pluginExitGuardPending_ || pluginExitGuardReady_ || restartPreparing_ || restartAccepted_ || id.isEmpty()) return;
     if (id.compare(QFileInfo(ProfileManager::instance().filePath()).completeBaseName(), Qt::CaseInsensitive) == 0) return;
     QScopedValueRollback<bool> switching(switchingProfile_, true);
     QScopedValueRollback<QString> selection(pendingProfileId_, id);
@@ -453,24 +496,52 @@ void AppComposer::setRestartHandler(std::function<bool(const Config&, const QStr
 
 void AppComposer::changeUiAccess(bool enabled)
 {
-    if (!initialized_ || !trayMenu_ || restartPreparing_ || restartAccepted_) return;
+    if (!initialized_ || !trayMenu_ || pluginExitGuardPending_ || pluginExitGuardReady_ || restartPreparing_ || restartAccepted_) return;
     if (!UiAccess::supported() || !prepareRestart_) {
         if (settingsWindow_) settingsWindow_->setUiAccessSwitching(false);
         return;
     }
     QScopedValueRollback<std::optional<bool>> request(pendingUiAccess_, enabled);
     trayMenu_->requestExit(TaskbarTrayMenu::RestartExitCode);
-    if (!restartAccepted_ && settingsWindow_) settingsWindow_->setUiAccessSwitching(false);
+    if (!pluginExitGuardPending_ && !pluginExitGuardReady_ && !restartAccepted_ && settingsWindow_) settingsWindow_->setUiAccessSwitching(false);
 }
 
 bool AppComposer::prepareToExit(int exitCode)
 {
     if (restartPreparing_ || restartAccepted_) return false;
+    if (plugins_ && plugins_->publishing()) {
+        QMessageBox::information(agentWindow_.get(), tr("正在发布插件"), tr("请等待插件发布完成后再退出或重启。"));
+        return false;
+    }
+    if(pluginUi_ && !pluginExitGuardReady_) {
+        if(pluginExitGuardPending_) return false;
+        pluginExitGuardPending_=true;
+        const auto profileRequest=pendingProfileId_;
+        const auto uiAccessRequest=pendingUiAccess_;
+        pluginUi_->prepareAll([this,exitCode,profileRequest,uiAccessRequest](bool allowed) {
+            pluginExitGuardPending_=false;
+            if(!allowed || !initialized_ || shutdown_) {
+                if(uiAccessRequest && settingsWindow_)settingsWindow_->setUiAccessSwitching(false);
+                return;
+            }
+            if(plugins_) plugins_->setWritesBlocked(true);
+            pluginExitGuardReady_=true;
+            QTimer::singleShot(0,this,[this,exitCode,profileRequest,uiAccessRequest]{
+                // The initiating slots use scoped requests. Preserve their values
+                // across the asynchronous plugin guard and restore only after the retry.
+                QScopedValueRollback<QString> selection(pendingProfileId_,profileRequest);
+                QScopedValueRollback<std::optional<bool>> request(pendingUiAccess_,uiAccessRequest);
+                if(trayMenu_)trayMenu_->requestExit(exitCode);
+                if(uiAccessRequest && !restartAccepted_ && settingsWindow_)settingsWindow_->setUiAccessSwitching(false);
+            });
+        });
+        return false;
+    }
+    pluginExitGuardReady_=false;
     QScopedValueRollback<bool> preparing(restartPreparing_, true);
     bool exitAccepted = false;
     if (plugins_) plugins_->setWritesBlocked(true);
     auto resumePlugins = qScopeGuard([this, &exitAccepted] { if (!exitAccepted && plugins_) plugins_->setWritesBlocked(false); });
-    if (pluginUi_ && !pluginUi_->prepareAll()) return false;
     if (profileEditorWindow_ && profileEditorWindow_->session()->isDirty()) {
         showProfileEditorWindow();
         if (!profileEditorWindow_->prepareToClose()) return false;

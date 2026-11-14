@@ -130,6 +130,7 @@ void PluginIo::request(const QString &id, quint64 generation, const QString &req
         return;
     }
     QJsonObject store;
+    QString revision=QStringLiteral("0");
     if (QFileInfo::exists(path))
     {
         if (!Plugins::within(root, path))
@@ -154,6 +155,20 @@ void PluginIo::request(const QString &id, quint64 generation, const QString &req
             return;
         }
         store = document.object().value(QStringLiteral("values")).toObject();
+        const auto savedRevision=document.object().value(QStringLiteral("revision"));
+        if(!savedRevision.isUndefined()) {
+            bool valid=false; const auto numeric=savedRevision.toString().toULongLong(&valid);
+            if(!valid || QString::number(numeric)!=savedRevision.toString()) {finish(Plugins::error(QStringLiteral("SAVE_FAILED"),QStringLiteral("存储 revision 损坏，原文件已保留")));return;}
+            revision=savedRevision.toString();
+        }
+    }
+    if(method==QStringLiteral("storage.read")) {
+        QJsonObject result{{QStringLiteral("exists"),store.contains(field)},{QStringLiteral("revision"),revision}};
+        if(store.contains(field)) result.insert(QStringLiteral("value"),store.value(field));
+        finish({},result);return;
+    }
+    if(method==QStringLiteral("storage.commit") && args.value(QStringLiteral("expectedRevision")).toString()!=revision) {
+        finish(Plugins::error(QStringLiteral("CONFLICT"),QStringLiteral("插件配置已变化，请重新读取后合并")));return;
     }
     if (method == QStringLiteral("storage.get"))
     {
@@ -168,7 +183,7 @@ void PluginIo::request(const QString &id, quint64 generation, const QString &req
                               QStringLiteral("设置已由其他任务修改，请重新打开窗口")));
         return;
     }
-    if (method == QStringLiteral("storage.set"))
+    if (method == QStringLiteral("storage.set") || method == QStringLiteral("storage.commit"))
         store.insert(field, args.value(QStringLiteral("value")));
     else if (method == QStringLiteral("storage.remove"))
         store.remove(field);
@@ -177,8 +192,10 @@ void PluginIo::request(const QString &id, quint64 generation, const QString &req
         finish(Plugins::error(QStringLiteral("NOT_FOUND"), method));
         return;
     }
+    if(revision==QStringLiteral("18446744073709551615")){finish(Plugins::error(QStringLiteral("SAVE_FAILED"),QStringLiteral("存储 revision 已超限，原文件保留")));return;}
+    const auto nextRevision=QString::number(revision.toULongLong()+1);
     const auto bytes =
-        QJsonDocument(QJsonObject{{QStringLiteral("schemaVersion"), 1}, {QStringLiteral("values"), store}})
+        QJsonDocument(QJsonObject{{QStringLiteral("schemaVersion"), 1}, {QStringLiteral("revision"),nextRevision}, {QStringLiteral("values"), store}})
             .toJson();
     if (bytes.size() > 1024 * 1024)
     {
@@ -191,7 +208,7 @@ void PluginIo::request(const QString &id, quint64 generation, const QString &req
         finish(Plugins::error(QStringLiteral("SAVE_FAILED"), file.errorString()));
         return;
     }
-    finish({}, true);
+    finish({}, method==QStringLiteral("storage.commit")?QJsonValue(QJsonObject{{QStringLiteral("revision"),nextRevision}}):QJsonValue(true));
 }
 void PluginIo::http(const std::shared_ptr<Transfer> &transfer)
 {

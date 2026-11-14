@@ -2,6 +2,7 @@
 #include "../../Core/Plugins/PluginManager.h"
 #include "../../Core/ConfigManager/ConfigManager.h"
 #include "../../Ui/Plugins/PluginUiHost.h"
+#include "../../Ui/Plugins/PluginHistoryDialog.h"
 #include "../../Ui/UiWidgets.h"
 #include "../../Utils/UiAccess/UiAccess.h"
 #include <ElaLineEdit.h>
@@ -11,6 +12,7 @@
 #include <ElaMenu.h>
 #include <ElaScrollArea.h>
 #include <QJsonDocument>
+#include <QPointer>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QStackedWidget>
@@ -21,20 +23,27 @@
 #include <QTimer>
 #include <QScrollBar>
 
+namespace {
+bool hasSettings(const std::shared_ptr<PluginManager::Record> &record) {
+    for(const auto &page:record->pages) if(page.value(QStringLiteral("purpose"))==QStringLiteral("settings")) return true;
+    return false;
+}
+}
 PluginSettingsTab::PluginSettingsTab(PluginManager *manager, PluginUiHost *ui, QWidget *parent)
     : ElaScrollPage(parent), manager_(manager), ui_(ui)
 {
     auto *layout = AppUi::page(this, QStringLiteral("插件"));
-    auto *cloudHint = AppUi::text(QStringLiteral("集控下发的启用偏好在下次启动生效，运行状态以当前会话为准。"), this, 12);
+    auto *toolsBody = AppUi::card(layout);
+    auto *cloudHint = AppUi::text(QStringLiteral("集控下发的启用偏好在下次启动生效，运行状态以当前会话为准。"), toolsBody->parentWidget(), 12);
     cloudHint->setWordWrap(true);
-    layout->addWidget(cloudHint);
     auto *tools = new QHBoxLayout;
-    search_ = new ElaLineEdit(this);
+    search_ = new ElaLineEdit(toolsBody->parentWidget());
     search_->setPlaceholderText(QStringLiteral("搜索插件名称或 ID"));
     tools->addWidget(search_, 1);
-    auto *more = AppUi::button(QStringLiteral("更多"), this);
+    auto *more = AppUi::button(QStringLiteral("更多"), toolsBody->parentWidget());
     tools->addWidget(more);
-    layout->addLayout(tools);
+    toolsBody->addLayout(tools);
+    toolsBody->addWidget(cloudHint);
     auto *menu = new ElaMenu(this);
     menu->addAction(QStringLiteral("重新扫描"), manager_, &PluginManager::scan);
     menu->addAction(QStringLiteral("打开插件目录"), this,
@@ -62,9 +71,9 @@ PluginSettingsTab::PluginSettingsTab(PluginManager *manager, PluginUiHost *ui, Q
     if (manager_->recovery())
     {
         auto *label =
-            AppUi::text(QStringLiteral("恢复模式：本次启动未自动运行第三方插件，可在此手动启用。"), this, 12);
+            AppUi::text(QStringLiteral("恢复模式：本次启动未自动运行第三方插件，可在此手动启用。"), toolsBody->parentWidget(), 12);
         label->setWordWrap(true);
-        layout->insertWidget(1, label);
+        toolsBody->addWidget(label);
     }
     connect(search_, &ElaLineEdit::textChanged, this, &PluginSettingsTab::refresh);
     connect(manager_, &PluginManager::changed, this,
@@ -101,10 +110,8 @@ void PluginSettingsTab::refresh()
             !record->manifest.id.contains(query, Qt::CaseInsensitive))
             continue;
         ++count;
-        auto *card = new QWidget(list_);
-        auto *body = new QVBoxLayout(card);
-        body->setContentsMargins(12, 8, 12, 8);
-        body->setSpacing(6);
+        auto *body = AppUi::card(rows_);
+        auto *card = body->parentWidget();
         auto *row = new QHBoxLayout;
         auto *name = AppUi::text(record->manifest.name, card, 16);
         name->setMinimumWidth(0);
@@ -118,24 +125,25 @@ void PluginSettingsTab::refresh()
         toggle->setEnabled(record->manifest.valid() && record->state != QStringLiteral("启动中") &&
                            record->state != QStringLiteral("停止中"));
         row->addWidget(toggle);
+        body->addLayout(row);
+        auto *actions = new QHBoxLayout;
+        actions->addStretch();
         auto *settings = AppUi::button(QStringLiteral("设置"), card);
-        settings->setEnabled(record->state == QStringLiteral("运行中") && !record->settingsPages.isEmpty());
+        settings->setEnabled(record->state == QStringLiteral("运行中") && hasSettings(record));
         settings->setToolTip(
-            record->settingsPages.isEmpty() ? QStringLiteral("无可配置项；已停用插件需先启用") : QString());
-        row->addWidget(settings);
+            !hasSettings(record) ? QStringLiteral("无可配置项；已停用插件需先启用") : QString());
+        actions->addWidget(settings);
         auto *details = AppUi::button(QStringLiteral("详情"), card);
         details->setProperty("pluginKey", record->key);
-        row->addWidget(details);
-        body->addLayout(row);
+        actions->addWidget(details);
         auto *summary = AppUi::text(
-            record->state + (record->updatePending ? QStringLiteral(" · 更新需重启") : QString()) +
+            record->state + (record->updatePending ? QStringLiteral(" · 待热重载") : QString()) +
                 QStringLiteral(" · ") + record->manifest.description.left(100),
             card, 12);
         summary->setWordWrap(true);
         summary->setMinimumWidth(0);
         body->addWidget(summary);
-        card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
-        rows_->addWidget(card, 0, Qt::AlignTop);
+        body->addLayout(actions);
         connect(toggle, &ElaToggleSwitch::toggled, this,
                 [this, key = record->key](bool enabled) { this->toggle(key, enabled); });
         connect(settings, &ElaPushButton::clicked, this,
@@ -144,14 +152,15 @@ void PluginSettingsTab::refresh()
     }
     if (!count)
     {
+        auto *emptyBody = AppUi::card(rows_);
         auto *empty = AppUi::text(
             query.isEmpty()
                 ? QStringLiteral(
                       "尚未发现插件。将插件目录放入 plugins 后，在“更多”中重新扫描；扫描不会执行插件代码。")
                 : QStringLiteral("没有匹配的插件"),
-            list_);
+            emptyBody->parentWidget());
         empty->setWordWrap(true);
-        rows_->addWidget(empty);
+        emptyBody->addWidget(empty);
     }
     rows_->addStretch();
 }
@@ -197,6 +206,7 @@ void PluginSettingsTab::showDetails(const QString &id)
     details_ = new QWidget(stack_);
     auto *layout = new QVBoxLayout(details_);
     layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(16);
     auto *back = AppUi::button(QStringLiteral("返回插件列表"), details_);
     layout->addWidget(back, 0, Qt::AlignLeft);
     connect(back, &ElaPushButton::clicked, this,
@@ -214,26 +224,60 @@ void PluginSettingsTab::showDetails(const QString &id)
                         scroll->verticalScrollBar()->setValue(listScroll_);
                 });
             });
+    auto *informationBody = AppUi::card(layout, QStringLiteral("插件信息"));
     auto *information =
         AppUi::text(QStringLiteral("%1\nID：%2\n版本：%3\n状态：%4\n来源：%5\n%6")
                         .arg(record->manifest.name, record->manifest.id, record->manifest.version,
-                             record->state, record->manifest.directory, record->failure),
-                    details_);
+                             record->state, record->source.isEmpty() ? record->manifest.directory : record->source,
+                             record->failure),
+                    informationBody->parentWidget());
     information->setTextFormat(Qt::PlainText);
     information->setWordWrap(true);
     information->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     information->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    layout->addWidget(information);
-    auto *settings = AppUi::button(QStringLiteral("打开插件设置"), details_);
-    settings->setEnabled(record->state == QStringLiteral("运行中") && !record->settingsPages.isEmpty());
-    layout->addWidget(settings, 0, Qt::AlignLeft);
+    informationBody->addWidget(information);
+    auto *actionsBody = AppUi::card(layout, QStringLiteral("插件操作"));
+    auto *settings = AppUi::button(QStringLiteral("打开插件设置"), actionsBody->parentWidget());
+    settings->setEnabled(record->state == QStringLiteral("运行中") && hasSettings(record));
+    actionsBody->addWidget(settings, 0, Qt::AlignLeft);
     connect(settings, &ElaPushButton::clicked, this, [this, id] { ui_->openSettings(id, window()); });
+    auto *history = AppUi::button(QStringLiteral("版本历史与回滚"), actionsBody->parentWidget());
+    actionsBody->addWidget(history, 0, Qt::AlignLeft);
+    connect(history, &ElaPushButton::clicked, this, [this, id] { AppUi::showPluginHistory(manager_->workspace(), id, window()); });
+    if (!record->source.isEmpty() && record->key == record->manifest.id) {
+        auto *reload = AppUi::button(QStringLiteral("热重载"), actionsBody->parentWidget());
+        reload->setEnabled(!manager_->publishing() && record->state != QStringLiteral("启动中") &&
+                           record->state != QStringLiteral("停止中"));
+        actionsBody->addWidget(reload, 0, Qt::AlignLeft);
+        connect(reload, &ElaPushButton::clicked, this, [this, id, source = record->source] {
+            QString error;
+            const auto package = manager_->stagePackage(source, &error);
+            if (!package.directory || package.manifest.id != id) {
+                AppUi::error(window(), error.isEmpty() ? QStringLiteral("插件 ID 已变化") : error);
+                return;
+            }
+            const auto current = manager_->record(id);
+            if (!current) return;
+            const auto permissions = ConfigManager::instance().config().pluginConfig.plugins.value(id).grantedPermissions;
+            const auto summary = QStringLiteral("%1\n%2 → %3\n\n已授予权限\n%4\n候选包权限\n%5\n\n插件与应用在同一进程运行。")
+                .arg(package.manifest.name, current->manifest.version, package.manifest.version,
+                     QString::fromUtf8(QJsonDocument(permissions).toJson()),
+                     QString::fromUtf8(QJsonDocument(package.manifest.permissions).toJson()));
+            if (!AppUi::confirm(window(), QStringLiteral("确认热重载与授权"), summary)) return;
+            const QPointer<PluginSettingsTab> tab(this);
+            if (!manager_->publish(package, PluginManager::PublishMode::PreserveEnabled, [tab](const QString &failure) {
+                    if (tab && !failure.isEmpty()) AppUi::error(tab->window(), failure);
+                }, &error)) {
+                AppUi::error(window(), error);
+            }
+        });
+    }
     if (record->state == QStringLiteral("运行故障") || record->state == QStringLiteral("待重新授权") ||
         (record->state == QStringLiteral("已停用") &&
          ConfigManager::instance().config().pluginConfig.plugins.value(record->manifest.id).enabled))
     {
-        auto *retry = AppUi::button(QStringLiteral("重新授权并重试"), details_);
-        layout->addWidget(retry, 0, Qt::AlignLeft);
+        auto *retry = AppUi::button(QStringLiteral("重新授权并重试"), actionsBody->parentWidget());
+        actionsBody->addWidget(retry, 0, Qt::AlignLeft);
         connect(retry, &ElaPushButton::clicked, this,
                 [this, id]
                 {
@@ -241,41 +285,48 @@ void PluginSettingsTab::showDetails(const QString &id)
                     showDetails(id);
                 });
     }
-    for (auto it = record->windows.begin(); it != record->windows.end(); ++it)
+    if (!record->pages.isEmpty())
     {
-        auto *open = AppUi::button(
-            QStringLiteral("打开：") + it->value(QStringLiteral("name")).toString(it.key()), details_);
-        layout->addWidget(open, 0, Qt::AlignLeft);
-        connect(open, &ElaPushButton::clicked, this,
-                [this, id, contribution = it.key()] { ui_->openWindow(id, contribution, window()); });
+        auto *pagesBody = AppUi::card(layout, QStringLiteral("插件页面"));
+        for (auto it = record->pages.begin(); it != record->pages.end(); ++it)
+        {
+            auto *open = AppUi::button(
+                QStringLiteral("打开：") + it->value(QStringLiteral("name")).toString(it.key()), pagesBody->parentWidget());
+            pagesBody->addWidget(open, 0, Qt::AlignLeft);
+            connect(open, &ElaPushButton::clicked, this,
+                    [this, id, contribution = it.key()] { emit ui_->navigationRequested(id, contribution, {}); });
+        }
     }
     const auto preference =
         ConfigManager::instance().config().pluginConfig.plugins.value(record->manifest.id);
+    auto *permissionsBody = AppUi::card(layout, QStringLiteral("权限信息"));
     auto *permissions =
         AppUi::text(QStringLiteral("声明权限\n%1\n已授予权限\n%2")
                         .arg(QString::fromUtf8(QJsonDocument(record->manifest.permissions).toJson()),
                              QString::fromUtf8(QJsonDocument(preference.grantedPermissions).toJson())),
-                    details_, 12);
+                    permissionsBody->parentWidget(), 12);
     permissions->setTextFormat(Qt::PlainText);
     permissions->setWordWrap(true);
     permissions->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    layout->addWidget(permissions);
-    auto *logs = new ElaPlainTextEdit(details_);
+    permissionsBody->addWidget(permissions);
+    auto *logsBody = AppUi::card(layout, QStringLiteral("运行日志"));
+    auto *logs = new ElaPlainTextEdit(logsBody->parentWidget());
     logs->setReadOnly(true);
     logs->setPlainText(record->logs.join(QLatin1Char('\n')));
     logs->setMinimumHeight(120);
     logs->setMaximumHeight(220);
     logs->setPlaceholderText(QStringLiteral("暂无日志；重新进入详情以刷新"));
-    layout->addWidget(logs);
+    logsBody->addWidget(logs);
     AppUi::enableTouchScrolling(logs);
+    auto *helpBody = AppUi::card(layout);
     auto *uninstall = AppUi::text(
         QStringLiteral(
-            "安装与更新：手动复制本地插件目录，新插件默认停用；更新前停用并备份旧目录，重启后使用新版本。卸载"
+            "安装与更新：手动复制本地插件目录，新插件默认停用；替换源文件后，在详情中审阅权限并热重载。卸载"
             "：停用后移出插件目录；plugin-data 中的数据默认保留，删除数据需另行确认。"),
-        details_, 12);
+        helpBody->parentWidget(), 12);
     uninstall->setWordWrap(true);
     uninstall->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    layout->addWidget(uninstall);
+    helpBody->addWidget(uninstall);
     stack_->addWidget(details_);
     list_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
     stack_->setCurrentWidget(details_);

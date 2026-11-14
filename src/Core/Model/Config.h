@@ -15,6 +15,7 @@ struct Config
     WindowInterceptionConfig windowInterceptionConfig;
     DesktopCountdownConfig desktopCountdownConfig;
     PluginConfig pluginConfig;
+    QJsonObject agentConfig;
     ReminderConfig reminderConfig;
 };
 #endif //CLASSTOPLAND_NEXT_CONFIG_H

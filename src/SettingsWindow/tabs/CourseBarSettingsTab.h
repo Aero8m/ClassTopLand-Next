@@ -33,7 +33,7 @@ private:
     void selectComponent(int index);
     void moveComponent(int from, int to);
     void showComponentSettings(int index);
-    bool save(const CourseBarConfig& candidate, int selection, bool refreshComponents = true, bool resetAll = false);
+    bool save(const CourseBarConfig& candidate, int selection, bool refreshComponents = true, bool resetAll = false, bool prepared = false);
     void scheduleRefresh();
     CourseBarComponentRegistry* registry_ = nullptr;
     CourseBarConfig config_;

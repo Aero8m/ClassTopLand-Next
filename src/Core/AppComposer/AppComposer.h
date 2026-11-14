@@ -13,6 +13,9 @@
 
 class TaskbarTrayMenu;
 class SettingsWindow;
+class AgentWindow;
+class PluginCenterWindow;
+class AgentService;
 class ProfileEditWindow;
 class SwapClassesWindow;
 class RescheduleWindow;
@@ -53,6 +56,9 @@ public:
 private slots:
     // Create each window on demand and always reuse that one instance.
     void showSettingsWindow();
+    void showAgentWindow();
+    void showPluginCenter();
+    void showAgentSettings(const QString &draftSession);
     void showProfileEditorWindow();
     void refreshScheduleMenu();
     void selectWeekSchedule(const QString& id);
@@ -85,6 +91,8 @@ private:
     bool shutdown_ = false;
     bool pluginsDisabled_ = false;
     bool exitAccepted_ = false;
+    bool pluginExitGuardReady_ = false;
+    bool pluginExitGuardPending_ = false;
     std::unique_ptr<PluginManager> plugins_;
     std::unique_ptr<PluginUiHost> pluginUi_;
     std::unique_ptr<CourseBarComponentRegistry> componentRegistry_;
@@ -95,6 +103,9 @@ private:
     std::unique_ptr<WindowInterceptionService> windowInterception_;
     std::unique_ptr<TaskbarTrayMenu> trayMenu_;
     std::unique_ptr<SettingsWindow> settingsWindow_;
+    std::unique_ptr<AgentService> agent_;
+    std::unique_ptr<AgentWindow> agentWindow_;
+    std::unique_ptr<PluginCenterWindow> pluginCenter_;
     std::unique_ptr<ProfileEditWindow> profileEditorWindow_;
     std::unique_ptr<SwapClassesWindow> swapWindow_;
     std::unique_ptr<RescheduleWindow> rescheduleWindow_;

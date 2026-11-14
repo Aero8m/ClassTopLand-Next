@@ -5,10 +5,13 @@
 #include <QTimer>
 #include <ElaApplication.h>
 #include "src/Core/AppComposer/AppComposer.h"
+#include "src/Core/Plugins/PluginPreview.h"
 #include "src/TaskbarTrayMenu/TaskbarTrayMenu.h"
 #include "src/Utils/UiAccess/UiAccess.h"
 int main(int argc, char* argv[])
 {
+    for(int index=1;index<argc;++index)
+        if(QString::fromLocal8Bit(argv[index])==QStringLiteral("--plugin-preview")) return runPluginPreview(argc,argv);
     const auto startup = UiAccess::inspectStartup(argc, argv, DATA_PATH);
     if (startup.exitRequested) return startup.exitCode;
     QString startupError;

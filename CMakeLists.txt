@@ -15,6 +15,7 @@ find_package(Qt6 COMPONENTS
         Widgets
         Qml
         Network
+        UiTools
         REQUIRED)
 
 if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/yaml-cpp/CMakeLists.txt")
@@ -36,6 +37,21 @@ add_subdirectory(third_party/ElaWidgetTools-Plus/ElaWidgetTools)
 
 add_executable(ClassTopLand-Next
         main.cpp
+        src/AgentWindow/AgentWindow.cpp
+        src/AgentWindow/AgentWindow.h
+        src/Core/Agent/AgentModel.cpp
+        src/Core/Agent/AgentModel.h
+        src/Core/Agent/AgentCatalog.cpp
+        src/Core/Agent/AgentCatalog.h
+        src/Core/Agent/AgentPlatform.cpp
+        src/Core/Agent/AgentPlatform.h
+        src/Core/Agent/AgentFiles.cpp
+        src/Core/Agent/AgentFiles.h
+        src/Core/Agent/AgentToolRegistry.cpp
+        src/Core/Agent/AgentToolRegistry.h
+        src/Core/Agent/AgentTools.cpp
+        src/Core/Agent/AgentService.cpp
+        src/Core/Agent/AgentService.h
         src/Core/Model/ReminderConfig.cpp
         src/Core/Model/ReminderConfig.h
         src/Core/Reminders/ReminderService.cpp
@@ -46,6 +62,22 @@ add_executable(ClassTopLand-Next
         src/Core/Plugins/PluginIo.h
         src/Core/Plugins/PluginManager.cpp
         src/Core/Plugins/PluginManager.h
+        src/Core/Plugins/PluginPublication.cpp
+        src/Core/Plugins/PluginWorkspace.cpp
+        src/Core/Plugins/PluginWorkspace.h
+        src/Core/Plugins/PluginContracts.cpp
+        src/Core/Plugins/PluginContracts.h
+        src/Core/Plugins/PluginActionRegistry.cpp
+        src/Core/Plugins/PluginActionRegistry.h
+        src/Core/Plugins/PluginContributions.cpp
+        src/Ui/Plugins/PluginWidgetRegistry.cpp
+        src/Ui/Plugins/PluginWidgetRegistry.h
+        src/Ui/Plugins/PluginNativeView.cpp
+        src/Ui/Plugins/PluginNativeView.h
+        src/Ui/Plugins/PluginCenterWindow.cpp
+        src/Ui/Plugins/PluginCenterWindow.h
+        src/Core/Plugins/PluginPreview.cpp
+        src/Core/Plugins/PluginPreview.h
         src/Core/Plugins/PluginManifest.cpp
         src/Core/Plugins/PluginManifest.h
         src/Core/Plugins/PluginRuntime.cpp
@@ -56,12 +88,10 @@ add_executable(ClassTopLand-Next
         src/Core/ProfileValidation/ProfileOperations.h
         src/Core/ProfileValidation/ProfileValidation.cpp
         src/Core/ProfileValidation/ProfileValidation.h
-        src/Ui/Plugins/PluginSettingsDialog.cpp
-        src/Ui/Plugins/PluginSettingsDialog.h
         src/Ui/Plugins/PluginUiHost.cpp
         src/Ui/Plugins/PluginUiHost.h
-        src/Ui/Plugins/PluginView.cpp
-        src/Ui/Plugins/PluginView.h
+        src/Ui/Plugins/PluginHistoryDialog.cpp
+        src/Ui/Plugins/PluginHistoryDialog.h
         src/Core/Model/PluginConfig.h
         src/CourseBar/CourseBarComponentRegistry.h
         src/CourseBar/CourseBarComponentRegistry.cpp
@@ -153,6 +183,8 @@ add_executable(ClassTopLand-Next
 
         src/SettingsWindow/SettingsWindow.cpp
         src/SettingsWindow/SettingsWindow.h
+        src/SettingsWindow/tabs/AgentSettingsTab.cpp
+        src/SettingsWindow/tabs/AgentSettingsTab.h
         src/SettingsWindow/AboutDialog.cpp
         src/SettingsWindow/AboutDialog.h
         src/SettingsWindow/tabs/AppearanceSettingsTab.cpp
@@ -212,6 +244,7 @@ target_link_libraries(ClassTopLand-Next
         Qt::Widgets
         Qt::Qml
         Qt::Network
+        Qt::UiTools
         Ela::WidgetTools
         yaml-cpp::yaml-cpp
 )

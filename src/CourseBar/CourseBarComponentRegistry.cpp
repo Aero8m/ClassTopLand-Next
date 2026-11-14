@@ -6,7 +6,7 @@
 #include "BuiltinComponents/TextTip/TextTip.h"
 #include "../Core/Plugins/PluginManager.h"
 #include "../Ui/Plugins/PluginUiHost.h"
-#include "../Ui/Plugins/PluginView.h"
+#include "../Ui/Plugins/PluginNativeView.h"
 #include <QVBoxLayout>
 #include <QLabel>
 #include <QEvent>
@@ -31,6 +31,8 @@ class ScriptCourseBarComponent final : public ICourseBarComponent
         }
         layout->addWidget(view_);
         view_->installEventFilter(this);
+        if(auto *native=qobject_cast<PluginNativeView *>(view_.data()))
+            connect(native,&PluginNativeView::availabilityChanged,this,[this]{notifyPreferredSizeChanged();});
         updateMetrics();
     }
     QString getName() override
@@ -39,7 +41,7 @@ class ScriptCourseBarComponent final : public ICourseBarComponent
     }
     QSize sizeHint() const override
     {
-        return QSize(qBound(24, view_->sizeHint().width(), 800), metrics().height);
+        return QSize(view_ ? qBound(24, view_->sizeHint().width(), 800) : 24, metrics().height);
     }
     bool visibleWhenCollapsed() const override
     {
@@ -47,16 +49,25 @@ class ScriptCourseBarComponent final : public ICourseBarComponent
     }
     bool isAvailable() const override
     {
-        const auto *view = qobject_cast<PluginView *>(view_);
-        return !view || view->available();
+        const auto *view = qobject_cast<PluginNativeView *>(view_.data());
+        return view_ && (!view || view->available());
     }
 
   protected:
     void updateMetrics() override
     {
         setFixedHeight(metrics().height);
-        if (view_)
-            view_->setFont(metrics().font());
+        if (view_) {
+            const auto font = metrics().font();
+            view_->setFont(font);
+            // Designer/QUiLoader and Ela controls can resolve their own fonts.
+            // Apply the course-bar scale to the rendered controls as well.
+            for (auto* child : view_->findChildren<QWidget*>()) {
+                auto scaledFont = child->font();
+                scaledFont.setPixelSize(font.pixelSize());
+                child->setFont(scaledFont);
+            }
+        }
         notifyPreferredSizeChanged();
     }
     bool eventFilter(QObject *watched, QEvent *event) override
@@ -69,7 +80,7 @@ class ScriptCourseBarComponent final : public ICourseBarComponent
 
   private:
     QString name_;
-    QWidget *view_ = nullptr;
+    QPointer<QWidget> view_;
     bool collapsed_ = false;
 };
 CourseBarComponentRegistry::CourseBarComponentRegistry(PluginManager *manager, PluginUiHost *ui,
@@ -171,7 +182,7 @@ void CourseBarComponentRegistry::openSettings(const QString &instance, QWidget *
 {
     ui_->openComponent(instance, parent);
 }
-bool CourseBarComponentRegistry::prepareRemoval(const QString &instance)
+void CourseBarComponentRegistry::prepareRemoval(const QStringList &instances, std::function<void(bool)> completion)
 {
-    return ui_->prepareComponentRemoval(instance);
+    ui_->prepareComponents(instances, std::move(completion));
 }

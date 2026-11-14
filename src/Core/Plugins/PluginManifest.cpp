@@ -1,6 +1,8 @@
 #include "PluginManifest.h"
+#include "PluginContracts.h"
 #include <QCryptographicHash>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -9,6 +11,7 @@
 #include <QSet>
 #include <QUrl>
 #include <functional>
+#include <utility>
 
 namespace Plugins
 {
@@ -86,9 +89,9 @@ Manifest Manifest::read(const QString &directory)
     if (!validId(m.id) || m.name.trimmed().isEmpty() || m.name.size() > 128 ||
         !versionPattern.match(m.version).hasMatch())
         return bad(QStringLiteral("插件 ID、名称或版本无效"));
-    if (value.value(QStringLiteral("manifestVersion")).toInt() != 1 ||
-        value.value(QStringLiteral("apiVersion")).toInt() != 1)
-        return bad(QStringLiteral("不支持的 manifestVersion 或 apiVersion"));
+    if (value.value(QStringLiteral("manifestVersion")).toInt() != 2 ||
+        value.value(QStringLiteral("apiVersion")).toInt() != 2)
+        return bad(QStringLiteral("需要升级：仅支持插件 manifestVersion=2、apiVersion=2"));
     if ((!value.value(QStringLiteral("permissions")).isUndefined() &&
          !value.value(QStringLiteral("permissions")).isObject()) ||
         (!value.value(QStringLiteral("contributions")).isUndefined() &&
@@ -122,8 +125,8 @@ Manifest Manifest::read(const QString &directory)
     static const QRegularExpression localId(QStringLiteral("\\A[a-zA-Z][a-zA-Z0-9_-]{0,63}\\z"));
     for (auto it = m.contributions.begin(); it != m.contributions.end(); ++it)
     {
-        if (!QStringList{QStringLiteral("settingsPages"), QStringLiteral("courseBarComponents"),
-                         QStringLiteral("windows")}
+        if (!QStringList{QStringLiteral("pages"), QStringLiteral("courseBarComponents"),
+                         QStringLiteral("actions")}
                  .contains(it.key()) ||
             !it.value().isArray() || it.value().toArray().size() > 32)
             return bad(QStringLiteral("无效的贡献列表"));
@@ -135,6 +138,28 @@ Manifest Manifest::read(const QString &directory)
             if (!item.isObject() || !localId.match(id).hasMatch() || ids.contains(id) ||
                 object.value(QStringLiteral("name")).toString().trimmed().isEmpty())
                 return bad(QStringLiteral("贡献 ID 或名称无效／重复"));
+            if (it.key() == QStringLiteral("actions")) {
+                if (object.value(QStringLiteral("description")).toString().trimmed().isEmpty()) return bad(QStringLiteral("动作缺少说明"));
+                for (const auto &schema : {QStringLiteral("inputSchema"), QStringLiteral("outputSchema")}) {
+                    const auto error = validateSchema(object.value(schema).toObject());
+                    if (!error.isEmpty()) return bad(id + QStringLiteral(": ") + error);
+                }
+                if(object.contains(QStringLiteral("timeoutMs")) && (!object.value(QStringLiteral("timeoutMs")).isDouble() || object.value(QStringLiteral("timeoutMs")).toDouble()!=object.value(QStringLiteral("timeoutMs")).toInt() || object.value(QStringLiteral("timeoutMs")).toInt()<100 || object.value(QStringLiteral("timeoutMs")).toInt()>60000)) return bad(QStringLiteral("timeoutMs 必须为 100～60000 的整数"));
+                if (!object.value(QStringLiteral("requiredPermissions")).isArray()) return bad(QStringLiteral("动作必须声明 requiredPermissions"));
+                for (const auto &permission : object.value(QStringLiteral("requiredPermissions")).toArray())
+                    if (!permission.isString() || !m.permissions.contains(permission.toString())) return bad(QStringLiteral("动作引用了未声明权限"));
+            } else {
+                if (it.key() == QStringLiteral("pages") && !QStringList{QStringLiteral("function"), QStringLiteral("settings")}.contains(object.value(QStringLiteral("purpose")).toString()))
+                    return bad(QStringLiteral("页面 purpose 必须为 function 或 settings"));
+                for (const auto &key : {QStringLiteral("ui"), QStringLiteral("settingsUi")}) {
+                    if (key == QStringLiteral("settingsUi") && !object.contains(key)) continue;
+                    const auto ui = object.value(key).toString();
+                    const auto error = QDir::isAbsolutePath(ui) ? QStringLiteral("UI 必须使用包内相对路径") : validateUi(QDir(directory).filePath(ui), directory);
+                    if (!error.isEmpty()) return bad(id + QStringLiteral(": ") + error);
+                }
+                if (object.contains(QStringLiteral("displayPolicy")) && !QStringList{QStringLiteral("expandedOnly"), QStringLiteral("whenAvailable")}.contains(object.value(QStringLiteral("displayPolicy")).toString()))
+                    return bad(QStringLiteral("无效的 displayPolicy"));
+            }
             ids.insert(id);
         }
     }
@@ -143,113 +168,30 @@ Manifest Manifest::read(const QString &directory)
     if (entry.isEmpty() || !within(directory, m.entry) || !QFileInfo(m.entry).isFile() ||
         QFileInfo(m.entry).size() > 2 * 1024 * 1024)
         return bad(QStringLiteral("入口不存在、越界或超过 2 MiB"));
-    QFile script(m.entry);
-    if (!script.open(QIODevice::ReadOnly))
-        return bad(script.errorString());
-    m.fingerprint = QCryptographicHash::hash(bytes + script.readAll(), QCryptographicHash::Sha256).toHex();
+    const QDir package(m.directory);
+    QDirIterator files(m.directory, QDir::Files | QDir::Hidden | QDir::System | QDir::NoSymLinks,
+                       QDirIterator::Subdirectories);
+    QStringList paths;
+    qint64 size = 0;
+    while (files.hasNext()) {
+        const auto filename = files.next();
+        if (!within(m.directory, filename) || paths.size() >= 512 ||
+            (size += files.fileInfo().size()) > 16 * 1024 * 1024)
+            return bad(QStringLiteral("插件包路径越界或超过大小限制"));
+        paths.append(package.relativeFilePath(filename));
+    }
+    paths.sort();
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for (const auto &path : std::as_const(paths)) {
+        QFile file(package.filePath(path));
+        if (!file.open(QIODevice::ReadOnly)) return bad(file.errorString());
+        QCryptographicHash content(QCryptographicHash::Sha256);
+        if (!content.addData(&file)) return bad(file.errorString());
+        hash.addData(path.toUtf8());
+        hash.addData(QByteArrayView("\0", 1));
+        hash.addData(content.result());
+    }
+    m.fingerprint = hash.result().toHex();
     return m;
 }
 } // namespace Plugins
-
-QString Plugins::validateView(const QJsonObject &definition)
-{
-    if (QJsonDocument(definition).toJson(QJsonDocument::Compact).size() > 256 * 1024)
-        return QStringLiteral("界面描述超过 256 KiB");
-    int count = 0;
-    QSet<QString> ids;
-    QString failure;
-    std::function<void(const QJsonObject &, int)> visit = [&](const QJsonObject &node, int depth)
-    {
-        if (!failure.isEmpty())
-            return;
-        if (depth > 16 || ++count > 256)
-        {
-            failure = QStringLiteral("界面深度或节点数超限");
-            return;
-        }
-        const auto type = node.value(QStringLiteral("type")).toString();
-        const auto id = node.value(QStringLiteral("id")).toString();
-        for (const auto &key :
-             {QStringLiteral("enabled"), QStringLiteral("visible"), QStringLiteral("required")})
-            if (node.contains(key) && !node.value(key).isBool())
-            {
-                failure = QStringLiteral("控件状态必须是布尔值");
-                return;
-            }
-        for (const auto &key : {QStringLiteral("min"), QStringLiteral("max"), QStringLiteral("maxLength")})
-            if (node.contains(key) &&
-                (!node.value(key).isDouble() || node.value(key).toDouble() != node.value(key).toInt()))
-            {
-                failure = QStringLiteral("控件范围必须是整数");
-                return;
-            }
-        if (type == QStringLiteral("number") &&
-            (node.value(QStringLiteral("min")).toInt(-1000000) < -1000000 ||
-             node.value(QStringLiteral("max")).toInt(1000000) > 1000000 ||
-             node.value(QStringLiteral("min")).toInt(-1000000) >
-                 node.value(QStringLiteral("max")).toInt(1000000)))
-        {
-            failure = QStringLiteral("数值范围无效");
-            return;
-        }
-        if (!QStringList{QStringLiteral("column"), QStringLiteral("row"), QStringLiteral("group"),
-                         QStringLiteral("scroll"), QStringLiteral("text"), QStringLiteral("icon"),
-                         QStringLiteral("button"), QStringLiteral("separator"), QStringLiteral("progress"),
-                         QStringLiteral("input"), QStringLiteral("multiline"), QStringLiteral("toggle"),
-                         QStringLiteral("select"), QStringLiteral("number"), QStringLiteral("list")}
-                 .contains(type))
-        {
-            failure = QStringLiteral("未知控件：%1").arg(type);
-            return;
-        }
-        if (!id.isEmpty())
-        {
-            if (id.size() > 128 || ids.contains(id))
-            {
-                failure = QStringLiteral("节点 ID 重复或过长");
-                return;
-            }
-            ids.insert(id);
-        }
-        if (QStringList{QStringLiteral("input"), QStringLiteral("multiline"), QStringLiteral("toggle"),
-                        QStringLiteral("select"), QStringLiteral("number")}
-                .contains(type) &&
-            id.isEmpty())
-        {
-            failure = QStringLiteral("输入控件必须声明 id");
-            return;
-        }
-        for (const auto &key :
-             {QStringLiteral("text"), QStringLiteral("label"), QStringLiteral("description")})
-            if (node.value(key).toString().size() > 4096)
-            {
-                failure = QStringLiteral("控件文本过长");
-                return;
-            }
-        if (node.value(QStringLiteral("items")).toArray().size() > 64)
-        {
-            failure = QStringLiteral("列表最多 64 项");
-            return;
-        }
-        const auto children = node.value(QStringLiteral("children"));
-        if (!children.isUndefined() && !children.isArray())
-        {
-            failure = QStringLiteral("children 必须是数组");
-            return;
-        }
-        for (const auto &child : children.toArray())
-        {
-            if (!child.isObject())
-            {
-                failure = QStringLiteral("子节点必须是对象");
-                return;
-            }
-            visit(child.toObject(), depth + 1);
-        }
-    };
-    const auto tree = definition.value(QStringLiteral("tree")).toObject();
-    if (tree.isEmpty())
-        return QStringLiteral("缺少 tree 描述");
-    visit(tree, 0);
-    return failure;
-}

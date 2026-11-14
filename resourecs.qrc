@@ -7,4 +7,22 @@
         <file>res/fonts/DTF-2.ttf</file>
         <file>res/fonts/DTF-3.ttf</file>
     </qresource>
+    <qresource prefix="/agent/plugins">
+        <file alias="README.md">docs/plugins/README.md</file>
+        <file alias="ui.md">docs/plugins/ui.md</file>
+        <file alias="services.md">docs/plugins/services.md</file>
+        <file alias="actions.md">docs/plugins/actions.md</file>
+        <file alias="examples.md">docs/plugins/examples.md</file>
+        <file alias="manifest.schema.json">docs/plugins/manifest.schema.json</file>
+        <file alias="widgets.json">docs/plugins/widgets.json</file>
+        <file alias="api.d.ts">docs/plugins/api.d.ts</file>
+        <file alias="example-details.ui">examples/plugins/org.classtopland.example-tools/details.ui</file>
+        <file alias="example-general.ui">examples/plugins/org.classtopland.example-tools/general.ui</file>
+        <file alias="example-display.ui">examples/plugins/org.classtopland.example-tools/display.ui</file>
+        <file alias="example-component.ui">examples/plugins/org.classtopland.example-tools/component.ui</file>
+        <file alias="example-component-settings.ui">examples/plugins/org.classtopland.example-tools/component-settings.ui</file>
+        <file alias="example-settings.mjs">examples/plugins/org.classtopland.example-tools/settings.mjs</file>
+        <file alias="example.mjs">examples/plugins/org.classtopland.example-tools/main.mjs</file>
+        <file alias="example.json">examples/plugins/org.classtopland.example-tools/manifest.json</file>
+    </qresource>
 </RCC>
