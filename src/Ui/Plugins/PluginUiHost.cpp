@@ -4,7 +4,7 @@
 #include "../UiWidgets.h"
 #include "PluginNativeView.h"
 #include <ElaContentDialog.h>
-#include <QLabel>
+#include <ElaText.h>
 #include <QTimer>
 #include <QUuid>
 #include <QVBoxLayout>
@@ -20,11 +20,10 @@ class PluginUnsavedDialog final : public ElaContentDialog
         setMiddleButtonText(QStringLiteral("放弃"));
         setRightButtonText(QStringLiteral("保存"));
         auto *body = new QWidget(this);
+        body->setMinimumWidth(440);
         auto *layout = new QVBoxLayout(body);
         layout->setContentsMargins(28, 24, 28, 24);
-        auto *label = new QLabel(QStringLiteral("插件页面有未保存的更改"), body);
-        label->setWordWrap(true);
-        layout->addWidget(label);
+        layout->addWidget(AppUi::text(QStringLiteral("插件页面有未保存的更改"), body, 22));
         setCentralWidget(body);
         setWindowModality(Qt::WindowModal);
     }
@@ -54,9 +53,11 @@ PluginUiHost::PluginUiHost(PluginManager *manager, QObject *parent) : QObject(pa
                guardToken_ == args.value(QStringLiteral("_guard")).toString() &&
                views_.value(guardInstance_).plugin == plugin;
     };
-    connect(
-        manager_, &PluginManager::pageRequested, this,
-        [this](const QString &plugin, const QString &page) { emit navigationRequested(plugin, page, {}); });
+    manager_->pageNavigation = [this](const QString &plugin, const QString &page) {
+        QString error;
+        return openPage(plugin, page, {}, &error) ? QJsonObject()
+             : Plugins::error(QStringLiteral("NOT_FOUND"), error);
+    };
     connect(manager_, &PluginManager::guardFinished, this,
             [this](const QString &token, const QJsonObject &error) {
                 if (token != guardToken_ || !guarding_)
@@ -121,9 +122,27 @@ PluginUiHost::~PluginUiHost()
     manager_->preparePluginStop = {};
     manager_->uiRequest = {};
     manager_->guardRequest = {};
+    manager_->pageNavigation = {};
     if (guarding_)
         finishGuard(false);
     closeDialogs();
+}
+bool PluginUiHost::openPage(const QString &plugin, const QString &page, const QString &component,
+                            QString *error)
+{
+    if (error) error->clear();
+    QString failure;
+    const bool opened = !guarding_ && navigator && navigator(plugin, page, component, &failure);
+    if (!opened)
+    {
+        if (failure.isEmpty())
+            failure = guarding_ ? QStringLiteral("正在处理未保存内容，请稍后重试") : QStringLiteral("插件导航不可用");
+        if (error)
+            *error = failure;
+        else
+            emit manager_->notification(QStringLiteral("插件页面打开失败"), failure);
+    }
+    return opened;
 }
 void PluginUiHost::openSettings(const QString &plugin, QWidget *)
 {
@@ -135,26 +154,30 @@ void PluginUiHost::openSettings(const QString &plugin, QWidget *)
             if (page.value(QStringLiteral("purpose")) == QStringLiteral("settings") &&
                 record->pages.contains(page.value(QStringLiteral("id")).toString()))
             {
-                emit navigationRequested(plugin, page.value(QStringLiteral("id")).toString(), {});
+                openPage(plugin, page.value(QStringLiteral("id")).toString());
                 return;
             }
         }
 }
 void PluginUiHost::openComponent(const QString &instance, QWidget *)
 {
-    emit navigationRequested({}, {}, instance);
+    openPage({}, {}, instance);
 }
 PluginNativeView *PluginUiHost::createPage(const QString &plugin, const QString &contribution,
-                                           QWidget *parent)
+                                           QWidget *parent, QString *error)
 {
     const auto definition = manager_->definition(plugin, QStringLiteral("page"), contribution);
     if (definition.isEmpty())
+    {
+        if (error) *error = QStringLiteral("插件页面不存在");
         return nullptr;
+    }
     return create(plugin, QStringLiteral("page"), contribution,
-                  definition.value(QStringLiteral("ui")).toString(), {}, {}, parent);
+                  definition.value(QStringLiteral("ui")).toString(), {}, {}, parent, error);
 }
-PluginNativeView *PluginUiHost::createComponentSettings(const QString &instance, QWidget *parent)
+PluginNativeView *PluginUiHost::createComponentSettings(const QString &instance, QWidget *parent, QString *error)
 {
+    if (error) *error = QStringLiteral("组件不存在或未声明实例设置");
     for (const auto &component : ConfigManager::instance().config().courseBarConfig.components)
         if (component.instanceId == instance)
         {
@@ -166,7 +189,7 @@ PluginNativeView *PluginUiHost::createComponentSettings(const QString &instance,
                 return nullptr;
             return create(parts[0], QStringLiteral("componentSettings"), parts[1],
                           definition.value(QStringLiteral("settingsUi")).toString(), instance,
-                          component.settings, parent);
+                          component.settings, parent, error);
         }
     return nullptr;
 }
@@ -184,19 +207,37 @@ QWidget *PluginUiHost::createComponent(const QString &typeId, const QString &ins
 }
 PluginNativeView *PluginUiHost::create(const QString &plugin, const QString &kind,
                                        const QString &contribution, const QString &file,
-                                       const QString &component, const QJsonObject &settings, QWidget *parent)
+                                       const QString &component, const QJsonObject &settings, QWidget *parent, QString *error)
 {
     const auto record = manager_->record(plugin);
     if (!record || record->state != QStringLiteral("运行中") ||
         (guarding_ && kind != QStringLiteral("component")))
+    {
+        if (error) *error = QStringLiteral("插件未运行或正在处理未保存内容");
         return nullptr;
-    auto *view = new PluginNativeView(record->manifest.directory, file, parent);
+    }
+    if (error) error->clear();
+    const auto definition = manager_->definition(plugin, kind == QStringLiteral("page") ? QStringLiteral("page") : QStringLiteral("component"), contribution);
+    const auto preset = kind == QStringLiteral("component") ? QString() : definition.value(kind == QStringLiteral("componentSettings")
+        ? QStringLiteral("settingsLayoutPreset") : QStringLiteral("layoutPreset")).toString();
+    const auto title = definition.value(QStringLiteral("name")).toString();
+    auto *view = new PluginNativeView(record->manifest.directory, file, parent,
+        kind == QStringLiteral("component") ? Plugins::UiKind::Component :
+        kind == QStringLiteral("componentSettings") ? Plugins::UiKind::ComponentSettings : Plugins::UiKind::Page, preset, title);
     if (!view->failure().isEmpty())
     {
-        emit manager_->notification(QStringLiteral("插件页面加载失败"), view->failure());
+        if (error) *error = view->failure();
+        else emit manager_->notification(QStringLiteral("插件页面加载失败"), view->failure());
         delete view;
         return nullptr;
     }
+    for (const auto &entry : view->diagnostics())
+    {
+        const auto diagnostic = entry.toObject();
+        record->logs.append(QStringLiteral("WARN %1 [%2] %3").arg(diagnostic.value(QStringLiteral("code")).toString(),
+            diagnostic.value(QStringLiteral("object")).toString(), diagnostic.value(QStringLiteral("message")).toString()));
+    }
+    while (record->logs.size() > 200) record->logs.removeFirst();
     const auto instance = QUuid::createUuid().toString(QUuid::WithoutBraces);
     view->setProperty("pluginViewInstance", instance);
     views_.insert(instance, {view, plugin, kind, contribution, component, record->generation});
@@ -321,6 +362,11 @@ void PluginUiHost::request(const QString &plugin, const QString &method, const Q
     }
     QString error;
     const auto result = entry.widget->request(method, args, &error);
+    if (!error.isEmpty())
+    {
+        record->logs.append(QStringLiteral("WARN UI_REQUEST_REJECTED [%1] %2").arg(args.value(QStringLiteral("object")).toString(), error));
+        while (record->logs.size() > 200) record->logs.removeFirst();
+    }
     completion(error.isEmpty() ? QJsonObject() : Plugins::error(QStringLiteral("INVALID_ARGUMENT"), error),
                result);
 }
@@ -394,6 +440,7 @@ void PluginUiHost::guardReady()
         guardNext();
         return;
     }
+    emit revealRequested(entry.plugin, guardInstance_);
     auto *prompt = new PluginUnsavedDialog(entry.widget->window());
     prompt_ = prompt;
     const auto instance = guardInstance_;

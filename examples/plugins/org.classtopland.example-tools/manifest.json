@@ -1,5 +1,5 @@
 {
-  "manifestVersion": 2,
+  "manifestVersion": 3,
   "apiVersion": 2,
   "id": "org.classtopland.example-tools",
   "name": "插件示例：课程助手",
@@ -15,19 +15,22 @@
         "id": "details",
         "name": "课程详情",
         "purpose": "function",
-        "ui": "details.ui"
+        "ui": "details.ui",
+        "layoutPreset": "content"
       },
       {
         "id": "general",
         "name": "常规设置",
         "purpose": "settings",
-        "ui": "general.ui"
+        "ui": "general.ui",
+        "layoutPreset": "settings"
       },
       {
         "id": "display",
         "name": "显示设置",
         "purpose": "settings",
-        "ui": "display.ui"
+        "ui": "display.ui",
+        "layoutPreset": "settings"
       }
     ],
     "courseBarComponents": [
@@ -37,7 +40,8 @@
         "ui": "component.ui",
         "settingsUi": "component-settings.ui",
         "previewText": "课程状态",
-        "displayPolicy": "whenAvailable"
+        "displayPolicy": "whenAvailable",
+        "settingsLayoutPreset": "settings"
       }
     ],
     "actions": [
@@ -66,6 +70,7 @@
           ]
         }
       }
-    ]
+    ],
+    "mainPage": "details"
   }
 }

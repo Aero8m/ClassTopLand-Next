@@ -199,7 +199,7 @@ private:
     quint64 sequence_ = 0;
 };
 
-void sizeActionButton(ElaPushButton* control)
+void sizeActionButtonImpl(ElaPushButton* control)
 {
     // Include the shadow and comfortable padding on both sides of the text.
     control->setMinimumWidth(qMax(112, control->fontMetrics().horizontalAdvance(control->text()) + 40));
@@ -207,6 +207,8 @@ void sizeActionButton(ElaPushButton* control)
     control->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
 }
 }
+
+void sizeActionButton(ElaPushButton* control) { sizeActionButtonImpl(control); }
 
 void enableTouchScrolling(QAbstractScrollArea* area, Qt::Orientations directions)
 {
@@ -250,12 +252,7 @@ QVBoxLayout* page(ElaScrollPage* view, const QString& title, int titleSize)
     view->setContentsMargins(0, 0, 0, 0);
     auto* content = new QWidget(view);
     content->setWindowTitle(title);
-    auto* layout = new QVBoxLayout(content);
-    layout->setContentsMargins(24, 20, 24, 20);
-    layout->setSpacing(16);
-    auto* heading = text(title, content, titleSize);
-    QFont font = heading->font(); font.setWeight(QFont::Medium); heading->setFont(font);
-    layout->addWidget(heading);
+    auto* layout = pageContent(content, title, titleSize);
     view->addCentralWidget(content, true, false);
     // Locate the newly created wrapper, rather than any nested scroll areas.
     for (auto* parent = content->parentWidget(); parent && parent != view; parent = parent->parentWidget()) {
@@ -267,16 +264,9 @@ QVBoxLayout* page(ElaScrollPage* view, const QString& title, int titleSize)
 QVBoxLayout* card(QVBoxLayout* layout, const QString& title, int titleSize)
 {
     auto* area = new ElaScrollPageArea;
-    area->setBorderRadius(8);
-    // ElaScrollPageArea defaults to a fixed 75px row; editor cards contain
-    // multiple rows and must grow to their layout's minimum size.
-    area->setMinimumHeight(0);
-    area->setMaximumHeight(QWIDGETSIZE_MAX);
-    area->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    configureCard(area);
     auto* body = new QVBoxLayout(area);
-    body->setSizeConstraint(QLayout::SetMinimumSize);
-    body->setContentsMargins(16, 14, 16, 14);
-    body->setSpacing(12);
+    configureCardLayout(body);
     if (!title.isEmpty()) body->addWidget(text(title, area, titleSize));
     layout->addWidget(area);
     return body;
@@ -284,20 +274,19 @@ QVBoxLayout* card(QVBoxLayout* layout, const QString& title, int titleSize)
 
 QVBoxLayout* section(QVBoxLayout* layout, const QString& title)
 {
-    auto* group = new QVBoxLayout;
-    group->setContentsMargins(0, 0, 0, 0);
-    group->setSpacing(8);
-    group->addWidget(text(title, layout->parentWidget(), 16));
-    layout->addLayout(group);
-    return card(group);
+    auto* group = new SettingsSection;
+    group->setTitle(title);
+    layout->addWidget(group);
+    return group->bodyLayout();
 }
 
 void primary(ElaPushButton* control)
 {
+    control->setProperty("appUiPrimary", true);
     if (!control->property("themeColorBound").toBool()) {
         control->setProperty("themeColorBound", true);
         QObject::connect(&ThemeManager::instance(), &ThemeManager::themeColorChanged,
-                         control, [control] { primary(control); });
+                         control, [control] { if (control->property("appUiPrimary").toBool()) primary(control); });
     }
     control->setLightDefaultColor(ElaThemeColor(ElaThemeType::Light, PrimaryNormal));
     control->setLightHoverColor(ElaThemeColor(ElaThemeType::Light, PrimaryHover));
@@ -313,10 +302,7 @@ void primary(ElaPushButton* control)
 ElaPushButton* button(const QString& title, QWidget* parent, bool accent)
 {
     auto* control = new ElaPushButton(title, parent);
-    sizeActionButton(control);
-    control->setBorderRadius(6);
-    control->setCursor(Qt::PointingHandCursor);
-    if (accent) primary(control);
+    configureActionButton(control, accent);
     return control;
 }
 

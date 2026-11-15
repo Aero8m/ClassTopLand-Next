@@ -4,12 +4,16 @@
 #include <QPointer>
 #include <QSet>
 #include <QWidget>
+#include "../../Core/Plugins/PluginUiPolicy.h"
+#include "../../CourseBar/CourseBarMetrics.h"
 
 class PluginNativeView final : public QWidget
 {
     Q_OBJECT
   public:
-    PluginNativeView(const QString &package, const QString &file, QWidget *parent = nullptr);
+    PluginNativeView(const QString &package, const QString &file, QWidget *parent = nullptr,
+                     Plugins::UiKind kind = Plugins::UiKind::Page,
+                     const QString &layoutPreset = {}, const QString &title = {});
     ~PluginNativeView() override;
     QString failure() const
     {
@@ -25,7 +29,7 @@ class PluginNativeView final : public QWidget
     }
     bool available() const
     {
-        return available_;
+        return available_ && (!component() || sizeHint().width() > 0);
     }
     void setAvailable(bool value)
     {
@@ -34,6 +38,10 @@ class PluginNativeView final : public QWidget
     }
     QJsonValue request(const QString &method, const QJsonObject &args, QString *error);
     QJsonObject snapshot() const;
+    QSize sizeHint() const override;
+    QSize minimumSizeHint() const override;
+    void applyMetrics(const CourseBarMetrics &metrics);
+    QJsonArray diagnostics() const { return diagnostics_; }
   signals:
     void controlSignal(const QString &object, const QString &signal, const QJsonArray &arguments);
     void availabilityChanged();
@@ -41,6 +49,7 @@ class PluginNativeView final : public QWidget
   protected:
     void showEvent(QShowEvent *event) override;
     void hideEvent(QHideEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
   signals:
     void visibilityChanged(bool visible);
 
@@ -48,11 +57,21 @@ class PluginNativeView final : public QWidget
     QObject *find(const QString &name) const;
     void wire(QWidget *widget);
     void selectionSignals(QWidget *widget);
-    bool validStyle(const QString &style) const;
-    QString resolveStyle(const QString &style) const;
-    QString package_, failure_;
+    bool component() const { return kind_ == Plugins::UiKind::Component; }
+    void applyPageBackgrounds();
+    void applyStyle(QWidget *widget, const QString &style);
+    void refreshComponent();
+    void registerItem(QWidget *widget);
+    QString package_, failure_, layoutPreset_;
+    bool finalizePageWidgets();
+    bool standardRootChild(const QString &type) const;
     QWidget *root_ = nullptr;
     bool dirty_ = false, available_ = true;
     QSet<QString> subscriptions_;
     QHash<QString, QPointer<QObject>> objects_;
+    Plugins::UiKind kind_;
+    CourseBarMetrics metrics_;
+    QJsonArray diagnostics_;
+    QHash<QString, QString> nativeStyles_, pluginStyles_;
+    QSet<QString> pending_, hiddenOnInsert_, protectedObjects_;
 };

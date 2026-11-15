@@ -288,13 +288,14 @@ void PluginSettingsTab::showDetails(const QString &id)
     if (!record->pages.isEmpty())
     {
         auto *pagesBody = AppUi::card(layout, QStringLiteral("插件页面"));
-        for (auto it = record->pages.begin(); it != record->pages.end(); ++it)
+        auto *open = AppUi::button(QStringLiteral("打开插件"), pagesBody->parentWidget());
+        pagesBody->addWidget(open, 0, Qt::AlignLeft);
+        connect(open, &ElaPushButton::clicked, this, [this, id] { ui_->openPage(id); });
+        if (hasSettings(record))
         {
-            auto *open = AppUi::button(
-                QStringLiteral("打开：") + it->value(QStringLiteral("name")).toString(it.key()), pagesBody->parentWidget());
-            pagesBody->addWidget(open, 0, Qt::AlignLeft);
-            connect(open, &ElaPushButton::clicked, this,
-                    [this, id, contribution = it.key()] { emit ui_->navigationRequested(id, contribution, {}); });
+            auto *settings = AppUi::button(QStringLiteral("插件设置"), pagesBody->parentWidget());
+            pagesBody->addWidget(settings, 0, Qt::AlignLeft);
+            connect(settings, &ElaPushButton::clicked, this, [this, id] { ui_->openSettings(id); });
         }
     }
     const auto preference =

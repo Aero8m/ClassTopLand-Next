@@ -6,8 +6,8 @@
 
 1. 从托盘打开「插件中心 → 插件管理 → 更多 → 打开插件目录」。
 2. 将标准插件包目录放入 `plugins/`，重新扫描并授权启用。四个完整示例见 `examples/plugins/`。
-3. 运行中插件的功能和设置页面出现在插件中心导航栏；管理卡的设置按钮跳转到插件自有设置页。
-4. 在「设置 → 课程条」添加插件组件；组件设置同样在插件中心打开，按稳定实例 ID 独立保存。
+3. 每个有页面的运行中插件只占一个侧栏入口；宿主在内部使用 ElaPivot 切换主页面和其他页面，单页隐藏页签。管理卡的设置按钮定位清单中第一个设置页。
+4. 在「设置 → 课程条」添加插件组件；实例设置以所属插件内部的动态页签打开，按稳定实例 ID 独立保存。无普通页面的插件仅在打开实例设置时出现临时入口。
 
 切换页面保留实例与草稿。关闭插件中心处理全部页面草稿，通过后销毁页面；后台插件继续运行。停用、重载、移除组件和退出均保留保存／放弃／取消守卫。主设置窗口不再拥有插件页面。
 
@@ -23,7 +23,7 @@ org.example.tools/
 
 ```json
 {
-  "manifestVersion": 2,
+  "manifestVersion": 3,
   "apiVersion": 2,
   "id": "org.example.tools",
   "name": "示例工具",
@@ -31,14 +31,17 @@ org.example.tools/
   "entry": "main.mjs",
   "permissions": {},
   "contributions": {
-    "pages": [{"id":"main","name":"工具","purpose":"function","ui":"page.ui"}]
+    "mainPage": "main",
+    "pages": [{"id":"main","name":"工具","purpose":"function","layoutPreset":"content","ui":"page.ui"}]
   }
 }
 ```
 
-页面 purpose 为 `function` 或 `settings`；组件声明 `ui`、可选 `settingsUi/previewText/displayPolicy`；动作声明输入／输出 schema 和 requiredPermissions。清单见 [manifest.schema.json](manifest.schema.json)，类型见 [api.d.ts](api.d.ts)，控件能力目录见 [widgets.json](widgets.json)。控件目录同时供静态校验、宿主桥接与 Agent SDK 使用。
+页面 purpose 为 `function` 或 `settings`，新页面分别声明 `layoutPreset:"content"` 或 `"settings"`；组件声明 `ui`、可选 `settingsUi/previewText/displayPolicy`，新组件设置页还声明 `settingsLayoutPreset:"settings"`；动作声明输入／输出 schema 和 requiredPermissions。清单见 [manifest.schema.json](manifest.schema.json)，类型见 [api.d.ts](api.d.ts)，控件能力目录见 [widgets.json](widgets.json)。控件目录同时供静态校验、宿主桥接与 Agent SDK 使用。标准设置页通过 PluginSection、PluginContentSlot、PluginSettingRow 和 PluginActionBar 编排业务内容，共用应用原生布局；功能页在统一页面容器中保留业务布局能力。旧页面缺省版式时兼容加载并提示，不改写源文件。课程条仅允许标准横向 `CourseBarItem`，开放展示项 `leftMargin` / `rightMargin`，其他字体、布局和样式沿用宿主，详见 UI 文档。
 
-只支持 v2；v1 显示「需要升级」，不会执行或自动转换 UI。旧插件数据、历史、启用偏好和课程条配置保留。v2 插件应自行读取旧 settings 结构，不得静默覆盖无法识别的数据。无需修改主配置版本。
+仅支持 manifestVersion=3、apiVersion=2；旧清单显示「需要升级」，不执行或自动转换。迁移时将清单版本改为 3，并在有 pages 时声明 contributions.mainPage，引用其中一个页面 ID；没有页面时不得声明 mainPage。旧插件数据、历史、启用偏好和课程条配置保留。JS API 和页面工厂保持 v2，插件应自行读取旧 settings 结构，不得静默覆盖无法识别的数据。无需修改主配置版本。回滚到不兼容的旧清单会在替换源文件前失败。
+
+主页面显示为第一个页签，其余页面按清单声明顺序排列，动态实例设置追加在末尾。首次进入插件显示主页面，侧栏再次进入恢复本窗口内上次页签；“打开插件”明确定位主页面。ctx.ui.openPage(id) 选择所属插件及指定页签，加载失败通过回调返回错误。所有页面按需加载，跨插件切换保留草稿；保存守卫也覆盖隐藏页面，并定位正在处理的页面。
 
 ## 开发主题
 

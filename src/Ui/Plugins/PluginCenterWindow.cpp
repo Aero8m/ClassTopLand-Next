@@ -2,14 +2,13 @@
 #include "../../Core/Plugins/PluginManager.h"
 #include "../../SettingsWindow/tabs/PluginSettingsTab.h"
 #include "../UiWidgets.h"
-#include "PluginNativeView.h"
+#include "PluginMainPage.h"
+#include "../../Core/ConfigManager/ConfigManager.h"
 #include "PluginUiHost.h"
 #include <ElaNavigationBar.h>
 #include <QCloseEvent>
-#include <QSet>
 #include <QSignalBlocker>
 #include <QTimer>
-#include <QVBoxLayout>
 
 PluginCenterWindow::PluginCenterWindow(PluginManager *manager, PluginUiHost *ui, QWidget *parent)
     : ElaWindow(parent), manager_(manager), ui_(ui)
@@ -35,11 +34,16 @@ PluginCenterWindow::PluginCenterWindow(PluginManager *manager, PluginUiHost *ui,
         for (auto it = navigationPages_.cbegin(); it != navigationPages_.cend(); ++it)
             if (it.value()->property("ElaPageKey").toString() == nodeKey)
             {
-                if (!select(it.key()))
-                    QTimer::singleShot(0, this, [this] {
-                        select(QStringLiteral("management"));
-                        navigation(management_->property("ElaPageKey").toString());
+                const auto previous = currentKey_;
+                QString error;
+                if (!select(it.key(), &error))
+                {
+                    QTimer::singleShot(0, this, [this, previous] {
+                        const auto key = navigationPages_.contains(previous) ? previous : QStringLiteral("management");
+                        navigation(navigationPages_.value(key)->property("ElaPageKey").toString());
                     });
+                    AppUi::error(this, error);
+                }
                 return;
             }
     });
@@ -48,124 +52,140 @@ PluginCenterWindow::PluginCenterWindow(PluginManager *manager, PluginUiHost *ui,
         if (auto *bar = findChild<ElaNavigationBar *>())
             bar->setEnabled(!guarding);
         management_->setEnabled(!guarding);
+        for (auto *page : plugins_)
+            page->setNavigationEnabled(!guarding);
     };
     connect(ui_, &PluginUiHost::guardStateChanged, this, guardState);
+    connect(&ConfigManager::instance(), &ConfigManager::courseBarChanged, this,
+            &PluginCenterWindow::refresh, Qt::QueuedConnection);
+    connect(ui_, &PluginUiHost::revealRequested, this, [this](const QString &plugin, const QString &instance) {
+        auto *container = plugins_.value(plugin);
+        if (container && container->revealView(instance))
+        {
+            currentKey_ = plugin;
+            navigation(container->property("ElaPageKey").toString());
+        }
+    });
     guardState(ui_->guarding());
     refresh();
 }
+PluginMainPage *PluginCenterWindow::ensurePlugin(const QString &plugin)
+{
+    if (auto *page = plugins_.value(plugin))
+        return page;
+    const auto record = manager_->record(plugin);
+    if (!record || record->state != QStringLiteral("运行中"))
+        return nullptr;
+    auto *page = new PluginMainPage(manager_, ui_, plugin, this);
+    page->setNavigationEnabled(!ui_->guarding());
+    addPageNode(record->manifest.name, page, ElaIconType::PuzzlePiece);
+    plugins_.insert(plugin, page);
+    navigationPages_.insert(plugin, page);
+    connect(page, &PluginMainPage::contentChanged, this, &PluginCenterWindow::refresh, Qt::QueuedConnection);
+    return page;
+}
+
 void PluginCenterWindow::refresh()
 {
-    const auto current = currentKey_;
     const QSignalBlocker blocker(this);
-    QSet<QString> available{QStringLiteral("management")};
-    auto add = [this, &available](const QString &title, const QString &key) {
-        available.insert(key);
-        if (auto *container = navigationPages_.value(key))
-        {
-            setNavigationNodeTitle(container->property("ElaPageKey").toString(), title);
-            return;
-        }
-        // Keep a stable Ela page while its plugin view is loaded on demand.
-        auto *container = new QWidget(this);
-        auto *layout = new QVBoxLayout(container);
-        layout->setContentsMargins(12, 12, 12, 12);
-        layout->setSpacing(0);
-        addPageNode(title, container, key.startsWith(QStringLiteral("component:"))
-                                          ? ElaIconType::Gear : ElaIconType::FileLines);
-        navigationPages_.insert(key, container);
-    };
     for (const auto &record : manager_->records())
-        if (record->state == QStringLiteral("运行中"))
-            for (const auto &item : record->manifest.contributions.value(QStringLiteral("pages")).toArray())
-            {
-                const auto page = item.toObject();
-                if (record->pages.contains(page.value(QStringLiteral("id")).toString()))
-                    add(record->manifest.name + QStringLiteral(" · ") +
-                            page.value(QStringLiteral("name")).toString(),
-                        record->manifest.id + QLatin1Char('/') + page.value(QStringLiteral("id")).toString());
-            }
-    const auto keys = pages_.keys();
+        if (record->state == QStringLiteral("运行中") && !record->pages.isEmpty())
+            ensurePlugin(record->manifest.id);
+    const auto keys = plugins_.keys();
     for (const auto &key : keys)
     {
-        if (!pages_.value(key))
+        auto *page = plugins_.value(key);
+        if (!page->sync())
         {
-            pages_.remove(key);
-            continue;
-        }
-        if (key.startsWith(QStringLiteral("component:")))
-            add(QStringLiteral("组件设置 · ") + key.mid(10), key);
-    }
-    const auto navigationKeys = navigationPages_.keys();
-    for (const auto &key : navigationKeys)
-        if (!available.contains(key))
-        {
-            auto *container = navigationPages_.take(key);
-            removeNavigationNode(container->property("ElaPageKey").toString());
-            if (auto view = pages_.take(key))
-                view->deleteLater();
+            if (currentKey_ == key)
+            {
+                currentKey_ = QStringLiteral("management");
+                navigation(management_->property("ElaPageKey").toString());
+            }
+            plugins_.remove(key);
+            navigationPages_.remove(key);
+            removeNavigationNode(page->property("ElaPageKey").toString());
             // ElaWindow removes the route but leaves widget ownership to us.
-            container->deleteLater();
+            page->deleteLater();
         }
-    if (!select(available.contains(current) ? current : QStringLiteral("management")))
-        currentKey_ = QStringLiteral("management");
+        else
+            setNavigationNodeTitle(page->property("ElaPageKey").toString(), manager_->record(key)->manifest.name);
+    }
+    if (!closing_ && !ui_->guarding() && currentKey_ != QStringLiteral("management"))
+    {
+        QString error;
+        if (!select(currentKey_, &error))
+        {
+            currentKey_ = QStringLiteral("management");
+            AppUi::error(this, error);
+        }
+    }
     navigation(navigationPages_.value(currentKey_)->property("ElaPageKey").toString());
 }
-bool PluginCenterWindow::select(const QString &key)
+
+bool PluginCenterWindow::select(const QString &key, QString *error)
 {
-    if (closing_)
-        return false;
-    if (key == QStringLiteral("management"))
+    if (closing_ || ui_->guarding())
     {
-        currentKey_ = key;
-        return true;
+        if (error) *error = QStringLiteral("正在处理未保存内容，请稍后重试");
+        return false;
     }
-    auto *container = navigationPages_.value(key);
-    if (!container)
-        return false;
-    auto page = pages_.value(key);
-    if (!page)
+    if (key != QStringLiteral("management"))
     {
-        if (key.startsWith(QStringLiteral("component:")))
-            page = ui_->createComponentSettings(key.mid(10), container);
-        else
-        {
-            const auto parts = key.split('/');
-            if (parts.size() == 2)
-                page = ui_->createPage(parts[0], parts[1], container);
-        }
-        if (!page)
-        {
-            AppUi::error(this, QStringLiteral("插件页面不可用或未声明实例设置"));
+        auto *page = plugins_.value(key);
+        if (!page || !page->selectPage({}, error))
             return false;
-        }
-        pages_.insert(key, page);
     }
-    if (page->parentWidget() != container || container->layout()->indexOf(page) < 0)
-        container->layout()->addWidget(page);
     currentKey_ = key;
     return true;
 }
-void PluginCenterWindow::navigate(const QString &plugin, const QString &page,
-                                  const QString &componentInstance)
+
+bool PluginCenterWindow::navigate(const QString &plugin, const QString &page,
+                                  const QString &componentInstance, QString *error)
 {
-    if (closing_)
-        return;
-    const auto key = componentInstance.isEmpty() ? plugin + QLatin1Char('/') + page
-                                                 : QStringLiteral("component:") + componentInstance;
-    if (!componentInstance.isEmpty() && !pages_.value(key))
+    if (error) error->clear();
+    auto fail = [error](const QString &message) {
+        if (error) *error = message;
+        return false;
+    };
+    if (closing_ || ui_->guarding())
+        return fail(QStringLiteral("正在处理未保存内容，请稍后重试"));
+    QString owner = plugin;
+    if (!componentInstance.isEmpty())
     {
-        auto *view = ui_->createComponentSettings(componentInstance, this);
-        if (!view)
-        {
-            AppUi::error(this, QStringLiteral("插件页面不可用或未声明实例设置"));
-            return;
-        }
-        pages_.insert(key, view);
+        owner.clear();
+        for (const auto &component : ConfigManager::instance().config().courseBarConfig.components)
+            if (component.instanceId == componentInstance)
+            {
+                const auto parts = component.typeId.split('/');
+                if (parts.size() == 2)
+                    owner = parts[0];
+                break;
+            }
+        if (owner.isEmpty())
+            return fail(QStringLiteral("组件实例不存在"));
     }
-    refresh();
-    if (select(key))
-        navigation(navigationPages_.value(key)->property("ElaPageKey").toString());
+    const auto record = manager_->record(owner);
+    if (!record || record->state != QStringLiteral("运行中"))
+        return fail(QStringLiteral("插件未运行"));
+    const auto target = page.isEmpty() ? record->manifest.contributions.value(QStringLiteral("mainPage")).toString() : page;
+    if (componentInstance.isEmpty() && (target.isEmpty() || !record->pages.contains(target)))
+        return fail(QStringLiteral("插件页面不存在"));
+    const bool existed = plugins_.contains(owner);
+    auto *container = ensurePlugin(owner);
+    const bool selected = componentInstance.isEmpty() ? container->selectPage(target, error)
+                                                     : container->selectComponent(componentInstance, error);
+    if (!selected)
+    {
+        if (!existed && record->pages.isEmpty())
+            refresh();
+        return false;
+    }
+    currentKey_ = owner;
+    navigation(container->property("ElaPageKey").toString());
+    return true;
 }
+
 void PluginCenterWindow::closeEvent(QCloseEvent *event)
 {
     if (approved_)
@@ -186,7 +206,6 @@ void PluginCenterWindow::closeEvent(QCloseEvent *event)
         if (!allowed)
             return;
         self->ui_->closePages();
-        self->pages_.clear();
         self->currentKey_ = QStringLiteral("management");
         self->refresh();
         self->approved_ = true;

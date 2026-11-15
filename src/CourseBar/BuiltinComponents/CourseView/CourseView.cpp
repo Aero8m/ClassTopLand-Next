@@ -1,5 +1,6 @@
 #include "CourseView.h"
 #include "../../CourseBarLabel.h"
+#include "../../CourseBarItem.h"
 
 #include "../../../Core/Logger/Logger.h"
 #include "../../../Core/ThemeManager/ThemeManager.h"
@@ -12,140 +13,18 @@
 
 #include <utility>
 
-// Keep QProgressBar's value/range semantics, with the remaining span centered.
-class CenteredProgressBar final : public QProgressBar
+// The service owns time calculations; presentation is shared with plugin items.
+class CourseBlock final : public CourseBarItem
 {
 public:
-    explicit CenteredProgressBar(QWidget* parent) : QProgressBar(parent)
-    {
-        // The translucent track needs the parent's background painted first.
-        setAttribute(Qt::WA_OpaquePaintEvent, false);
-        setAutoFillBackground(false);
-    }
-
-    void setThemeColor(const QColor& color)
-    {
-        color_ = color;
-        update();
-    }
-
-protected:
-    void paintEvent(QPaintEvent*) override
-    {
-        QPainter painter(this);
-        QColor track = color_;
-        track.setAlpha(115);
-        painter.fillRect(rect(), track);
-        if (maximum() <= minimum() || value() <= minimum()) return;
-        const double remaining = qBound(0.0,
-            (double(value()) - minimum()) / (double(maximum()) - minimum()), 1.0);
-        const int span = qRound(width() * remaining);
-        painter.fillRect(QRect((width() - span) / 2, 0, span, height()), color_);
-    }
-
-private:
-    QColor color_;
-};
-
-// Presentation only: the service owns all course and time calculations.
-class CourseBlock final : public QWidget
-{
-public:
-    explicit CourseBlock(QWidget* parent) : QWidget(parent)
-    {
-        name_ = new CourseBarLabel(this);
-        name_->setObjectName(QStringLiteral("courseName"));
-        name_->setTextFormat(Qt::PlainText);
-        name_->setAlignment(Qt::AlignCenter);
-        name_->setStyleSheet(QStringLiteral("color: black; background: transparent;"));
-        name_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-        progress_ = new CenteredProgressBar(this);
-        progress_->setObjectName(QStringLiteral("remainingProgress"));
-        progress_->setRange(0, 10000);
-        progress_->setValue(10000);
-        progress_->setTextVisible(false);
-        setPresentation({}, false);
-    }
-
-    void setPresentation(const QString& name, bool active)
-    {
-        name_->setText(name);
-        progress_->setVisible(active);
-        setProperty("active", active);
-        refreshThemeColor();
-        updateWidth();
-    }
-
-    void refreshThemeColor()
-    {
-        progress_->setThemeColor(ThemeManager::instance().themeColor());
-        update();
-    }
-
+    explicit CourseBlock(QWidget* parent) : CourseBarItem(parent) {}
     void setProgress(const CourseRefreshService::State& state)
     {
         const int value = state.phase == CourseRefreshService::Phase::BeforeFirstClass ? 10000 :
             (state.durationSeconds > 0 ? qRound(qBound(0.0,
                 double(state.remainingSeconds) / double(state.durationSeconds), 1.0) * 10000) : 0);
-        progress_->setValue(value);
+        setProgressValue(value);
     }
-
-    void setMetrics(const CourseBarMetrics& metrics)
-    {
-        metrics_ = metrics;
-        setFixedHeight(metrics.height);
-        name_->setFont(metrics.font());
-        progress_->setFixedHeight(metrics.progressHeight());
-        updateWidth();
-    }
-
-    int textWidth() const
-    {
-        return metrics_.textWidth(name_->text(), name_->font());
-    }
-
-    void setHorizontalExtension(int left, int right)
-    {
-        leftExtension_ = left;
-        rightExtension_ = right;
-        updateWidth();
-    }
-
-private:
-    void paintEvent(QPaintEvent*) override
-    {
-        if (!property("active").toBool()) return;
-        const QColor background(200, 200, 200, 77);
-        QPainter painter(this);
-        painter.fillRect(rect(), background);
-    }
-
-    void resizeEvent(QResizeEvent* event) override
-    {
-        QWidget::resizeEvent(event);
-        layoutText();
-    }
-
-    void layoutText()
-    {
-        // Keep the text in place while the decoration extends into existing gaps.
-        name_->setGeometry(leftExtension_, 0, textWidth(), height());
-        progress_->setGeometry(0, height() - progress_->height(), width(), progress_->height());
-    }
-
-    void updateWidth()
-    {
-        const int margin = metrics_.textGuard();
-        name_->setContentsMargins(margin, 0, margin, 0);
-        setFixedWidth(textWidth() + leftExtension_ + rightExtension_);
-        layoutText();
-    }
-
-    QLabel* name_;
-    CenteredProgressBar* progress_;
-    CourseBarMetrics metrics_;
-    int leftExtension_ = 0;
-    int rightExtension_ = 0;
 };
 
 CourseView::CourseView(QWidget* parent) : CourseView(CourseRefreshService::Clock{}, parent)
@@ -311,24 +190,9 @@ void CourseView::updateContentSize()
     if (!breakBlock_->isHidden())
         visibleBlocks.insert(visualState_.nextClassIndex, breakBlock_);
 
-    const int spacing = metrics().courseSpacing();
-    const int activeSpacing = qRound(spacing * 1.2);
-    // Borrow 60% of each adjacent gap, reserving space at exposed active edges.
-    const int extension = qRound(activeSpacing * 0.6);
-    int width = !visibleBlocks.isEmpty() && visibleBlocks.first() == activeBlock_ ? extension : 0;
-    for (qsizetype i = 0; i < visibleBlocks.size(); ++i) {
-        CourseBlock* block = visibleBlocks[i];
-        const bool active = block == activeBlock_;
-        const int left = active ? extension : 0;
-        const int right = left;
-        block->setHorizontalExtension(left, right);
-        block->move(width - left, 0);
-        width += block->textWidth();
-        if (i + 1 < visibleBlocks.size())
-            width += active || visibleBlocks[i + 1] == activeBlock_ ? activeSpacing : spacing;
-    }
-    if (!visibleBlocks.isEmpty() && visibleBlocks.last() == activeBlock_)
-        width += extension;
+    QList<CourseBarItem*> items;
+    for (auto* block : visibleBlocks) items.append(block);
+    const int width = layoutCourseBarItems(items, metrics());
     content_->setFixedSize(qMax(1, width), metrics().height);
     const int preferred = showingStatus_
         ? metrics().textWidth(status_->text(), status_->font())

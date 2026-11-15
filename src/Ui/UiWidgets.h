@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ElaContentDialog.h>
+#include "SettingsLayout.h"
 #include <QSize>
 #include <QTime>
 #include <functional>

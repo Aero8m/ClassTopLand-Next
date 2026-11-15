@@ -4,13 +4,6 @@
   <widget class="QWidget" name="root">
     <layout class="QVBoxLayout" name="pageLayout">
       <item>
-        <widget class="ElaText" name="title">
-          <property name="text">
-            <string>添加科目并保存当前档案，建议仅在测试档案使用。</string>
-          </property>
-        </widget>
-      </item>
-      <item>
         <widget class="ElaLineEdit" name="name">
           <property name="text">
             <string>插件示例科目</string>

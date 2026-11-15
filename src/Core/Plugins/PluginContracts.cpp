@@ -20,7 +20,7 @@ QJsonObject widgetCatalog()
     }();
     return catalog;
 }
-QString validateUi(const QString &path, const QString &package)
+QString validateUiSafety(const QString &path, const QString &package)
 {
     QFile file(path);
     if (!within(package, path) || !file.open(QIODevice::ReadOnly) || file.size() > 1024 * 1024)

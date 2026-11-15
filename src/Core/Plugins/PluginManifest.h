@@ -1,5 +1,6 @@
 #pragma once
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QString>
 class QUrl;
 
@@ -16,6 +17,7 @@ struct Manifest
     QString id, name, version, directory, entry, description, failure;
     QJsonObject permissions, contributions;
     QByteArray fingerprint;
+    QJsonArray uiDiagnostics;
     bool valid() const
     {
         return failure.isEmpty();

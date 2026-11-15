@@ -12,7 +12,8 @@
       "styleSheet"
     ],
     "signals": [],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QLabel": {
     "kind": "widget",
@@ -28,7 +29,8 @@
       "text"
     ],
     "signals": [],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QPushButton": {
     "kind": "widget",
@@ -51,7 +53,8 @@
     ],
     "operations": [
       "click"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QToolButton": {
     "kind": "widget",
@@ -74,7 +77,8 @@
     ],
     "operations": [
       "click"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QCheckBox": {
     "kind": "widget",
@@ -97,7 +101,8 @@
     ],
     "operations": [
       "click"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QRadioButton": {
     "kind": "widget",
@@ -120,7 +125,8 @@
     ],
     "operations": [
       "click"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QGroupBox": {
     "kind": "widget",
@@ -135,7 +141,8 @@
       "styleSheet"
     ],
     "signals": [],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QFrame": {
     "kind": "widget",
@@ -150,7 +157,8 @@
       "styleSheet"
     ],
     "signals": [],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QLineEdit": {
     "kind": "widget",
@@ -173,7 +181,8 @@
       "textChanged",
       "editingFinished"
     ],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QTextEdit": {
     "kind": "widget",
@@ -193,7 +202,8 @@
     "signals": [
       "textChanged"
     ],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QPlainTextEdit": {
     "kind": "widget",
@@ -213,7 +223,8 @@
     "signals": [
       "textChanged"
     ],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QSpinBox": {
     "kind": "widget",
@@ -233,7 +244,8 @@
     "signals": [
       "valueChanged"
     ],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QDoubleSpinBox": {
     "kind": "widget",
@@ -253,7 +265,8 @@
     "signals": [
       "valueChanged"
     ],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QComboBox": {
     "kind": "widget",
@@ -275,7 +288,8 @@
     ],
     "operations": [
       "setItems"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QSlider": {
     "kind": "widget",
@@ -295,7 +309,8 @@
     "signals": [
       "valueChanged"
     ],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QProgressBar": {
     "kind": "widget",
@@ -313,7 +328,8 @@
       "maximum"
     ],
     "signals": [],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QScrollArea": {
     "kind": "widget",
@@ -328,7 +344,8 @@
       "styleSheet"
     ],
     "signals": [],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QTabWidget": {
     "kind": "widget",
@@ -348,7 +365,8 @@
     ],
     "operations": [
       "addPage"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QStackedWidget": {
     "kind": "widget",
@@ -368,7 +386,8 @@
     ],
     "operations": [
       "addPage"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QListWidget": {
     "kind": "widget",
@@ -389,7 +408,8 @@
     "operations": [
       "setItems",
       "select"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QTreeWidget": {
     "kind": "widget",
@@ -410,7 +430,8 @@
     "operations": [
       "setItems",
       "select"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QTableWidget": {
     "kind": "widget",
@@ -431,7 +452,8 @@
     "operations": [
       "setItems",
       "select"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QDateEdit": {
     "kind": "widget",
@@ -452,7 +474,8 @@
     "signals": [
       "dateTimeChanged"
     ],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QTimeEdit": {
     "kind": "widget",
@@ -473,7 +496,8 @@
     "signals": [
       "dateTimeChanged"
     ],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QDateTimeEdit": {
     "kind": "widget",
@@ -494,7 +518,8 @@
     "signals": [
       "dateTimeChanged"
     ],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QSplitter": {
     "kind": "widget",
@@ -509,7 +534,8 @@
       "styleSheet"
     ],
     "signals": [],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QListView": {
     "kind": "widget",
@@ -530,7 +556,8 @@
     "operations": [
       "setItems",
       "select"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QTreeView": {
     "kind": "widget",
@@ -551,7 +578,8 @@
     "operations": [
       "setItems",
       "select"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QTableView": {
     "kind": "widget",
@@ -572,7 +600,8 @@
     "operations": [
       "setItems",
       "select"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaText": {
     "kind": "widget",
@@ -591,7 +620,8 @@
       "IsWrapAnywhere"
     ],
     "signals": [],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaPushButton": {
     "kind": "widget",
@@ -606,7 +636,8 @@
       "styleSheet",
       "text",
       "checked",
-      "checkable"
+      "checkable",
+      "primary"
     ],
     "signals": [
       "clicked",
@@ -614,7 +645,8 @@
     ],
     "operations": [
       "click"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaToolButton": {
     "kind": "widget",
@@ -637,7 +669,8 @@
     ],
     "operations": [
       "click"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaCheckBox": {
     "kind": "widget",
@@ -660,7 +693,8 @@
     ],
     "operations": [
       "click"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaRadioButton": {
     "kind": "widget",
@@ -683,7 +717,8 @@
     ],
     "operations": [
       "click"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaLineEdit": {
     "kind": "widget",
@@ -706,7 +741,8 @@
       "textChanged",
       "editingFinished"
     ],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaPlainTextEdit": {
     "kind": "widget",
@@ -726,7 +762,8 @@
     "signals": [
       "textChanged"
     ],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaSpinBox": {
     "kind": "widget",
@@ -746,7 +783,8 @@
     "signals": [
       "valueChanged"
     ],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaDoubleSpinBox": {
     "kind": "widget",
@@ -766,7 +804,8 @@
     "signals": [
       "valueChanged"
     ],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaComboBox": {
     "kind": "widget",
@@ -788,7 +827,8 @@
     ],
     "operations": [
       "setItems"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaSlider": {
     "kind": "widget",
@@ -808,7 +848,8 @@
     "signals": [
       "valueChanged"
     ],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaProgressBar": {
     "kind": "widget",
@@ -826,7 +867,8 @@
       "maximum"
     ],
     "signals": [],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaScrollArea": {
     "kind": "widget",
@@ -841,7 +883,8 @@
       "styleSheet"
     ],
     "signals": [],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaTabWidget": {
     "kind": "widget",
@@ -861,7 +904,8 @@
     ],
     "operations": [
       "addPage"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaToggleSwitch": {
     "kind": "widget",
@@ -879,7 +923,8 @@
     "signals": [
       "toggled"
     ],
-    "operations": []
+    "operations": [],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaListView": {
     "kind": "widget",
@@ -900,7 +945,8 @@
     "operations": [
       "setItems",
       "select"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaTreeView": {
     "kind": "widget",
@@ -921,7 +967,8 @@
     "operations": [
       "setItems",
       "select"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "ElaTableView": {
     "kind": "widget",
@@ -942,18 +989,149 @@
     "operations": [
       "setItems",
       "select"
-    ]
+    ],
+    "stylePolicy": "self-scoped; no background, image, URL, dimensions or qproperty; theme palette colors only; pages and settings only"
   },
   "QVBoxLayout": {
-    "kind": "layout"
+    "kind": "layout",
+    "properties": [
+      "leftMargin",
+      "topMargin",
+      "rightMargin",
+      "bottomMargin",
+      "spacing"
+    ],
+    "contexts": [
+      "page",
+      "componentSettings"
+    ]
   },
   "QHBoxLayout": {
-    "kind": "layout"
+    "kind": "layout",
+    "properties": [
+      "leftMargin",
+      "topMargin",
+      "rightMargin",
+      "bottomMargin",
+      "spacing"
+    ],
+    "contexts": [
+      "page",
+      "componentSettings"
+    ]
   },
   "QGridLayout": {
-    "kind": "layout"
+    "kind": "layout",
+    "properties": [
+      "leftMargin",
+      "topMargin",
+      "rightMargin",
+      "bottomMargin",
+      "spacing",
+      "horizontalSpacing",
+      "verticalSpacing"
+    ],
+    "contexts": [
+      "page",
+      "componentSettings"
+    ]
   },
   "QFormLayout": {
-    "kind": "layout"
+    "kind": "layout",
+    "properties": [
+      "leftMargin",
+      "topMargin",
+      "rightMargin",
+      "bottomMargin",
+      "spacing",
+      "horizontalSpacing",
+      "verticalSpacing"
+    ],
+    "contexts": [
+      "page",
+      "componentSettings"
+    ]
+  },
+  "CourseBarItem": {
+    "kind": "widget",
+    "contexts": [
+      "component"
+    ],
+    "properties": [
+      "text",
+      "toolTip",
+      "visible",
+      "active",
+      "progressValue",
+      "leftMargin",
+      "rightMargin"
+    ],
+    "signals": [],
+    "operations": [],
+    "layoutPolicy": "leftMargin/rightMargin: -1 inherits the adjacent host gap share (outer edge 0), 0..100 sets external margin in 49px bar units; adjacent margins add, hidden items take no space; other layout and styling remain host-managed"
+  },
+  "PluginSection": {
+    "kind": "widget",
+    "contexts": [
+      "page",
+      "componentSettings"
+    ],
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "title"
+    ],
+    "signals": [],
+    "operations": [],
+    "layoutPolicy": "host-managed title and native card; exactly one direct PluginContentSlot child, inserted with view.insert(section, slot, {}); no plugin layout, QSS or dimensions"
+  },
+  "PluginContentSlot": {
+    "kind": "widget",
+    "contexts": [
+      "page",
+      "componentSettings"
+    ],
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip"
+    ],
+    "signals": [],
+    "operations": [],
+    "layoutPolicy": "section content: one QVBoxLayout, margins 0, spacing 12; settings preset accepts only PluginSettingRow; content preset accepts catalog business widgets; no QSS or dimensions"
+  },
+  "PluginSettingRow": {
+    "kind": "widget",
+    "contexts": [
+      "page",
+      "componentSettings"
+    ],
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "title",
+      "description"
+    ],
+    "signals": [],
+    "operations": [],
+    "layoutPolicy": "exactly one direct business editor child, inserted with view.insert(row, editor, {}); host manages title, description, editor size and responsive arrangement; no plugin layout, QSS or dimensions"
+  },
+  "PluginActionBar": {
+    "kind": "widget",
+    "contexts": [
+      "page",
+      "componentSettings"
+    ],
+    "properties": [
+      "enabled",
+      "visible",
+      "toolTip",
+      "message"
+    ],
+    "signals": [],
+    "operations": [],
+    "layoutPolicy": "direct ElaPushButton children only, ordered by index; right aligned at content end and scrolls with page; button height 44, minimum width max(112,text+40); at most one primary=true; settings root allows one last action bar; no QSS or dimensions"
   }
 }

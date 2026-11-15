@@ -85,8 +85,8 @@ bool PluginManager::contributionRequest(const std::shared_ptr<Record> &record, c
             reply(Plugins::error(QStringLiteral("NOT_FOUND"), QStringLiteral("页面不可用")));
         else
         {
-            emit pageRequested(record->manifest.id, page);
-            reply();
+            reply(pageNavigation ? pageNavigation(record->manifest.id, page)
+                                 : Plugins::error(QStringLiteral("NOT_FOUND"), QStringLiteral("插件导航不可用")));
         }
         return true;
     }

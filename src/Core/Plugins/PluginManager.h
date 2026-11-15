@@ -77,6 +77,7 @@ class PluginManager final : public QObject
     using Completion = std::function<void(const QJsonObject &, const QJsonValue &)>;
     std::function<void(const QString &, const QString &, const QJsonObject &, Completion)> uiRequest;
     std::function<bool(const QString &, const QJsonObject &)> guardRequest;
+    std::function<QJsonObject(const QString &, const QString &)> pageNavigation;
     void setQuiescing(bool value) { quiescing_ = value; }
     bool acceptingWork() const { return !quiescing_ && !writesBlocked_ && !stopped_ && !publication_; }
     PluginActionRegistry *actions() const { return actions_; }
@@ -98,7 +99,6 @@ class PluginManager final : public QObject
     void contributionsChanged();
     void pluginStopped(const QString &id, bool fault);
     void notification(const QString &title, const QString &message);
-    void pageRequested(const QString &pluginId, const QString &contribution);
     void guardFinished(const QString &token, const QJsonObject &error);
     void profileWritten(const QJsonArray &canceledDates);
     void restartRequested();

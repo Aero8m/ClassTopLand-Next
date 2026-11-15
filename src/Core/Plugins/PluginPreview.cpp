@@ -10,6 +10,7 @@
 #include <QApplication>
 #include <QDate>
 #include <QDirIterator>
+#include <QEvent>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -17,9 +18,37 @@
 #include <QTimer>
 #include <iostream>
 #include <thread>
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
+
+namespace
+{
+// Keep normal layout and show/hide lifecycle events, without mapping any preview
+// window (including popups) onto the user's desktop. QWidget::grab still renders it.
+class PreviewWindowFilter final : public QObject
+{
+  protected:
+    bool eventFilter(QObject *object, QEvent *event) override
+    {
+        if (event->type() == QEvent::Polish || event->type() == QEvent::Show)
+            if (auto *widget = qobject_cast<QWidget *>(object); widget && widget->isWindow())
+            {
+                widget->setAttribute(Qt::WA_DontShowOnScreen);
+                widget->setAttribute(Qt::WA_ShowWithoutActivating);
+            }
+        return false;
+    }
+};
+}
 
 PluginPreview::PluginPreview(QObject *parent) : QObject(parent)
 {
+#ifdef Q_OS_WIN
+    process_.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *args) {
+        args->flags |= CREATE_NO_WINDOW;
+    });
+#endif
     connect(&process_, &QProcess::readyReadStandardOutput, this, &PluginPreview::consume);
     connect(&process_, &QProcess::readyReadStandardError, this, [this] { process_.readAllStandardError(); });
     connect(&process_, &QProcess::finished, this, [this] { failAll(QStringLiteral("预览进程已结束")); });
@@ -194,6 +223,8 @@ int runPluginPreview(int argc, char **argv)
 {
     QApplication app(argc, argv);
     app.setQuitOnLastWindowClosed(false);
+    PreviewWindowFilter windows;
+    app.installEventFilter(&windows);
     eApp->init();
     const auto args = app.arguments();
     const int index = args.indexOf(QStringLiteral("--plugin-preview"));
@@ -241,11 +272,11 @@ int runPluginPreview(int argc, char **argv)
     manager.setPreviewMode(true);
     PluginUiHost ui(&manager);
     PluginCenterWindow center(&manager, &ui);
-    QObject::connect(&ui, &PluginUiHost::navigationRequested, &center,
-                     [&](const QString &id, const QString &page, const QString &instance) {
-                         center.navigate(id, page, instance);
-                         center.show();
-                     });
+    ui.navigator = [&](const QString &id, const QString &page, const QString &instance, QString *error) {
+        const bool opened = center.navigate(id, page, instance, error);
+        if (opened) center.show();
+        return opened;
+    };
     manager.start();
     bool ready = false;
     auto initialized = [&] {
@@ -278,18 +309,20 @@ int runPluginPreview(int argc, char **argv)
                 if (view)
                 {
                     view->setWindowFlag(Qt::Window);
-                    view->resize(500, 120);
+                    if (auto *native = qobject_cast<PluginNativeView *>(view))
+                    {
+                        native->applyMetrics(CourseBarMetrics(candidate.courseBarConfig));
+                        QObject::connect(native, &PluginNativeView::availabilityChanged, native,
+                                [native] { native->resize(native->sizeHint()); });
+                    }
+                    view->resize(view->sizeHint());
                     view->show();
                 }
                 if (it->contains(QStringLiteral("settingsUi")))
                     center.navigate({}, {}, instance);
             }
-            for (const auto &page : record->pages)
-                if (page.value(QStringLiteral("purpose")) == QStringLiteral("function"))
-                {
-                    center.navigate(plugin, page.value(QStringLiteral("id")).toString());
-                    break;
-                }
+            if (!record->pages.isEmpty())
+                center.navigate(plugin, {});
             center.show();
             output({{QStringLiteral("event"), QStringLiteral("ready")},
                     {QStringLiteral("plugin"), plugin},
@@ -347,8 +380,8 @@ int runPluginPreview(int argc, char **argv)
                     }
                     else if (operation == QStringLiteral("navigate"))
                     {
-                        center.navigate(plugin, request.value(QStringLiteral("page")).toString());
-                        result = true;
+                        result = center.navigate(plugin, request.value(QStringLiteral("page")).toString(),
+                                                 request.value(QStringLiteral("componentInstance")).toString(), &failure);
                     }
                     else if (QStringList{QStringLiteral("get"), QStringLiteral("set"),
                                          QStringLiteral("invoke")}

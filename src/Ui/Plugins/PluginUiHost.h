@@ -16,10 +16,14 @@ class PluginUiHost final : public QObject
     using GuardCompletion = std::function<void(bool)>;
     explicit PluginUiHost(PluginManager *manager, QObject *parent = nullptr);
     ~PluginUiHost() override;
+    using Navigator = std::function<bool(const QString &, const QString &, const QString &, QString *)>;
+    Navigator navigator;
+    bool openPage(const QString &plugin, const QString &page = {}, const QString &component = {},
+                  QString *error = nullptr);
     void openSettings(const QString &plugin, QWidget *parent = nullptr);
     void openComponent(const QString &instance, QWidget *parent = nullptr);
-    PluginNativeView *createPage(const QString &plugin, const QString &contribution, QWidget *parent);
-    PluginNativeView *createComponentSettings(const QString &instance, QWidget *parent);
+    PluginNativeView *createPage(const QString &plugin, const QString &contribution, QWidget *parent, QString *error = nullptr);
+    PluginNativeView *createComponentSettings(const QString &instance, QWidget *parent, QString *error = nullptr);
     QWidget *createComponent(const QString &typeId, const QString &instance, const QJsonObject &settings,
                              QWidget *parent);
     void prepareAll(GuardCompletion completion, const QString &plugin = {});
@@ -35,8 +39,7 @@ class PluginUiHost final : public QObject
                        QString *error);
   signals:
     void guardStateChanged(bool guarding);
-    void navigationRequested(const QString &plugin, const QString &contribution,
-                             const QString &componentInstance);
+    void revealRequested(const QString &plugin, const QString &viewInstance);
 
   private:
     struct View
@@ -47,7 +50,7 @@ class PluginUiHost final : public QObject
     };
     PluginNativeView *create(const QString &plugin, const QString &kind, const QString &contribution,
                              const QString &file, const QString &component, const QJsonObject &settings,
-                             QWidget *parent);
+                             QWidget *parent, QString *error = nullptr);
     void prepare(QStringList instances, GuardCompletion completion);
     void guardNext();
     void guardReady();

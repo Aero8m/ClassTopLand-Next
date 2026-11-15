@@ -89,9 +89,9 @@ Manifest Manifest::read(const QString &directory)
     if (!validId(m.id) || m.name.trimmed().isEmpty() || m.name.size() > 128 ||
         !versionPattern.match(m.version).hasMatch())
         return bad(QStringLiteral("插件 ID、名称或版本无效"));
-    if (value.value(QStringLiteral("manifestVersion")).toInt() != 2 ||
-        value.value(QStringLiteral("apiVersion")).toInt() != 2)
-        return bad(QStringLiteral("需要升级：仅支持插件 manifestVersion=2、apiVersion=2"));
+    if (value.value(QStringLiteral("manifestVersion")) != QJsonValue(3) ||
+        value.value(QStringLiteral("apiVersion")) != QJsonValue(2))
+        return bad(QStringLiteral("需要升级：仅支持插件 manifestVersion=3、apiVersion=2；有页面的插件必须声明 contributions.mainPage"));
     if ((!value.value(QStringLiteral("permissions")).isUndefined() &&
          !value.value(QStringLiteral("permissions")).isObject()) ||
         (!value.value(QStringLiteral("contributions")).isUndefined() &&
@@ -125,6 +125,8 @@ Manifest Manifest::read(const QString &directory)
     static const QRegularExpression localId(QStringLiteral("\\A[a-zA-Z][a-zA-Z0-9_-]{0,63}\\z"));
     for (auto it = m.contributions.begin(); it != m.contributions.end(); ++it)
     {
+        if (it.key() == QStringLiteral("mainPage"))
+            continue;
         if (!QStringList{QStringLiteral("pages"), QStringLiteral("courseBarComponents"),
                          QStringLiteral("actions")}
                  .contains(it.key()) ||
@@ -151,17 +153,45 @@ Manifest Manifest::read(const QString &directory)
             } else {
                 if (it.key() == QStringLiteral("pages") && !QStringList{QStringLiteral("function"), QStringLiteral("settings")}.contains(object.value(QStringLiteral("purpose")).toString()))
                     return bad(QStringLiteral("页面 purpose 必须为 function 或 settings"));
+                const bool page = it.key() == QStringLiteral("pages");
+                if (object.contains(QStringLiteral("layoutPreset")) && (!page || !object.value(QStringLiteral("layoutPreset")).isString() ||
+                    object.value(QStringLiteral("layoutPreset")).toString() != (object.value(QStringLiteral("purpose")) == QStringLiteral("settings") ? QStringLiteral("settings") : QStringLiteral("content"))))
+                    return bad(id + QStringLiteral(": layoutPreset 与页面用途不匹配"));
+                if (object.contains(QStringLiteral("settingsLayoutPreset")) && (page || !object.contains(QStringLiteral("settingsUi")) ||
+                    object.value(QStringLiteral("settingsLayoutPreset")) != QStringLiteral("settings")))
+                    return bad(id + QStringLiteral(": settingsLayoutPreset 仅支持带 settingsUi 的 settings 版式"));
                 for (const auto &key : {QStringLiteral("ui"), QStringLiteral("settingsUi")}) {
                     if (key == QStringLiteral("settingsUi") && !object.contains(key)) continue;
                     const auto ui = object.value(key).toString();
-                    const auto error = QDir::isAbsolutePath(ui) ? QStringLiteral("UI 必须使用包内相对路径") : validateUi(QDir(directory).filePath(ui), directory);
-                    if (!error.isEmpty()) return bad(id + QStringLiteral(": ") + error);
+                    if (QDir::isAbsolutePath(ui)) return bad(id + QStringLiteral(": UI 必须使用包内相对路径"));
+                    const auto prepared = prepareUi(QDir(directory).filePath(ui), directory,
+                        it.key() == QStringLiteral("courseBarComponents") && key == QStringLiteral("ui")
+                            ? UiKind::Component : key == QStringLiteral("settingsUi") ? UiKind::ComponentSettings : UiKind::Page,
+                        object.value(key == QStringLiteral("settingsUi") ? QStringLiteral("settingsLayoutPreset") : QStringLiteral("layoutPreset")).toString());
+                    if (!prepared.error.isEmpty()) return bad(id + QStringLiteral(": ") + prepared.error);
+                    for (const auto &diagnostic : prepared.diagnostics) m.uiDiagnostics.append(diagnostic);
                 }
                 if (object.contains(QStringLiteral("displayPolicy")) && !QStringList{QStringLiteral("expandedOnly"), QStringLiteral("whenAvailable")}.contains(object.value(QStringLiteral("displayPolicy")).toString()))
                     return bad(QStringLiteral("无效的 displayPolicy"));
             }
             ids.insert(id);
         }
+    }
+    const auto pages = m.contributions.value(QStringLiteral("pages")).toArray();
+    const auto mainPage = m.contributions.value(QStringLiteral("mainPage"));
+    if (pages.isEmpty())
+    {
+        if (!mainPage.isUndefined())
+            return bad(QStringLiteral("无页面插件不得声明 contributions.mainPage"));
+    }
+    else
+    {
+        bool found = false;
+        for (const auto &page : pages)
+            if (page.toObject().value(QStringLiteral("id")) == mainPage)
+                found = true;
+        if (!mainPage.isString() || !found)
+            return bad(QStringLiteral("contributions.mainPage 必须引用 pages 中唯一的主页面 ID"));
     }
     const auto entry = value.value(QStringLiteral("entry")).toString();
     m.entry = QFileInfo(QDir(directory).filePath(entry)).canonicalFilePath();

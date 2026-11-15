@@ -10,6 +10,50 @@ export interface ConfigStore {
     read(callback: Callback<ConfigSnapshot>): Handle;
     commit(expectedRevision: string, value: Json, callback: Callback<{ revision: string }>): Handle;
 }
+/** Manifest v3 page. layoutPreset may be omitted for legacy layout compatibility. */
+export type PageContribution = { id: string; name: string; ui: string } & (
+    { purpose: "settings"; layoutPreset?: "settings" } |
+    { purpose: "function"; layoutPreset?: "content" }
+);
+/** Host-owned navigation: mainPage is the first tab, followed by declaration order.
+ * The mainPage ID must exist in pages; no-page plugins must omit mainPage.
+ */
+export type PageNavigationContributions =
+    { mainPage: string; pages: [PageContribution, ...PageContribution[]] } |
+    { mainPage?: never; pages?: [] };
+export interface ComponentSettingsContribution {
+    settingsUi?: string;
+    settingsLayoutPreset?: "settings"; // Requires settingsUi. Omitted = legacy layout.
+}
+export interface PluginContentSlotProperties { enabled?: boolean; visible?: boolean; toolTip?: string; }
+export interface PluginSectionProperties extends PluginContentSlotProperties { title?: string; }
+export interface PluginSettingRowProperties extends PluginSectionProperties { description?: string; }
+export interface PluginActionBarProperties { message?: string; enabled?: boolean; visible?: boolean; toolTip?: string; }
+/** ElaPushButton inside PluginActionBar only; at most one true per bar. */
+export interface ActionButtonProperties { text?: string; primary?: boolean; enabled?: boolean; visible?: boolean; toolTip?: string; }
+/** CourseBarItem is available only in component views; no signals or operations. */
+export interface CourseBarItemProperties {
+    text?: string; // Single line, plain text, at most 32768 characters.
+    toolTip?: string;
+    visible?: boolean;
+    active?: boolean;
+    progressValue?: number; // Integer 0..10000, default 10000.
+    /** -1 (default): inherit the host gap share, outer edge 0. 0..100: external margin in 49px bar units. */
+    leftMargin?: number;
+    rightMargin?: number;
+}
+/** Flexible page layouts only; excludes host-managed standard layouts. Values: -1 or integer 0..256. */
+export interface LayoutProperties {
+    leftMargin?: number; topMargin?: number; rightMargin?: number; bottomMargin?: number;
+    spacing?: number; horizontalSpacing?: number; verticalSpacing?: number;
+}
+export interface WidgetDefinition {
+    kind: "widget" | "layout";
+    contexts?: ("page" | "component" | "componentSettings")[];
+    properties?: string[]; signals?: string[]; operations?: string[];
+    stylePolicy?: string;
+    layoutPolicy?: string;
+}
 export interface View {
     readonly instanceId: string;
     readonly kind: "page" | "component" | "componentSettings";
@@ -22,6 +66,7 @@ export interface View {
     on(object: string, signal: string, handler: (...args: Json[]) => void): Disposable;
     create(parent: string, className: string, objectName: string, callback: Callback<string>): Handle;
     remove(object: string, callback?: Callback<boolean>): Handle;
+    /** Standard slots/rows/actions also accept their widget ID as target; only index is allowed there. */
     insert(layout: string, child: string, options: { index?: number; stretch?: number; row?: number; column?: number }, callback?: Callback<boolean>): Handle;
     invoke(object: string, operation: "click" | "setItems" | "addPage" | "select", args: Values, callback?: Callback<Json>): Handle;
     setDirty(dirty: boolean, callback?: Callback<boolean>): Handle;
@@ -66,7 +111,7 @@ export interface Context {
     http: { request(options: { url: string; method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD"; headers?: Record<string, string>; body?: string | Values | Json[]; timeoutMs?: number }, callback: Callback<{ status: number; headers: Record<string, string>; body: string }>): Handle };
     profiles: { getCurrent(callback: Callback<ProfileSnapshot>): Handle; applyChanges(request: { session: string; expectedRevision: string; operations: ProfileOperation[] }, callback: Callback<ProfileCommit>): Handle };
     settings: { get(callback: Callback<{ revision: string; themeColor: string; themeMode: number; courseBarEnabled: boolean; courseBarHeight: number; componentSpacing: number }>): Handle; update(request: { expectedRevision: string; changes: { themeColor?: string; themeMode?: number; courseBarEnabled?: boolean; courseBarHeight?: number; componentSpacing?: number } }, callback: Callback<{ revision: string }>): Handle };
-    ui: { registerPage(id: string, factory: PageFactory): Handle; registerComponent(id: string, factories: { create: PageFactory; createSettings?: PageFactory }): Handle; openPage(id: string, callback?: Callback<void>): Handle; catalog(callback: Callback<Record<string, { kind: "widget" | "layout"; properties?: string[]; signals?: string[]; operations?: string[] }>>): Handle };
+    ui: { registerPage(id: string, factory: PageFactory): Handle; registerComponent(id: string, factories: { create: PageFactory; createSettings?: PageFactory }): Handle; openPage(id: string, callback?: Callback<void>): Handle; catalog(callback: Callback<Record<string, WidgetDefinition>>): Handle };
     actions: { register(id: string, handler: ActionHandler): Handle; invoke(id: string, args: Json, callback: Callback<Json>): Handle };
     notifications: { show(options: { title: string; message: string }, callback?: Callback<void>): Handle };
     log: { debug(message: string): void; info(message: string): void; warn(message: string): void; error(message: string): void };

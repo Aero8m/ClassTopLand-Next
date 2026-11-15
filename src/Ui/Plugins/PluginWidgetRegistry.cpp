@@ -1,4 +1,6 @@
 #include "PluginWidgetRegistry.h"
+#include "PluginPageWidgets.h"
+#include "../../CourseBar/CourseBarItem.h"
 #include "../../Core/Plugins/PluginContracts.h"
 #include "../../Core/ThemeManager/ThemeManager.h"
 #include <ElaCheckBox.h>
@@ -61,34 +63,45 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QWidget>
-void PluginWidgetRegistry::bindTheme(QWidget *widget)
+void PluginWidgetRegistry::applyTheme(QWidget *widget, bool descendants)
 {
-    auto update = [widget] {
-        const auto mode = eTheme->getThemeMode();
-        auto palette = widget->palette();
-        palette.setColor(QPalette::Window, ElaThemeColor(mode, WindowBase));
-        palette.setColor(QPalette::Base, ElaThemeColor(mode, BasicBase));
-        palette.setColor(QPalette::AlternateBase, ElaThemeColor(mode, BasicAlternating));
-        palette.setColor(QPalette::Text, ElaThemeColor(mode, BasicText));
-        palette.setColor(QPalette::WindowText, ElaThemeColor(mode, BasicText));
-        palette.setColor(QPalette::ButtonText, ElaThemeColor(mode, BasicText));
-        palette.setColor(QPalette::Button, ElaThemeColor(mode, BasicBase));
-        palette.setColor(QPalette::Highlight, ElaThemeColor(mode, PrimaryNormal));
-        palette.setColor(QPalette::HighlightedText, ElaThemeColor(mode, BasicTextInvert));
-        palette.setColor(QPalette::Disabled, QPalette::Text, ElaThemeColor(mode, BasicTextDisable));
-        widget->setPalette(palette);
-        // Native Qt viewports may have an explicit platform palette. Apply the
-        // host colors after construction and on theme changes as well.
+    const auto mode = eTheme->getThemeMode();
+    auto palette = widget->palette();
+    palette.setColor(QPalette::Window, ElaThemeColor(mode, WindowBase));
+    palette.setColor(QPalette::Base, ElaThemeColor(mode, BasicBase));
+    palette.setColor(QPalette::AlternateBase, ElaThemeColor(mode, BasicAlternating));
+    palette.setColor(QPalette::Text, ElaThemeColor(mode, BasicText));
+    palette.setColor(QPalette::WindowText, ElaThemeColor(mode, BasicText));
+    palette.setColor(QPalette::ButtonText, ElaThemeColor(mode, BasicText));
+    palette.setColor(QPalette::Button, ElaThemeColor(mode, BasicBase));
+    palette.setColor(QPalette::PlaceholderText, ElaThemeColor(mode, BasicTextDisable));
+    palette.setColor(QPalette::Highlight, ElaThemeColor(mode, PrimaryNormal));
+    palette.setColor(QPalette::HighlightedText, ElaThemeColor(mode, BasicTextInvert));
+    palette.setColor(QPalette::Disabled, QPalette::Text, ElaThemeColor(mode, BasicTextDisable));
+    palette.setColor(QPalette::Disabled, QPalette::WindowText, ElaThemeColor(mode, BasicTextDisable));
+    palette.setColor(QPalette::Disabled, QPalette::ButtonText, ElaThemeColor(mode, BasicTextDisable));
+    widget->setPalette(palette);
+    // Native Qt viewports may have an explicit platform palette. Apply the
+    // host colors after construction and on theme changes as well.
+    if (descendants)
         for (auto *child : widget->findChildren<QWidget *>())
             child->setPalette(palette);
-    };
+}
+void PluginWidgetRegistry::bindTheme(QWidget *widget)
+{
+    auto update = [widget] { applyTheme(widget); };
     update();
-    QTimer::singleShot(0, widget, update);
     QObject::connect(eTheme, &ElaTheme::themeModeChanged, widget, update);
     QObject::connect(&ThemeManager::instance(), &ThemeManager::themeColorChanged, widget, update);
 }
 QWidget *PluginWidgetRegistry::create(const QString &type, QWidget *parent)
 {
+    if (type == QStringLiteral("PluginSection")) return new PluginSection(parent);
+    if (type == QStringLiteral("PluginContentSlot")) return new PluginContentSlot(parent);
+    if (type == QStringLiteral("PluginSettingRow")) return new PluginSettingRow(parent);
+    if (type == QStringLiteral("PluginActionBar")) return new PluginActionBar(parent);
+    if (type == QStringLiteral("CourseBarItem"))
+        return new CourseBarItem(parent);
     if (type == QStringLiteral("QWidget"))
         return new QWidget(parent);
     if (type == QStringLiteral("QLabel"))
@@ -191,6 +204,7 @@ QWidget *PluginWidgetRegistry::create(const QString &type, QWidget *parent)
 }
 QString PluginWidgetRegistry::typeName(QObject *object)
 {
+    if (qobject_cast<CourseBarRowLayout *>(object)) return QStringLiteral("QHBoxLayout");
     const auto catalog = Plugins::widgetCatalog();
     for (auto meta = object->metaObject(); meta; meta = meta->superClass())
         if (catalog.contains(QString::fromLatin1(meta->className())))
@@ -211,6 +225,20 @@ QJsonValue PluginWidgetRegistry::read(QObject *object, const QString &name, QStr
     }
     if (auto toggle = qobject_cast<ElaToggleSwitch *>(object); toggle && name == QStringLiteral("checked"))
         return toggle->getIsToggled();
+    if (name == QStringLiteral("primary") && qobject_cast<ElaPushButton *>(object)) return object->property("primary").toBool();
+    if (auto *layout = qobject_cast<QLayout *>(object))
+    {
+        const auto margins = layout->contentsMargins();
+        if (name == QStringLiteral("leftMargin")) return margins.left();
+        if (name == QStringLiteral("topMargin")) return margins.top();
+        if (name == QStringLiteral("rightMargin")) return margins.right();
+        if (name == QStringLiteral("bottomMargin")) return margins.bottom();
+        if (name == QStringLiteral("spacing")) return layout->spacing();
+        if (auto *grid = qobject_cast<QGridLayout *>(layout))
+            return name == QStringLiteral("horizontalSpacing") ? grid->horizontalSpacing() : grid->verticalSpacing();
+        if (auto *form = qobject_cast<QFormLayout *>(layout))
+            return name == QStringLiteral("horizontalSpacing") ? form->horizontalSpacing() : form->verticalSpacing();
+    }
     const auto propertyName =
         object->metaObject()->indexOfProperty(name.toUtf8()) >= 0 ? name : QStringLiteral("p") + name;
     const auto value = object->property(propertyName.toUtf8());
@@ -223,11 +251,56 @@ QJsonValue PluginWidgetRegistry::read(QObject *object, const QString &name, QStr
     return QJsonValue::fromVariant(value);
 }
 bool PluginWidgetRegistry::write(QObject *object, const QString &name, const QJsonValue &value,
-                                 QString *error)
+                                 QString *error, bool validateOnly)
 {
     read(object, name, error);
     if (!error->isEmpty())
         return false;
+    if (PluginPageWidgets::composite(object) && QStringList{QStringLiteral("title"), QStringLiteral("description"), QStringLiteral("message")}.contains(name) &&
+        (!value.isString() || value.toString().size() > 32768))
+    { *error = QStringLiteral("标准组件文字必须为 string，且不超过 32768 字符"); return false; }
+    if (name == QStringLiteral("primary"))
+    {
+        auto *button = qobject_cast<ElaPushButton *>(object);
+        auto *bar = button ? qobject_cast<PluginActionBar *>(button->parentWidget()) : nullptr;
+        if (!bar || !value.isBool() || !bar->canSetPrimary(button, value.toBool()))
+        { *error = QStringLiteral("primary 仅用于标准操作栏，且每栏最多一个主按钮"); return false; }
+        if (!validateOnly) bar->setPrimary(button, value.toBool());
+        return true;
+    }
+    if (auto *layout = qobject_cast<QLayout *>(object))
+    {
+        if (!value.isDouble() || value.toDouble() != value.toInt(-2) || value.toInt() < -1 || value.toInt() > 256)
+        { *error = QStringLiteral("布局间距必须为 -1 或 0～256 的整数"); return false; }
+        if (validateOnly) return true;
+        const int number = value.toInt();
+        auto margins = layout->contentsMargins();
+        if (name == QStringLiteral("leftMargin")) margins.setLeft(number);
+        else if (name == QStringLiteral("topMargin")) margins.setTop(number);
+        else if (name == QStringLiteral("rightMargin")) margins.setRight(number);
+        else if (name == QStringLiteral("bottomMargin")) margins.setBottom(number);
+        else if (name == QStringLiteral("spacing")) { layout->setSpacing(number); return true; }
+        else if (auto *grid = qobject_cast<QGridLayout *>(layout))
+        { if (name == QStringLiteral("horizontalSpacing")) grid->setHorizontalSpacing(number); else grid->setVerticalSpacing(number); return true; }
+        else if (auto *form = qobject_cast<QFormLayout *>(layout))
+        { if (name == QStringLiteral("horizontalSpacing")) form->setHorizontalSpacing(number); else form->setVerticalSpacing(number); return true; }
+        layout->setContentsMargins(margins);
+        return true;
+    }
+    if (qobject_cast<CourseBarItem *>(object))
+    {
+        if ((name == QStringLiteral("text") || name == QStringLiteral("toolTip")) && !value.isString())
+        { *error = QStringLiteral("文字必须为 string"); return false; }
+        if (name == QStringLiteral("text") && !Plugins::singleLineText(value.toString()))
+        { *error = QStringLiteral("课程条文字必须为单行，且不超过 32 Ki 字符"); return false; }
+        if ((name == QStringLiteral("active") || name == QStringLiteral("visible")) && !value.isBool())
+        { *error = QStringLiteral("状态必须为 boolean"); return false; }
+        if (name == QStringLiteral("progressValue") && (!value.isDouble() || value.toDouble() != value.toInt(-1) || value.toInt() < 0 || value.toInt() > 10000))
+        { *error = QStringLiteral("progressValue 必须为 0～10000 整数"); return false; }
+        if ((name == QStringLiteral("leftMargin") || name == QStringLiteral("rightMargin")) &&
+            (!value.isDouble() || value.toDouble() != value.toInt(-2) || value.toInt() < -1 || value.toInt() > CourseBarConfig::MaximumSpacing))
+        { *error = QStringLiteral("左右边距必须为 -1 或 0～100 整数"); return false; }
+    }
     if (auto toggle = qobject_cast<ElaToggleSwitch *>(object); toggle && name == QStringLiteral("checked"))
     {
         if (!value.isBool())
@@ -235,7 +308,7 @@ bool PluginWidgetRegistry::write(QObject *object, const QString &name, const QJs
             *error = QStringLiteral("checked 必须为 boolean");
             return false;
         }
-        toggle->setIsToggled(value.toBool());
+        if (!validateOnly) toggle->setIsToggled(value.toBool());
         return true;
     }
     const auto propertyName =
@@ -254,7 +327,7 @@ bool PluginWidgetRegistry::write(QObject *object, const QString &name, const QJs
         converted = QTime::fromString(value.toString(), Qt::ISODate);
     if (prop.metaType().id() == QMetaType::QDateTime)
         converted = QDateTime::fromString(value.toString(), Qt::ISODate);
-    if (!prop.isWritable() || !converted.convert(prop.metaType()) || !prop.write(object, converted))
+    if (!prop.isWritable() || !converted.convert(prop.metaType()) || (!validateOnly && !prop.write(object, converted)))
     {
         *error = QStringLiteral("属性类型错误或不可写：%1").arg(name);
         return false;

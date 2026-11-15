@@ -2,7 +2,7 @@
 export function settingsFactory(ctx, page, field, fallback) {
     return function(view) {
         let baseline, value=fallback, loading=true;
-        function status(text) {view.set("status",{text:text});}
+        function status(text) {view.set("status",{message:text});}
         function read(done) {
             loading=true;
             view.config.read(function(error,snapshot) {

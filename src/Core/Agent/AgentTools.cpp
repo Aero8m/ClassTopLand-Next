@@ -257,7 +257,7 @@ void AgentService::runTool(const QString &name, const QJsonObject &args)
         const auto target=item->plugin;
         if(target.isEmpty()){sendResult({},u"请先 open_plugin"_s);return;}
         const auto generation=generation_;
-        authorizePlugin(target,u"执行源包快照并打开隔离预览；不连接真实用户数据或外部网络"_s,[this,target,generation](bool allow){
+        authorizePlugin(target,u"在后台执行源包快照并生成隔离预览，不显示窗口；不连接真实用户数据或外部网络"_s,[this,target,generation](bool allow){
             if(!allow){sendResult({},u"用户拒绝"_s);return;}
             QString error;const auto source=plugins_->workspace()->source(target,&error);
             if(source.isEmpty()){sendResult({},error);return;}
@@ -519,6 +519,26 @@ void AgentService::finalizeNextPlugin()
     const auto record = plugins_->record(plugin);
     const auto preference = ConfigManager::instance().config().pluginConfig.plugins.value(plugin);
     const bool newPlugin = !record || (preference.activeRevision.isEmpty() && preference.approvedVersion.isEmpty());
+    QMap<QString, QJsonObject> previousPages, previousComponents;
+    if (record) {
+        for (const auto &entry : record->manifest.contributions.value(u"pages"_s).toArray())
+            previousPages.insert(entry.toObject().value(u"id"_s).toString(), entry.toObject());
+        for (const auto &entry : record->manifest.contributions.value(u"courseBarComponents"_s).toArray())
+            previousComponents.insert(entry.toObject().value(u"id"_s).toString(), entry.toObject());
+    }
+    for (const auto &entry : package.manifest.contributions.value(u"pages"_s).toArray()) {
+        const auto page = entry.toObject(); const auto id = page.value(u"id"_s).toString();
+        const auto preset = page.value(u"purpose"_s) == u"settings"_s ? u"settings"_s : u"content"_s;
+        if ((newPlugin || !previousPages.contains(id) || previousPages.value(id).value(u"purpose"_s) != page.value(u"purpose"_s)) && page.value(u"layoutPreset"_s) != preset) {
+            done(u"新建页面必须按用途声明 layoutPreset=settings/content，并使用对应标准版式："_s + id); return;
+        }
+    }
+    for (const auto &entry : package.manifest.contributions.value(u"courseBarComponents"_s).toArray()) {
+        const auto component = entry.toObject(); const auto id = component.value(u"id"_s).toString();
+        if (component.contains(u"settingsUi"_s) && (newPlugin || !previousComponents.value(id).contains(u"settingsUi"_s)) && component.value(u"settingsLayoutPreset"_s) != u"settings"_s) {
+            done(u"新建组件设置页必须声明 settingsLayoutPreset=settings："_s + id); return;
+        }
+    }
     const auto expected = pluginFingerprints_.value(plugin);
     const auto apply = [this, plugin, path, expected, package, done, newPlugin, generation](bool allow) {
         if (generation_ != generation || !busy()) return;

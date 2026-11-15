@@ -193,6 +193,13 @@ void PluginManager::scan()
             record->updatePending = !it->valid() || installed.fingerprint != it->fingerprint;
             record->manifest = installed;
         }
+        for (const auto &entry : record->manifest.uiDiagnostics)
+        {
+            const auto diagnostic = entry.toObject();
+            record->logs.append(QStringLiteral("WARN %1 [%2] %3").arg(diagnostic.value(QStringLiteral("code")).toString(),
+                diagnostic.value(QStringLiteral("object")).toString(), diagnostic.value(QStringLiteral("message")).toString()));
+        }
+        while (record->logs.size() > 200) record->logs.removeFirst();
         record->failure = record->manifest.failure;
         if (!record->manifest.valid())
             record->state = record->failure.startsWith(QStringLiteral("需要升级")) ? QStringLiteral("需要升级") : QStringLiteral("不可用");

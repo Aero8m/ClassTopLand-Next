@@ -4,16 +4,6 @@
   <widget class="QWidget" name="root">
     <layout class="QVBoxLayout" name="pageLayout">
       <item>
-        <widget class="ElaText" name="title">
-          <property name="text">
-            <string>HTTP 连接测试</string>
-          </property>
-          <property name="TextPixelSize">
-            <number>20</number>
-          </property>
-        </widget>
-      </item>
-      <item>
         <widget class="ElaPushButton" name="request">
           <property name="text">
             <string>请求 example.com</string>

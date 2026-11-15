@@ -7,13 +7,41 @@
 #include "src/Core/AppComposer/AppComposer.h"
 #include "src/Core/Plugins/PluginPreview.h"
 #include "src/TaskbarTrayMenu/TaskbarTrayMenu.h"
+#include "src/Utils/SingleInstance/SingleInstance.h"
 #include "src/Utils/UiAccess/UiAccess.h"
+
+namespace {
+bool acquireInstance(SingleInstance& instance, int& argc, char* argv[])
+{
+    QString error;
+    const auto result = instance.acquire(&error);
+    if (result == SingleInstance::Result::Acquired) return true;
+
+    // Only rejected cold launches need a temporary QApplication for the dialog.
+    std::unique_ptr<QApplication> dialogApplication;
+    if (!QCoreApplication::instance()) {
+        dialogApplication = std::make_unique<QApplication>(argc, argv);
+        QApplication::setWindowIcon(QIcon(QStringLiteral(":/res/images/icon.png")));
+    }
+    if (result == SingleInstance::Result::AlreadyRunning)
+        QMessageBox::information(nullptr, QStringLiteral("程序已经运行"),
+                                 QStringLiteral("ClassTopLand Next 已经运行，请在系统托盘中打开已有程序。"));
+    else
+        QMessageBox::critical(nullptr, QStringLiteral("启动失败"), error);
+    return false;
+}
+}
+
 int main(int argc, char* argv[])
 {
     for(int index=1;index<argc;++index)
         if(QString::fromLocal8Bit(argv[index])==QStringLiteral("--plugin-preview")) return runPluginPreview(argc,argv);
     const auto startup = UiAccess::inspectStartup(argc, argv, DATA_PATH);
     if (startup.exitRequested) return startup.exitCode;
+    SingleInstance instance(startup.dataDirectory);
+    // A prepared successor must acknowledge initialization and wait for its
+    // predecessor to exit before acquiring the predecessor's data lock.
+    if (!startup.handshake && !acquireInstance(instance, argc, argv)) return 1;
     QString startupError;
     std::optional<bool> startupUiAccessOverride;
     const QString configPath = QDir(startup.dataDirectory).filePath(QStringLiteral("MainConfig.json"));
@@ -43,6 +71,7 @@ int main(int argc, char* argv[])
     eApp->init();
     QString handoffError;
     if (!UiAccess::finishStartup(startup, &handoffError)) return 1;
+    if (startup.handshake && !acquireInstance(instance, argc, argv)) return 1;
 
     const QString workingDirectory = QDir::currentPath();
     std::unique_ptr<UiAccess::Restart> preparedRestart;
@@ -78,6 +107,9 @@ int main(int argc, char* argv[])
         }
         QStringList arguments = QCoreApplication::arguments();
         arguments.removeFirst();
+        // The fallback restart has no handoff protocol; business teardown and
+        // persistence are complete, so release before launching its successor.
+        instance.release();
         if (!QProcess::startDetached(QCoreApplication::applicationFilePath(), arguments, workingDirectory)) {
             const QString error = QStringLiteral("无法重启 ClassTopLand-Next，请手动重新启动应用。");
             Logger::instance().log(Logger::Level::Error, error);

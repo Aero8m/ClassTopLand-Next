@@ -1,5 +1,6 @@
 #include "CourseBarComponentRegistry.h"
 #include "ICourseBarComponent.h"
+#include "CourseBarItem.h"
 #include "BuiltinComponents/Date/Date.h"
 #include "BuiltinComponents/CourseView/CourseView.h"
 #include "BuiltinComponents/Countdown/Countdown.h"
@@ -21,11 +22,13 @@ class ScriptCourseBarComponent final : public ICourseBarComponent
     {
         auto *layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(0);
         layout->setSizeConstraint(QLayout::SetNoConstraint);
         view_ = ui->createComponent(config.typeId, config.instanceId, config.settings, this);
         if (!view_)
         {
-            auto *label = new QLabel(QStringLiteral("插件不可用"), this);
+            auto *label = new CourseBarItem(this);
+            label->setText(QStringLiteral("插件不可用"));
             label->setToolTip(config.typeId);
             view_ = label;
         }
@@ -41,7 +44,7 @@ class ScriptCourseBarComponent final : public ICourseBarComponent
     }
     QSize sizeHint() const override
     {
-        return QSize(view_ ? qBound(24, view_->sizeHint().width(), 800) : 24, metrics().height);
+        return QSize(view_ ? qMax(0, view_->sizeHint().width()) : 0, metrics().height);
     }
     bool visibleWhenCollapsed() const override
     {
@@ -57,17 +60,8 @@ class ScriptCourseBarComponent final : public ICourseBarComponent
     void updateMetrics() override
     {
         setFixedHeight(metrics().height);
-        if (view_) {
-            const auto font = metrics().font();
-            view_->setFont(font);
-            // Designer/QUiLoader and Ela controls can resolve their own fonts.
-            // Apply the course-bar scale to the rendered controls as well.
-            for (auto* child : view_->findChildren<QWidget*>()) {
-                auto scaledFont = child->font();
-                scaledFont.setPixelSize(font.pixelSize());
-                child->setFont(scaledFont);
-            }
-        }
+        if (auto *native = qobject_cast<PluginNativeView *>(view_.data())) native->applyMetrics(metrics());
+        else if (auto *item = qobject_cast<CourseBarItem *>(view_.data())) item->setMetrics(metrics());
         notifyPreferredSizeChanged();
     }
     bool eventFilter(QObject *watched, QEvent *event) override

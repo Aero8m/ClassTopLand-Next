@@ -1,5 +1,5 @@
 {
-  "manifestVersion": 2,
+  "manifestVersion": 3,
   "apiVersion": 2,
   "id": "org.classtopland.profile-demo",
   "name": "插件示例：档案写入",
@@ -15,7 +15,8 @@
         "id": "profile",
         "name": "档案写入",
         "purpose": "function",
-        "ui": "profile.ui"
+        "ui": "profile.ui",
+        "layoutPreset": "content"
       }
     ],
     "actions": [
@@ -51,6 +52,7 @@
           ]
         }
       }
-    ]
+    ],
+    "mainPage": "profile"
   }
 }

@@ -98,10 +98,14 @@ bool AppComposer::initInstances()
     // init course bar
     plugins_ = std::make_unique<PluginManager>(dataDirectory_, pluginsDisabled_);
     pluginUi_ = std::make_unique<PluginUiHost>(plugins_.get());
-    connect(pluginUi_.get(), &PluginUiHost::navigationRequested, this, [this](const QString &plugin,const QString &page,const QString &component) {
+    pluginUi_->navigator = [this](const QString &plugin, const QString &page, const QString &component, QString *error) {
         showPluginCenter();
-        if(pluginCenter_) pluginCenter_->navigate(plugin,page,component);
-    });
+        if (!pluginCenter_) {
+            if (error) *error = QStringLiteral("插件中心尚未就绪");
+            return false;
+        }
+        return pluginCenter_->navigate(plugin, page, component, error);
+    };
     componentRegistry_ = std::make_unique<CourseBarComponentRegistry>(plugins_.get(), pluginUi_.get());
     plugins_->editorDirty = [this] { return profileEditorWindow_ && profileEditorWindow_->session()->isDirty(); };
     courseBar = std::make_unique<CourseBar>(nullptr, componentRegistry_.get(), plugins_->courses());

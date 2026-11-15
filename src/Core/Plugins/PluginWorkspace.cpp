@@ -139,7 +139,7 @@ bool PluginWorkspace::create(const QString &plugin, QString *error)
     QTemporaryDir candidate(QDir(pluginsRoot).filePath(QStringLiteral(".create-XXXXXX")));
     if (!candidate.isValid()) return fail(error, candidate.errorString());
     if (!writeJson(QDir(candidate.path()).filePath(QStringLiteral("manifest.json")),
-        {{QStringLiteral("manifestVersion"), 2}, {QStringLiteral("apiVersion"), 2}, {QStringLiteral("id"), plugin},
+        {{QStringLiteral("manifestVersion"), 3}, {QStringLiteral("apiVersion"), 2}, {QStringLiteral("id"), plugin},
          {QStringLiteral("name"), plugin}, {QStringLiteral("version"), QStringLiteral("0.1.0")},
          {QStringLiteral("entry"), QStringLiteral("main.mjs")}, {QStringLiteral("permissions"), QJsonObject()},
          {QStringLiteral("contributions"), QJsonObject()}}, error)) return false;
@@ -371,6 +371,11 @@ bool PluginWorkspace::rollback(const QString &plugin, const QString &version, Pl
     const auto target = QDir(root).filePath(QStringLiteral("package"));
     if (record.isEmpty() || fingerprint(target, error) != record.value(QStringLiteral("fingerprint")).toString().toLatin1())
         return fail(error, QStringLiteral("备份包校验失败，未修改源文件"));
+    // Reject incompatible snapshots before touching source files or creating a recovery journal.
+    const auto candidate = Plugins::Manifest::read(target);
+    if (!candidate.valid() || candidate.id != plugin)
+        return fail(error, QStringLiteral("回滚预检失败，未修改源文件：") +
+                    (candidate.valid() ? QStringLiteral("插件 ID 不匹配") : candidate.failure));
     const auto backup = checkpoint(plugin, {}, QStringLiteral("回滚前备份"), error);
     if (backup.isEmpty()) return false;
     const auto saved = QDir(versionDirectory(plugin, backup)).filePath(QStringLiteral("package"));

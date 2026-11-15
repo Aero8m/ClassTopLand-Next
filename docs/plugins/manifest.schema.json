@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "ClassTopLand Next plugin manifest v2",
+  "title": "ClassTopLand Next plugin manifest v3 (JS API v2)",
   "type": "object",
   "required": [
     "manifestVersion",
@@ -12,7 +12,7 @@
   ],
   "properties": {
     "manifestVersion": {
-      "const": 2
+      "const": 3
     },
     "apiVersion": {
       "const": 2
@@ -101,8 +101,39 @@
           "items": {
             "$ref": "#/$defs/action"
           }
+        },
+        "mainPage": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$",
+          "description": "Required when pages is non-empty; must reference a declared page ID. The host validates the reference. Forbidden without pages."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "pages"
+            ],
+            "properties": {
+              "pages": {
+                "minItems": 1
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "mainPage"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "mainPage"
+              ]
+            }
+          }
+        }
+      ]
     }
   },
   "$defs": {
@@ -132,8 +163,40 @@
         "ui": {
           "type": "string",
           "minLength": 1
+        },
+        "layoutPreset": {
+          "enum": [
+            "settings",
+            "content"
+          ],
+          "description": "settings for settings pages, content for function pages; absent means legacy compatibility"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "purpose": {
+                "const": "settings"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "layoutPreset": {
+                "const": "settings"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "layoutPreset": {
+                "const": "content"
+              }
+            }
+          }
+        }
+      ]
     },
     "component": {
       "type": "object",
@@ -167,7 +230,16 @@
             "expandedOnly",
             "whenAvailable"
           ]
+        },
+        "settingsLayoutPreset": {
+          "const": "settings",
+          "description": "Requires settingsUi; uses standard settings layout"
         }
+      },
+      "dependentRequired": {
+        "settingsLayoutPreset": [
+          "settingsUi"
+        ]
       }
     },
     "action": {

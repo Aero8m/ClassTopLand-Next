@@ -70,12 +70,18 @@ add_executable(ClassTopLand-Next
         src/Core/Plugins/PluginActionRegistry.cpp
         src/Core/Plugins/PluginActionRegistry.h
         src/Core/Plugins/PluginContributions.cpp
+        src/Ui/SettingsLayout.cpp
+        src/Ui/SettingsLayout.h
+        src/Ui/Plugins/PluginPageWidgets.cpp
+        src/Ui/Plugins/PluginPageWidgets.h
         src/Ui/Plugins/PluginWidgetRegistry.cpp
         src/Ui/Plugins/PluginWidgetRegistry.h
         src/Ui/Plugins/PluginNativeView.cpp
         src/Ui/Plugins/PluginNativeView.h
         src/Ui/Plugins/PluginCenterWindow.cpp
         src/Ui/Plugins/PluginCenterWindow.h
+        src/Ui/Plugins/PluginMainPage.cpp
+        src/Ui/Plugins/PluginMainPage.h
         src/Core/Plugins/PluginPreview.cpp
         src/Core/Plugins/PluginPreview.h
         src/Core/Plugins/PluginManifest.cpp
@@ -152,6 +158,10 @@ add_executable(ClassTopLand-Next
         src/CourseBar/CourseBar.h
         src/CourseBar/ICourseBarComponent.h
         src/CourseBar/ICourseBarComponent.cpp
+        src/CourseBar/CourseBarItem.cpp
+        src/CourseBar/CourseBarItem.h
+        src/Core/Plugins/PluginUiPolicy.cpp
+        src/Core/Plugins/PluginUiPolicy.h
         src/CourseBar/CourseBarMetrics.h
         src/CourseBar/CourseBarLabel.h
         src/CourseBar/CourseBarText.h
@@ -206,6 +216,7 @@ add_executable(ClassTopLand-Next
         src/Utils/SupportFunctions.h
         src/Utils/UiAccess/UiAccess.cpp
         src/Utils/UiAccess/UiAccess.h
+        src/Utils/SingleInstance/SingleInstance.h
         src/VERSION.h)
 
 if (MSVC)
