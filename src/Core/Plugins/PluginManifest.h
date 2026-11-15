@@ -1,4 +1,5 @@
 #pragma once
+#include <ElaWidgetToolsDef.h>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QString>
@@ -15,6 +16,7 @@ QString origin(const QUrl &url);
 struct Manifest
 {
     QString id, name, version, directory, entry, description, failure;
+    ElaIconType::IconName icon = ElaIconType::PuzzlePiece;
     QJsonObject permissions, contributions;
     QByteArray fingerprint;
     QJsonArray uiDiagnostics;

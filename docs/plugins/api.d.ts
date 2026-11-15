@@ -10,6 +10,11 @@ export interface ConfigStore {
     read(callback: Callback<ConfigSnapshot>): Handle;
     commit(expectedRevision: string, value: Json, callback: Callback<{ revision: string }>): Handle;
 }
+/** Optional fields at the manifest v3 root. */
+export interface PluginAppearance {
+    /** Exact ElaIconType::IconName key for the plugin sidebar entry. Default: PuzzlePiece; None hides it. */
+    icon?: string;
+}
 /** Manifest v3 page. layoutPreset may be omitted for legacy layout compatibility. */
 export type PageContribution = { id: string; name: string; ui: string } & (
     { purpose: "settings"; layoutPreset?: "settings" } |

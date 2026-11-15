@@ -3,6 +3,7 @@
   "apiVersion": 2,
   "id": "org.classtopland.example-tools",
   "name": "插件示例：课程助手",
+  "icon": "ScrewdriverWrench",
   "version": "2.0.0",
   "entry": "main.mjs",
   "description": "原生多页设置、课程表格、动态控件、课程条组件与 Agent 动作。",

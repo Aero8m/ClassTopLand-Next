@@ -4,6 +4,8 @@
 
 清单使用 manifestVersion=3、apiVersion=2。有 pages 时必须用 contributions.mainPage 引用其中一个页面，无页面时省略 mainPage。宿主只为每个插件创建一个侧栏入口，在内部以 ElaPivot + QStackedWidget 组织页面：主页面最先，其余按清单顺序，实例设置最后；单页隐藏页签。
 
+插件可在 `manifest.json` 根节点设置 `"icon": "Clock"`，指定左侧插件入口的图标。值为宿主所带 `ElaIconType::IconName` 的准确枚举名，区分大小写，不带 `ElaIconType::` 前缀；例如 `Clock`、`ArrowsRotate`、`CalendarDays` 或 `ScrewdriverWrench`，完整名称见 [ElaWidgetToolsDef.h](../../third_party/ElaWidgetTools-Plus/ElaWidgetTools/ElaWidgetToolsDef.h) 的 IconName。省略时沿用 `PuzzlePiece`，`None` 表示不显示图标；空值、未知名称及非字符串会导致清单校验失败。每个插件只有一个入口，所有页面及临时组件设置入口共用该图标；不需要新增权限。修改清单后重新扫描并热重载即可生效，停用和失败回滚沿用原有生命周期。图标由 Ela 绘制，跟随宿主主题与缩放。
+
 页面继续分别使用 registerPage(id, factory) 注册；ctx.ui.openPage(id, callback) 选择所属插件和指定页签，失败通过 callback 返回 HostError。无需在 .ui 中声明宿主的 ElaPivot。页面按需加载，跨页签和跨插件切换保留实例与草稿。侧栏恢复上次页签，“打开插件”定位主页面。隐藏页参与关闭、停用、重载和退出的保存守卫；守卫期间导航禁用，宿主定位有未保存内容的页面。
 
 组件实例设置在所属插件内部动态打开，同实例复用视图，不同实例使用名称和实例 ID 区分。无普通页面的插件允许只运行后台能力；打开实例设置时才创建临时入口，实例删除或中心关闭后移除。

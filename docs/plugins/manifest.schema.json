@@ -38,6 +38,14 @@
     "description": {
       "type": "string"
     },
+    "icon": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z][A-Za-z0-9]*$",
+      "default": "PuzzlePiece",
+      "description": "Plugin sidebar icon: an exact ElaIconType::IconName key, e.g. Clock or ArrowsRotate. The host validates the name against its bundled Ela version. None hides the icon."
+    },
     "permissions": {
       "type": "object",
       "additionalProperties": false,

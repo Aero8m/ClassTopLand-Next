@@ -636,7 +636,8 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
     setWindowTitle(u"AI Agent"_s);
     setIsDefaultClosed(false);
     setUserInfoCardVisible(false);
-    setNavigationBarWidth(176);
+    // 会话标题较长，按窗口比例限制导航宽度，放大后允许显示更多内容。
+    setNavigationBarMaximumWidthRatio(0.28);
     setNavigationBarDisplayMode(ElaNavigationType::Maximal);
     setIsAllowPageOpenInNewWindow(false);
     setStackSwitchMode(ElaWindowType::None);

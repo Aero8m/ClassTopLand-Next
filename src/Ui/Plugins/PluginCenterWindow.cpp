@@ -21,7 +21,6 @@ PluginCenterWindow::PluginCenterWindow(PluginManager *manager, PluginUiHost *ui,
     setWindowButtonFlag(ElaAppBarType::RouteForwardButtonHint, false);
     setWindowButtonFlag(ElaAppBarType::ThemeChangeButtonHint, false);
     setUserInfoCardVisible(false);
-    setNavigationBarWidth(180);
     setNavigationBarDisplayMode(ElaNavigationType::Maximal);
     setIsAllowPageOpenInNewWindow(false);
     resize(AppUi::defaultWindowSize);
@@ -78,7 +77,7 @@ PluginMainPage *PluginCenterWindow::ensurePlugin(const QString &plugin)
         return nullptr;
     auto *page = new PluginMainPage(manager_, ui_, plugin, this);
     page->setNavigationEnabled(!ui_->guarding());
-    addPageNode(record->manifest.name, page, ElaIconType::PuzzlePiece);
+    addPageNode(record->manifest.name, page, record->manifest.icon);
     plugins_.insert(plugin, page);
     navigationPages_.insert(plugin, page);
     connect(page, &PluginMainPage::contentChanged, this, &PluginCenterWindow::refresh, Qt::QueuedConnection);

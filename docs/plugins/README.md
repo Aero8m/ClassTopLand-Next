@@ -27,6 +27,7 @@ org.example.tools/
   "apiVersion": 2,
   "id": "org.example.tools",
   "name": "示例工具",
+  "icon": "ScrewdriverWrench",
   "version": "2.0.0",
   "entry": "main.mjs",
   "permissions": {},

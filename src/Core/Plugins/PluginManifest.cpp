@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QMetaEnum>
 #include <QRegularExpression>
 #include <QSet>
 #include <QUrl>
@@ -92,6 +93,16 @@ Manifest Manifest::read(const QString &directory)
     if (value.value(QStringLiteral("manifestVersion")) != QJsonValue(3) ||
         value.value(QStringLiteral("apiVersion")) != QJsonValue(2))
         return bad(QStringLiteral("需要升级：仅支持插件 manifestVersion=3、apiVersion=2；有页面的插件必须声明 contributions.mainPage"));
+    if (value.contains(QStringLiteral("icon")))
+    {
+        const auto icon = value.value(QStringLiteral("icon"));
+        static const QRegularExpression iconPattern(QStringLiteral("\\A[A-Za-z][A-Za-z0-9]{0,127}\\z"));
+        bool known = false;
+        const int code = QMetaEnum::fromType<ElaIconType::IconName>().keyToValue(icon.toString().toUtf8().constData(), &known);
+        if (!icon.isString() || !iconPattern.match(icon.toString()).hasMatch() || !known)
+            return bad(QStringLiteral("icon 必须为有效的 ElaIconType 图标名称，例如 Clock 或 ArrowsRotate"));
+        m.icon = static_cast<ElaIconType::IconName>(code);
+    }
     if ((!value.value(QStringLiteral("permissions")).isUndefined() &&
          !value.value(QStringLiteral("permissions")).isObject()) ||
         (!value.value(QStringLiteral("contributions")).isUndefined() &&

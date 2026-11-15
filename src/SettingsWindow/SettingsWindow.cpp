@@ -38,7 +38,6 @@ void SettingsWindow::initUI()
 
     // init tabs
     setUserInfoCardVisible(false);
-    setNavigationBarWidth(180);
     setNavigationBarDisplayMode(ElaNavigationType::Maximal);
     setIsAllowPageOpenInNewWindow(false);
     resize(AppUi::defaultWindowSize);

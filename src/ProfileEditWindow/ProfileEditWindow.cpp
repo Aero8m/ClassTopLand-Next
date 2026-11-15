@@ -30,7 +30,6 @@ void ProfileEditWindow::initUI()
     setWindowTitle(tr("档案编辑"));
     resize(850, 550);
     setMinimumSize(850, 550);
-    setNavigationBarWidth(180);
     setNavigationBarDisplayMode(ElaNavigationType::Maximal);
     setUserInfoCardVisible(false);
     setIsAllowPageOpenInNewWindow(false);
