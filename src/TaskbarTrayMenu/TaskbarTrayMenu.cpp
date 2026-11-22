@@ -8,6 +8,7 @@
 #include <ElaScrollPageArea.h>
 #include <ElaText.h>
 #include <ElaTheme.h>
+#include <ElaWidgetToolsDef.h>
 
 #include <QApplication>
 #include <QAbstractButton>
@@ -39,6 +40,8 @@ constexpr int CornerRadius = 6;
 constexpr int SlideDistance = 12;
 constexpr int OpenDuration = 180;
 constexpr int CloseDuration = 140;
+constexpr int ShortcutCardHeight = 56;
+constexpr int ShortcutCardInset = 1;
 constexpr int ScheduleCardHeight = 56;
 constexpr int ScheduleCardGap = 8;
 constexpr int VisibleScheduleRows = 2;
@@ -283,16 +286,17 @@ void TaskbarTrayMenu::initUI()
         auto* column = new QVBoxLayout;
         column->setSpacing(6);
         auto* card = new ElaScrollPageArea(this);
-        card->setFixedHeight(56);
+        card->setFixedHeight(ShortcutCardHeight);
         card->setBorderRadius(8);
         auto* cardLayout = new QHBoxLayout(card);
-        cardLayout->setContentsMargins(1, 1, 1, 1);
+        cardLayout->setContentsMargins(ShortcutCardInset, ShortcutCardInset, ShortcutCardInset, ShortcutCardInset);
         auto* button = new ElaIconButton(icon, 24, card);
         button->setObjectName(objectName);
         button->setAccessibleName(text);
         button->setBorderRadius(8);
         button->setCursor(Qt::PointingHandCursor);
-        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        button->setFixedHeight(ShortcutCardHeight - 2 * ShortcutCardInset);
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         cardLayout->addWidget(button);
         auto* label = new ElaText(text, 13, this);
         label->setAlignment(Qt::AlignCenter);
@@ -374,13 +378,13 @@ void TaskbarTrayMenu::initUI()
     footerLayout->setContentsMargins(14, 6, 14, 6);
     footerLayout->setSpacing(8);
     footerLayout->addStretch();
-    auto* restart = new ElaIconButton(ElaIconType::ArrowRotateRight, 20, 36, 36, footer_);
+    auto* restart = new ElaIconButton(ElaIconType::ArrowRotateRight, 20, ElaWidgetToolsSize::DefaultControlHeight, ElaWidgetToolsSize::DefaultControlHeight, footer_);
     restart->setObjectName(QStringLiteral("restartButton"));
     restart->setBorderRadius(6);
     restart->setToolTip(tr("重启应用"));
     restart->setAccessibleName(restart->toolTip());
     restart->setCursor(Qt::PointingHandCursor);
-    auto* quit = new ElaIconButton(ElaIconType::ArrowRightFromBracket, 20, 36, 36, footer_);
+    auto* quit = new ElaIconButton(ElaIconType::ArrowRightFromBracket, 20, ElaWidgetToolsSize::DefaultControlHeight, ElaWidgetToolsSize::DefaultControlHeight, footer_);
     quit->setObjectName(QStringLiteral("quitButton"));
     quit->setBorderRadius(6);
     quit->setToolTip(tr("退出应用"));
@@ -581,6 +585,11 @@ void TaskbarTrayMenu::hideMenu()
     const QRect available = screen()->availableGeometry();
     const QPoint position = boundedPosition(pos() + animationOffset_, available, size());
     startTransition(position, 0.0, CloseDuration);
+}
+
+void TaskbarTrayMenu::showManagedNotification(const QString& message)
+{
+    if (trayIcon_) trayIcon_->showMessage(tr("教室通知"), message, QSystemTrayIcon::Information);
 }
 
 void TaskbarTrayMenu::requestExit(int exitCode)

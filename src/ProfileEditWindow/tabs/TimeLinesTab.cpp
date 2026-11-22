@@ -44,7 +44,7 @@ TimeLinesTab::TimeLinesTab(ProfileEditSession* session, QWidget* parent) : ElaSc
     undo_ = new QUndoStack(this);
     auto* layout = page(this, tr("时间线管理"));
     auto* selector = card(layout);
-    lines_ = new ElaComboBox; lines_->setFixedHeight(38); lines_->setAccessibleName(tr("时间线"));
+    lines_ = new ElaComboBox; lines_->setAccessibleName(tr("时间线"));
     lines_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     selector->addWidget(lines_);
     auto* actions = new QHBoxLayout;

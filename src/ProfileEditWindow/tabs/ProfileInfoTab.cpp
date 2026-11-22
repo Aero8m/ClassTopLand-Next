@@ -16,7 +16,7 @@ ProfileInfoTab::ProfileInfoTab(ProfileEditSession* session, QWidget* parent) : E
     auto* layout = page(this, tr("基本信息"));
     auto* details = card(layout);
     details->addWidget(text(tr("档案名称")));
-    name_ = new ElaLineEdit; name_->setFixedHeight(38); name_->setObjectName(QStringLiteral("profileName"));
+    name_ = new ElaLineEdit; name_->setObjectName(QStringLiteral("profileName"));
     name_->setAccessibleName(tr("档案名称")); details->addWidget(name_);
     details->addWidget(text(tr("文件路径")));
     auto* path = text(ProfileManager::instance().filePath());
@@ -30,7 +30,7 @@ ProfileInfoTab::ProfileInfoTab(ProfileEditSession* session, QWidget* parent) : E
     semesterStart_ = new ElaCalendarPicker;
     semesterStart_->setObjectName(QStringLiteral("semesterStartDate"));
     semesterStart_->setAccessibleName(tr("学期第一天"));
-    semesterStart_->setFixedSize(160, 38);
+    semesterStart_->setFixedWidth(160);
     semesterRow->addWidget(semesterEnabled_); semesterRow->addWidget(semesterStart_);
     semester->addLayout(semesterRow);
     auto* explanation = text(tr("所选日期所在周为第 1 周（单周），每周一开始新的一周，用于自动匹配单周 / 双周课表。"));

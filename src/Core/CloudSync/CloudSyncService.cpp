@@ -2,8 +2,10 @@
 
 #include "CloudDisplayConfig.h"
 #include "CloudEndpoint.h"
+#include "CloudOperations.h"
+#include "CloudPower.h"
+#include "CloudScreen.h"
 
-#include "../../VERSION.h"
 #include "../ConfigManager/ConfigManager.h"
 #include "../Logger/Logger.h"
 #include "../ProfileManager/ProfileExchange.h"
@@ -18,6 +20,7 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QStringList>
 #include <QTimer>
 #include <QUuid>
@@ -33,7 +36,6 @@ constexpr int kMaxSyncDelayMs = 300000;
 constexpr int kMinBackoffMs = 10000;
 constexpr int kMaxBackoffMs = 120000;
 constexpr int kFailureThrottleSeconds = 300;
-constexpr int kMaxNotifiedKeys = 200;
 
 bool fail(QString* error, const QString& message)
 {
@@ -71,10 +73,7 @@ QString newClaimId()
 
 QString clientVersion()
 {
-    QString version = QString::fromLatin1(APP_VERSION);
-    if (version.isEmpty() || version.startsWith(QLatin1Char('|')) || version.contains(QLatin1Char('|')))
-        version = QStringLiteral("0.0.0");
-    return QStringLiteral("ClassTopLand-Next/") + version.left(60);
+    return QStringLiteral("ClassTopLand-Next/") + CloudOperations::buildId().left(60);
 }
 
 QJsonObject dataObject(const QByteArray& body)
@@ -92,10 +91,17 @@ QString replyError(const CloudApi::Reply& reply)
     if (!reply.transportError.isEmpty()) return reply.transportError;
     return QStringLiteral("HTTP %1").arg(reply.status);
 }
+
+QString replyDiagnostic(const CloudApi::Reply& reply)
+{
+    if (!reply.transportDiagnostic.isEmpty()) return reply.transportDiagnostic;
+    const QString status = QStringLiteral("HTTP %1").arg(reply.status);
+    return reply.message.isEmpty() ? status : status + QStringLiteral(": ") + reply.message;
+}
 } // namespace
 
 CloudSyncService::CloudSyncService(const QString& dataDirectory, QObject* parent)
-    : QObject(parent), store_(dataDirectory), api_(new CloudApi(this))
+    : QObject(parent), store_(dataDirectory), api_(new CloudApi(this)), screen_(std::make_unique<CloudScreen>())
 {
     state_.ensureChannels();
     timer_ = new QTimer(this);
@@ -119,7 +125,7 @@ bool CloudSyncService::start(QString* error)
     if (!store_.load(state_, &corrupt, &loadError)) {
         statusError_ = loadError;
         setStatus(corrupt ? Cloud::Status::Corrupt : Cloud::Status::Error);
-        report(loadError);
+        report(QStringLiteral("Could not load sync state"), loadError);
         if (error) *error = loadError;
         emit stateChanged();
         return false;
@@ -129,7 +135,7 @@ bool CloudSyncService::start(QString* error)
     if (!store_.acquireLock(&lockError)) {
         statusError_ = lockError;
         setStatus(Cloud::Status::Locked);
-        report(lockError);
+        report(QStringLiteral("Could not lock sync state"), lockError);
         if (error) *error = lockError;
         emit stateChanged();
         return true;
@@ -151,6 +157,7 @@ bool CloudSyncService::start(QString* error)
 
 void CloudSyncService::stop()
 {
+    screen_->stop();
     if (timer_) timer_->stop();
     if (api_) api_->abortAll();
     ++cycleToken_;
@@ -172,7 +179,7 @@ Cloud::Snapshot CloudSyncService::snapshot() const
     snap.busy = busy();
     snap.deviceName = state_.deviceName;
     snap.deviceId = state_.deviceId;
-    snap.hasCredential = !state_.deviceSecret.isEmpty();
+    snap.hasCredential = !state_.deviceSecret.isEmpty() || !state_.pendingPairSecret.isEmpty();
     snap.cloudProfileId = state_.cloudProfileId;
     snap.cloudProfileName = cloudProfileName_;
     snap.cloudProfileExists = cloudProfileExists_;
@@ -202,19 +209,13 @@ void CloudSyncService::setStatus(Cloud::Status status)
     emit stateChanged();
 }
 
-void CloudSyncService::report(const QString& message, bool notify)
+void CloudSyncService::report(const QString& message, const QString& detail)
 {
-    Logger::instance().log(Logger::Level::Warning, QStringLiteral("集控：") + message);
+    QString line = QStringLiteral("Cloud sync: ") + message;
+    if (!detail.isEmpty() && detail != message)
+        line += QStringLiteral(": ") + detail;
+    Logger::instance().log(Logger::Level::Warning, line);
     Logger::instance().flush();
-    if (notify) emit notification(tr("集控"), message);
-}
-
-void CloudSyncService::notifyOnce(const QString& key, const QString& title, const QString& message)
-{
-    if (notified_.contains(key)) return;
-    notified_.insert(key);
-    if (notified_.size() > kMaxNotifiedKeys) notified_.clear();
-    emit notification(title, message);
 }
 
 bool CloudSyncService::persist(const Cloud::State& state, QString* error)
@@ -246,6 +247,7 @@ QJsonObject CloudSyncService::appliedBody() const
 QJsonObject CloudSyncService::syncBody() const
 {
     QJsonArray profileFormats;
+    profileFormats.append(1);
     profileFormats.append(Cloud::kProfileFormatVersion);
     QJsonArray displayFormats;
     displayFormats.append(1);
@@ -409,20 +411,29 @@ void CloudSyncService::beginCycle(bool manual)
     if (state_.cloudProfileId.isEmpty()) {
         QString profileError;
         if (!ensureCloudProfile(&profileError))
-            report(tr("云端档案创建失败：%1").arg(profileError));
+            report(QStringLiteral("Could not create the cloud profile"), profileError);
+    }
+    QString recoveryError;
+    if (!recoverOperation(&recoveryError)) {
+        finishCycle(token, recoveryError, backoffMs_,
+                    QStringLiteral("Could not recover an interrupted device operation: %1").arg(recoveryError));
+        return;
     }
     resumeJournals(token, [this, token] {
         flushReceipts(token, [this, token] { doSync(token); });
     });
 }
 
-void CloudSyncService::finishCycle(quint64 token, const QString& error, int nextDelayMs)
+void CloudSyncService::finishCycle(quint64 token, const QString& error, int nextDelayMs, const QString& diagnostic)
 {
     if (token != cycleToken_) return;
     inFlight_ = false;
     if (!error.isEmpty()) {
         state_.lastError = error;
-        report(error);
+        if (diagnostic.isEmpty())
+            report(QStringLiteral("Sync cycle failed"), error);
+        else
+            report(diagnostic);
         if (status_ != Cloud::Status::Revoked) setStatus(Cloud::Status::Error);
         backoffMs_ = qBound(kMinBackoffMs, backoffMs_ * 2, kMaxBackoffMs);
         scheduleNext(nextDelayMs > 0 ? nextDelayMs : backoffMs_);
@@ -441,6 +452,7 @@ void CloudSyncService::finishCycle(quint64 token, const QString& error, int next
 
 void CloudSyncService::handleUnauthorized()
 {
+    screen_->stop();
     if (api_) api_->abortAll();
     ++cycleToken_;
     inFlight_ = false;
@@ -485,45 +497,35 @@ void CloudSyncService::pair(const QString& code)
     if (timer_) timer_->stop();
     if (api_) api_->abortAll();
     ++cycleToken_;
+    const bool wasRevoked = status_ == Cloud::Status::Revoked;
     pairing_ = true;
     setStatus(Cloud::Status::Pairing);
     const QString hash = sha256Hex(normalized.toUtf8());
     Cloud::State next = state_;
-    if (next.pairCodeHash != hash) {
-        if (!next.pairCodeHash.isEmpty() || next.bound() || !next.deviceSecret.isEmpty()) {
-            // A new binding needs a new credential and an independent generation
-            // space; the last applied content stays on disk.
-            next.deviceSecret = newDeviceSecret();
-            next.claimId = newClaimId();
-            next.deviceId.clear();
-            next.deviceName.clear();
-            next.channels.clear();
-            next.ensureChannels();
-            next.attempts.clear();
-            next.pendingReceipts.clear();
-            next.journal.clear();
-            store_.removePending(Cloud::profileKey());
-            store_.removePending(Cloud::displayKey());
-        }
+    if (next.pairCodeHash != hash || next.claimId.isEmpty()) {
         next.pairCodeHash = hash;
+        next.pendingPairSecret = newDeviceSecret();
+        next.claimId = newClaimId();
+    } else if (next.pendingPairSecret.isEmpty()) {
+        // Resume a claim persisted by an older version before switching credentials.
+        next.pendingPairSecret = next.deviceSecret.isEmpty() ? newDeviceSecret() : next.deviceSecret;
     }
-    if (next.deviceSecret.isEmpty()) next.deviceSecret = newDeviceSecret();
-    if (next.claimId.isEmpty()) next.claimId = newClaimId();
     QString saveError;
     if (!persist(next, &saveError)) {
         pairing_ = false;
-        setStatus(Cloud::Status::Error);
-        report(saveError);
+        setStatus(wasRevoked ? Cloud::Status::Revoked : Cloud::Status::Error);
+        report(QStringLiteral("Could not save the pending pairing"), saveError);
         emit pairingFinished(false, saveError);
+        scheduleNext(kMinBackoffMs);
         return;
     }
     const QJsonObject body{
         {QStringLiteral("code"), normalized},
         {QStringLiteral("claim_id"), state_.claimId},
-        {QStringLiteral("device_secret"), state_.deviceSecret},
+        {QStringLiteral("device_secret"), state_.pendingPairSecret},
         {QStringLiteral("client_version"), clientVersion()}};
     api_->postJson(Cloud::apiUrl(state_.origin, QStringLiteral("/device/pair")), {}, body,
-                   [this](const CloudApi::Reply& reply) {
+                   [this, wasRevoked](const CloudApi::Reply& reply) {
                        pairing_ = false;
                        if (!started_) return;
                        if (reply.status == 201) {
@@ -538,6 +540,20 @@ void CloudSyncService::pair(const QString& code)
                                return;
                            }
                            Cloud::State next = state_;
+                           const bool sameDevice = next.deviceId == deviceId;
+                           if (!sameDevice) {
+                               next.channels.clear();
+                               next.ensureChannels();
+                               next.attempts.clear();
+                               next.pendingReceipts.clear();
+                               next.journal.clear();
+                               next.operationJournal = {};
+                               next.lastSyncAt = {};
+                           }
+                           next.deviceSecret = next.pendingPairSecret;
+                           next.pendingPairSecret.clear();
+                           next.claimId.clear();
+                           next.pairCodeHash.clear();
                            next.deviceId = deviceId;
                            next.deviceName = name;
                            next.lastError.clear();
@@ -546,6 +562,13 @@ void CloudSyncService::pair(const QString& code)
                                setStatus(Cloud::Status::Error);
                                emit pairingFinished(false, error);
                                return;
+                           }
+                           screen_->stop();
+                           if (!sameDevice) {
+                               store_.removePending(Cloud::profileKey());
+                               store_.removePending(Cloud::displayKey());
+                               retryAfter_.clear();
+                               blockSignature_.clear();
                            }
                            statusError_.clear();
                            QString profileError;
@@ -556,11 +579,11 @@ void CloudSyncService::pair(const QString& code)
                            emit pairingFinished(
                                true, tr("配对成功：%1").arg(name.isEmpty() ? deviceId : name));
                            if (!profileReady) {
-                               report(tr("云端档案创建失败：%1").arg(profileError));
+                               report(QStringLiteral("Could not create the cloud profile"), profileError);
                            } else {
                                emit cloudProfileUpdated();
                            }
-                           if (profileReady && !isCurrentCloudProfile())
+                           if (!sameDevice && profileReady && !isCurrentCloudProfile())
                                emit cloudProfileSwitchRequested(state_.cloudProfileId);
                            scheduleNext(600);
                            emit stateChanged();
@@ -581,8 +604,9 @@ void CloudSyncService::pair(const QString& code)
                            message = tr("配对失败：HTTP %1").arg(reply.status);
                        state_.lastError = message;
                        statusError_ = message;
-                       setStatus(state_.bound() ? Cloud::Status::Error : Cloud::Status::Unbound);
-                       report(message);
+                       setStatus(wasRevoked ? Cloud::Status::Revoked :
+                                 state_.bound() ? Cloud::Status::Error : Cloud::Status::Unbound);
+                       report(QStringLiteral("Pairing failed"), replyDiagnostic(reply));
                        emit pairingFinished(false, message);
                        emit stateChanged();
                        if (state_.bound()) scheduleNext(kMinBackoffMs);
@@ -597,6 +621,12 @@ bool CloudSyncService::setOrigin(const QString& origin, QString* error)
     const QString normalized = Cloud::normalizeOrigin(origin, error);
     if (normalized.isEmpty()) return false;
     Cloud::State next = state_;
+    if (next.origin != normalized) {
+        next.deviceSecret.clear();
+        next.pendingPairSecret.clear();
+        next.claimId.clear();
+        next.pairCodeHash.clear();
+    }
     next.origin = normalized;
     if (!persist(next, error)) return false;
     emit stateChanged();
@@ -610,10 +640,11 @@ void CloudSyncService::setEnabled(bool enabled)
     next.enabled = enabled;
     QString error;
     if (!persist(next, &error)) {
-        report(error);
+        report(QStringLiteral("Could not save the sync preference"), error);
         return;
     }
     if (!enabled) {
+        screen_->stop();
         if (timer_) timer_->stop();
         if (!inFlight_) setStatus(state_.bound() ? Cloud::Status::Paused : Cloud::Status::Unbound);
     } else if (state_.bound()) {
@@ -625,6 +656,7 @@ void CloudSyncService::setEnabled(bool enabled)
 
 void CloudSyncService::unbind()
 {
+    screen_->stop();
     if (!started_) return;
     if (timer_) timer_->stop();
     if (api_) api_->abortAll();
@@ -633,6 +665,7 @@ void CloudSyncService::unbind()
     pairing_ = false;
     Cloud::State next = state_;
     next.deviceSecret.clear();
+    next.pendingPairSecret.clear();
     next.claimId.clear();
     next.pairCodeHash.clear();
     next.deviceId.clear();
@@ -642,12 +675,13 @@ void CloudSyncService::unbind()
     next.attempts.clear();
     next.pendingReceipts.clear();
     next.journal.clear();
+    next.operationJournal = {};
     next.lastError.clear();
     store_.removePending(Cloud::profileKey());
     store_.removePending(Cloud::displayKey());
     QString error;
     if (!persist(next, &error)) {
-        report(error);
+        report(QStringLiteral("Could not save the unbound state"), error);
     }
     statusError_.clear();
     blockSignature_.clear();
@@ -658,6 +692,7 @@ void CloudSyncService::unbind()
 
 bool CloudSyncService::resetState(QString* error)
 {
+    screen_->stop();
     if (error) error->clear();
     if (timer_) timer_->stop();
     if (api_) api_->abortAll();
@@ -739,14 +774,12 @@ void CloudSyncService::flushReceipts(quint64 token, Step done)
                            (reply.ok() || reply.status == 404 || reply.status == 409 ||
                             reply.status == 422);
                        if (!accepted) {
-                           finishCycle(token, replyError(reply),
-                                       retryDelay(reply, backoffMs_));
+                           finishCycle(token, replyError(reply), retryDelay(reply, backoffMs_),
+                                       QStringLiteral("Could not send sync receipt: %1").arg(replyDiagnostic(reply)));
                            return;
                        }
                        if (reply.status == 404 || reply.status == 409 || reply.status == 422) {
-                           report(tr("回执被服务器拒绝（HTTP %1）：%2")
-                                      .arg(reply.status)
-                                      .arg(replyError(reply)));
+                           report(QStringLiteral("Server rejected the sync receipt"), replyDiagnostic(reply));
                        }
                        Cloud::State next = state_;
                        const QString assignment =
@@ -783,18 +816,25 @@ void CloudSyncService::doSync(quint64 token)
                            return;
                        }
                        if (!reply.transportError.isEmpty()) {
-                           finishCycle(token, reply.transportError,
-                                       retryDelay(reply, backoffMs_));
+                           finishCycle(token, reply.transportError, retryDelay(reply, backoffMs_),
+                                       replyDiagnostic(reply));
                            return;
                        }
                        if (!reply.ok()) {
-                           finishCycle(token, replyError(reply), retryDelay(reply, backoffMs_));
+                           finishCycle(token, replyError(reply), retryDelay(reply, backoffMs_), replyDiagnostic(reply));
                            return;
                        }
                        const QJsonObject data = dataObject(reply.body);
                        if (!data.contains(QStringLiteral("channels"))) {
-                           finishCycle(token, tr("服务器同步响应格式无效"), 60000);
+                           finishCycle(token, tr("服务器同步响应格式无效"), 60000,
+                                       QStringLiteral("Invalid sync response from the server"));
                            return;
+                       }
+                       qtPowerEnabled_ = data.value(QStringLiteral("qt_power")).toBool();
+                       qtScreenSnapshotsEnabled_ = data.value(QStringLiteral("qt_screen_snapshots")).toBool();
+                       if (qtPowerEnabled_ && CloudPower::supported() && !bootProbeStarted_) {
+                           bootProbeStarted_ = true;
+                           CloudPower::readBootId(this, [this](const QString& id) { powerBootId_ = id; });
                        }
                        pendingSyncAfterMs_ =
                            qBound(kMinSyncDelayMs,
@@ -825,7 +865,7 @@ void CloudSyncService::doSync(quint64 token)
                        }
                        processNextChannel(token, 0, targets, [this, token] {
                            flushReceipts(token, [this, token] {
-                               finishCycle(token, {}, pendingSyncAfterMs_);
+                               pollOperation(token);
                            });
                        });
                    });
@@ -844,12 +884,232 @@ void CloudSyncService::processNextChannel(quint64 token, int index,
     });
 }
 
+void CloudSyncService::pollOperation(quint64 token)
+{
+    if (token != cycleToken_) return;
+    const auto journal = state_.operationJournal;
+    const QString id = journal.value(QStringLiteral("id")).toString();
+    const QString status = journal.value(QStringLiteral("status")).toString();
+    if (!id.isEmpty() && !status.isEmpty()) {
+        if (status == QStringLiteral("accepted") && !qtPowerEnabled_) {
+            QString error;
+            auto next = state_;
+            next.operationJournal = {};
+            if (!persist(next, &error)) {
+                finishCycle(token, error, backoffMs_);
+                return;
+            }
+            report(QStringLiteral("The server does not support power operation receipts"));
+        } else if (status == QStringLiteral("restart_accepted")) {
+            const auto expected = journal.value(QStringLiteral("activate_cloud")).toBool();
+            if (managedRestartAccepted_) {
+                finishCycle(token, {}, pendingSyncAfterMs_);
+                return;
+            }
+            const bool applied = !expected || isCurrentCloudProfile();
+            sendOperationResult(token, id, applied ? QStringLiteral("applied") : QStringLiteral("failed"),
+                                applied ? QString() : tr("重启后未启用云端档案"));
+            return;
+        } else {
+            sendOperationResult(token, id, status, journal.value(QStringLiteral("reason")).toString(),
+                                journal.value(QStringLiteral("boot_id")).toString());
+            return;
+        }
+    }
+    auto telemetry = CloudOperations::telemetry(isCurrentCloudProfile());
+    if (qtScreenSnapshotsEnabled_ && CloudScreen::supported())
+        telemetry.insert(QStringLiteral("screen_snapshots"), true);
+    if (qtPowerEnabled_ && CloudPower::supported()) {
+        telemetry.insert(QStringLiteral("power_control"), true);
+        if (!powerBootId_.isEmpty()) telemetry.insert(QStringLiteral("boot_id"), powerBootId_);
+    }
+    if (pluginTelemetry_) telemetry.insert(QStringLiteral("plugins"), pluginTelemetry_());
+    api_->postJson(Cloud::apiUrl(state_.origin, QStringLiteral("/device/operations/poll")), bearer(), telemetry,
+                   [this, token](const CloudApi::Reply& reply) {
+                       if (token != cycleToken_) return;
+                       if (reply.status == 401) {
+                           handleUnauthorized();
+                           return;
+                       }
+                       if (!reply.ok()) {
+                           if (reply.status != 404)
+                               report(QStringLiteral("Could not send device status"), replyDiagnostic(reply));
+                           finishCycle(token, {}, pendingSyncAfterMs_);
+                           return;
+                       }
+                       const auto data = dataObject(reply.body);
+                       if (state_.enabled && data.value(QStringLiteral("screen_enabled")).toBool())
+                           screen_->configure(state_.origin, bearer());
+                       else
+                           screen_->stop();
+                       const auto task = data.value(QStringLiteral("task")).toObject();
+                       if (task.isEmpty()) {
+                           finishCycle(token, {}, pendingSyncAfterMs_);
+                           return;
+                       }
+                       executeOperation(token, task);
+                   });
+}
+
+bool CloudSyncService::recoverOperation(QString* error)
+{
+    auto journal = state_.operationJournal;
+    const auto task = journal.value(QStringLiteral("schedule_task")).toObject();
+    if (task.isEmpty() || journal.contains(QStringLiteral("status"))) return true;
+    const auto changes = task.value(QStringLiteral("changes")).toArray();
+    const bool sameProfile = task.value(QStringLiteral("profile_id")).toString() == CloudOperations::activeProfileId();
+    const auto& current = ProfileManager::instance().profile();
+    if (sameProfile && CloudOperations::matches(current, changes, true)) {
+        journal.insert(QStringLiteral("status"), QStringLiteral("applied"));
+    } else if (!sameProfile || !CloudOperations::matches(current, changes, false)) {
+        journal.insert(QStringLiteral("status"), QStringLiteral("conflict"));
+        journal.insert(QStringLiteral("reason"), tr("恢复任务时发现生效档案或相关课表已变化"));
+    } else {
+        const auto expiry = QDateTime::fromString(task.value(QStringLiteral("expires_at")).toString(), Qt::ISODate);
+        if (expiry.isValid() && expiry > QDateTime::currentDateTimeUtc()) return true;
+        journal.insert(QStringLiteral("status"), QStringLiteral("expired"));
+        journal.insert(QStringLiteral("reason"), tr("任务有效期已过"));
+    }
+    journal.remove(QStringLiteral("schedule_task"));
+    Cloud::State next = state_;
+    next.operationJournal = journal;
+    return persist(next, error);
+}
+
+void CloudSyncService::executeOperation(quint64 token, const QJsonObject& task)
+{
+    const QString id = task.value(QStringLiteral("id")).toString();
+    static const QRegularExpression taskId(QStringLiteral("^[a-f0-9]{32}$"));
+    if (!taskId.match(id).hasMatch()) {
+        finishCycle(token, tr("设备任务 ID 无效"), pendingSyncAfterMs_, QStringLiteral("Invalid device operation ID"));
+        return;
+    }
+    const auto complete = [this, token, &id](const QString& status, const QString& reason = {}) {
+        sendOperationResult(token, id, status, reason);
+    };
+    const auto operation = task.value(QStringLiteral("operation")).toObject();
+    const QString action = operation.value(QStringLiteral("action")).toString();
+    const auto changes = task.value(QStringLiteral("changes")).toArray();
+    const bool recovering = state_.operationJournal.value(QStringLiteral("id")).toString() == id;
+    auto& profiles = ProfileManager::instance();
+    auto candidate = profiles.profile();
+    QString error;
+    if (!changes.isEmpty()) {
+        if (task.value(QStringLiteral("profile_id")).toString() != CloudOperations::activeProfileId())
+            return complete(QStringLiteral("conflict"), tr("当前生效档案已切换"));
+        if (recovering && CloudOperations::matches(candidate, changes, true))
+            return complete(QStringLiteral("applied"));
+        for (const auto& value : changes) {
+            const auto date = QDate::fromString(value.toObject().value(QStringLiteral("date")).toString(), Qt::ISODate);
+            if (!date.isValid() || date < QDate::currentDate())
+                return complete(QStringLiteral("expired"), tr("涉及的日期已过"));
+        }
+        if (profileEditorDirty_ && profileEditorDirty_())
+            return complete(QStringLiteral("blocked"), tr("档案有未保存的编辑"));
+        if (!CloudOperations::matches(candidate, changes, false) ||
+            !CloudOperations::prepare(candidate, task, &error) ||
+            !CloudOperations::matches(candidate, changes, true))
+            return complete(QStringLiteral("conflict"), error.isEmpty() ? tr("相关课表已变化") : error);
+    } else if (recovering) {
+        return complete(QStringLiteral("failed"), tr("上次执行意外中断，无法确认结果"));
+    }
+    const auto expiry = QDateTime::fromString(task.value(QStringLiteral("expires_at")).toString(), Qt::ISODate);
+    if (!expiry.isValid() || expiry <= QDateTime::currentDateTimeUtc())
+        return complete(QStringLiteral("expired"), tr("任务有效期已过"));
+    Cloud::State next = state_;
+    next.operationJournal = {{QStringLiteral("id"), id}};
+    if (!changes.isEmpty()) next.operationJournal.insert(QStringLiteral("schedule_task"), task);
+    if (!persist(next, &error)) {
+        finishCycle(token, error, backoffMs_);
+        return;
+    }
+    if (!changes.isEmpty()) {
+        if (!profiles.commit(candidate, &error))
+            return complete(QStringLiteral("failed"), error);
+        return complete(QStringLiteral("applied"));
+    }
+    if (action == QStringLiteral("notify")) {
+        emit managedNotification(operation.value(QStringLiteral("message")).toString());
+        return complete(QStringLiteral("applied"));
+    }
+    const bool restartSystem = action == QStringLiteral("restart_system");
+    if (restartSystem || action == QStringLiteral("shutdown_system")) {
+        if (!qtPowerEnabled_ || !CloudPower::supported())
+            return complete(QStringLiteral("failed"), tr("客户端不支持 Windows 电源操作"));
+        if (powerOperationGuard_) {
+            const auto reason = powerOperationGuard_();
+            if (!reason.isEmpty()) return complete(QStringLiteral("blocked"), reason);
+        }
+        if (!CloudPower::request(restartSystem, &error))
+            return complete(QStringLiteral("failed"), error);
+        const auto bootId = restartSystem ? powerBootId_ : QString();
+        const auto reason = restartSystem && bootId.isEmpty()
+            ? tr("Windows 已接受重启请求，无法读取系统启动标识") : QString();
+        return sendOperationResult(token, id, QStringLiteral("accepted"), reason, bootId);
+    }
+    const bool activate = action == QStringLiteral("activate_cloud");
+    if (activate && isCurrentCloudProfile()) return complete(QStringLiteral("applied"));
+    if (activate && !cloudProfileExists_) return complete(QStringLiteral("blocked"), tr("云端档案尚未准备好"));
+    if (activate || action == QStringLiteral("restart_app")) {
+        if (!managedRestart_) return complete(QStringLiteral("failed"), tr("应用重启不可用"));
+        error = managedRestart_(activate ? state_.cloudProfileId : QString());
+        if (!error.isEmpty()) return complete(QStringLiteral("blocked"), error);
+        managedRestartAccepted_ = true;
+        next = state_;
+        next.operationJournal.insert(QStringLiteral("status"), QStringLiteral("restart_accepted"));
+        next.operationJournal.insert(QStringLiteral("activate_cloud"), activate);
+        if (!persist(next, &error))
+            report(QStringLiteral("Could not save the device operation journal"), error);
+        return;
+    }
+    complete(QStringLiteral("failed"), tr("客户端不支持该操作"));
+}
+
+void CloudSyncService::sendOperationResult(quint64 token, const QString& id, const QString& status,
+                                          const QString& reason, const QString& bootId)
+{
+    QJsonObject receipt{{QStringLiteral("status"), status}, {QStringLiteral("reason"), reason.left(1000)}};
+    if (!bootId.isEmpty()) receipt.insert(QStringLiteral("boot_id"), bootId);
+    Cloud::State next = state_;
+    next.operationJournal = receipt;
+    next.operationJournal.insert(QStringLiteral("id"), id);
+    QString error;
+    if (!persist(next, &error)) {
+        finishCycle(token, error, backoffMs_);
+        return;
+    }
+    if (status != QStringLiteral("applied") && status != QStringLiteral("accepted"))
+        report(QStringLiteral("Device operation status: %1").arg(status), reason);
+    const auto path = QStringLiteral("/device/operations/%1/result").arg(id);
+    api_->postJson(Cloud::apiUrl(state_.origin, path), bearer(), receipt,
+                   [this, token, status](const CloudApi::Reply& reply) {
+                       if (token != cycleToken_) return;
+                       if (reply.status == 401) {
+                           handleUnauthorized();
+                           return;
+                       }
+                       if (!reply.ok() && reply.status != 404 && reply.status != 409) {
+                           finishCycle(token, replyError(reply), pendingSyncAfterMs_,
+                                       QStringLiteral("Could not send device operation result: %1").arg(replyDiagnostic(reply)));
+                           return;
+                       }
+                       Cloud::State next = state_;
+                       next.operationJournal = {};
+                       QString error;
+                       if (!persist(next, &error)) {
+                           finishCycle(token, error, backoffMs_);
+                           return;
+                       }
+                       finishCycle(token, {}, status == QStringLiteral("blocked") ? pendingSyncAfterMs_ : 5000);
+                   });
+}
+
 void CloudSyncService::processChannel(quint64 token, const Cloud::Target& target, Step done)
 {
     if (token != cycleToken_) return;
     const QString kind = target.kind;
     const bool supportedFormat = kind == Cloud::profileKey()
-        ? target.formatVersion == Cloud::kProfileFormatVersion
+        ? (target.formatVersion >= 1 && target.formatVersion <= Cloud::kProfileFormatVersion)
         : (target.formatVersion == 1 || target.formatVersion == Cloud::kDisplayFormatVersion);
     if (!target.present || !target.compatible || !supportedFormat) {
         blockSignature_.remove(kind);
@@ -867,21 +1127,15 @@ void CloudSyncService::processChannel(quint64 token, const Cloud::Target& target
         done();
         return;
     }
-    QString blockedReason;
-    if (kind == Cloud::profileKey()) {
-        if (isCurrentCloudProfile() && profileEditorDirty_ && profileEditorDirty_())
-            blockedReason = QStringLiteral("local_edit");
-    } else if (CloudDisplay::hasPluginComponent(
-                   ConfigManager::instance().config().courseBarConfig)) {
-        blockedReason = QStringLiteral("plugin_layout_conflict");
-    }
-    if (!blockedReason.isEmpty()) {
+    const int attempt = qMax(state_.attempts.value(target.assignmentId), target.attempt) + 1;
+    if (kind == Cloud::profileKey() && isCurrentCloudProfile() &&
+        profileEditorDirty_ && profileEditorDirty_()) {
+        const QString blockedReason = QStringLiteral("local_edit");
         const QString signature = target.assignmentId + QLatin1Char('|') + blockedReason;
         if (blockSignature_.value(kind) == signature) {
             done();
             return;
         }
-        const int attempt = state_.attempts.value(target.assignmentId) + 1;
         Cloud::State next = state_;
         next.attempts.insert(target.assignmentId, attempt);
         QString error;
@@ -890,11 +1144,7 @@ void CloudSyncService::processChannel(quint64 token, const Cloud::Target& target
             return;
         }
         blockSignature_.insert(kind, signature);
-        notifyOnce(kind + QLatin1Char('|') + target.assignmentId + QLatin1Char('|') + blockedReason,
-                   tr("集控同步被阻塞"),
-                   kind == Cloud::profileKey()
-                       ? tr("档案有未保存的更改，云端档案将在保存或放弃后更新")
-                       : tr("课程条包含插件组件，云端展示配置将在移除后更新"));
+        report(QStringLiteral("Sync blocked by unsaved local edits"));
         completeChannel(token, target, attempt, QStringLiteral("blocked"), blockedReason, false,
                         done);
         return;
@@ -907,7 +1157,6 @@ void CloudSyncService::processChannel(quint64 token, const Cloud::Target& target
             return;
         }
     }
-    const int attempt = state_.attempts.value(target.assignmentId) + 1;
     Cloud::State next = state_;
     next.attempts.insert(target.assignmentId, attempt);
     Cloud::Journal journal;
@@ -1009,7 +1258,19 @@ void CloudSyncService::applyContent(quint64 token, const Cloud::Target& target, 
         Profile profile;
         QStringList warnings;
         QString error;
-        if (!ProfileExchange::decode(contents, ProfileExchange::Format::NativeJson, profile,
+        QByteArray nativeContent = contents;
+        if (target.formatVersion == 2) {
+            auto root = QJsonDocument::fromJson(contents).object();
+            if (root.value(QStringLiteral("version")) != QJsonValue(2) ||
+                root.value(QStringLiteral("profile")).toObject().contains(QStringLiteral("dateOverrides"))) {
+                failChannel(token, target, attempt, QStringLiteral("validation_failed"),
+                            tr("常规档案格式无效"), done);
+                return;
+            }
+            root.insert(QStringLiteral("version"), 1);
+            nativeContent = QJsonDocument(root).toJson(QJsonDocument::Compact);
+        }
+        if (!ProfileExchange::decode(nativeContent, ProfileExchange::Format::NativeJson, profile,
                                      &warnings, &error)) {
             failChannel(token, target, attempt, QStringLiteral("validation_failed"), error, done);
             return;
@@ -1022,6 +1283,14 @@ void CloudSyncService::applyContent(quint64 token, const Cloud::Target& target, 
             failChannel(token, target, attempt, QStringLiteral("save_failed"), error, done);
             return;
         }
+        if (target.formatVersion == 2) {
+            Profile current;
+            if (!ProfileManager::instance().readProfile(state_.cloudProfileId, current, &error)) {
+                failChannel(token, target, attempt, QStringLiteral("save_failed"), error, done);
+                return;
+            }
+            profile.dateOverrides = current.dateOverrides;
+        }
         QList<QDate> canceled;
         if (!ProfileManager::instance().commitManagedProfile(state_.cloudProfileId, profile, &error,
                                                              &canceled)) {
@@ -1031,12 +1300,12 @@ void CloudSyncService::applyContent(quint64 token, const Cloud::Target& target, 
         if (!isCurrentCloudProfile()) {
             refreshCloudProfileInfo();
             emit cloudProfileUpdated();
-            notifyOnce(QStringLiteral("profile-updated|") + target.assignmentId,
-                       tr("云端档案已更新"),
-                       tr("云端档案“%1”已更新，切换为该档案后生效")
-                           .arg(cloudProfileName_.isEmpty() ? tr("云端档案") : cloudProfileName_));
         }
-        completeChannel(token, target, attempt, QStringLiteral("applied"), {}, true, done);
+        QStringList dates;
+        for (const auto& date : canceled) dates.append(date.toString(Qt::ISODate));
+        const QString reason = dates.isEmpty() ? QString() :
+            tr("临时安排来源已变更，已取消：%1").arg(dates.join(QStringLiteral("、"))).left(1000);
+        completeChannel(token, target, attempt, QStringLiteral("applied"), reason, true, done);
         return;
     }
     QJsonParseError parseError;
@@ -1081,9 +1350,9 @@ void CloudSyncService::failChannel(quint64 token, const Cloud::Target& target, i
 {
     if (token != cycleToken_) return;
     retryAfter_.insert(target.kind, QDateTime::currentDateTime().addSecs(kFailureThrottleSeconds));
-    const QString label = target.kind == Cloud::profileKey() ? tr("课表档案") : tr("展示配置");
-    notifyOnce(target.kind + QLatin1Char('|') + target.assignmentId + QLatin1Char('|') + result,
-               tr("集控同步失败"), tr("%1：%2").arg(label, reason.left(200)));
+    const QString label = target.kind == Cloud::profileKey() ? QStringLiteral("Schedule profile")
+                                                            : QStringLiteral("Display configuration");
+    report(QStringLiteral("%1 sync failed (%2)").arg(label, result), reason.left(200));
     completeChannel(token, target, attempt, QStringLiteral("failed"),
                     result + QStringLiteral(": ") + reason, false, done);
 }

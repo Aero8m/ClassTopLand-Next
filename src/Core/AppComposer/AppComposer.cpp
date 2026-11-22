@@ -26,9 +26,9 @@
 #include <QTimer>
 
 namespace {
-bool reportStartupError(const QString& message)
+bool reportStartupError(const QString& logMessage, const QString& message)
 {
-    Logger::instance().log(Logger::Level::Error, message);
+    Logger::instance().log(Logger::Level::Error, logMessage);
     Logger::instance().flush();
     QMessageBox::critical(nullptr, QStringLiteral("错误"), message);
     return false;
@@ -71,12 +71,14 @@ bool AppComposer::initInstances()
     const QString configPath = QDir(dataDirectory_).filePath(QStringLiteral("MainConfig.json"));
     const bool createConfig = !QFileInfo::exists(configPath);
     if (!ConfigManager::instance().load(configPath, &error)) {
-        return reportStartupError(QStringLiteral("配置加载失败：%1\n%2").arg(configPath, error));
+        return reportStartupError(QStringLiteral("Could not load configuration from %1: %2").arg(configPath, error),
+                                  QStringLiteral("配置加载失败：%1\n%2").arg(configPath, error));
     }
     if (startupUiAccessOverride_)
         ConfigManager::instance().config().courseBarConfig.uiAccessEnabled = *startupUiAccessOverride_;
     if (createConfig && !ConfigManager::instance().save(&error)) {
-        return reportStartupError(QStringLiteral("默认配置保存失败：%1\n%2").arg(configPath, error));
+        return reportStartupError(QStringLiteral("Could not save default configuration to %1: %2").arg(configPath, error),
+                                  QStringLiteral("默认配置保存失败：%1\n%2").arg(configPath, error));
     }
     ThemeManager::instance().applyConfiguredTheme();
     // init profile manager
@@ -84,14 +86,16 @@ bool AppComposer::initInstances()
         QStringLiteral("profiles/%1.json").arg(ConfigManager::instance().config().profileName));
     const bool createProfile = !QFileInfo::exists(profilePath);
     if (!ProfileManager::instance().load(profilePath, &error)) {
-        return reportStartupError(QStringLiteral("档案加载失败：%1\n%2").arg(profilePath, error));
+        return reportStartupError(QStringLiteral("Could not load profile from %1: %2").arg(profilePath, error),
+                                  QStringLiteral("档案加载失败：%1\n%2").arg(profilePath, error));
     }
     if (createProfile && !ProfileManager::instance().save(&error)) {
-        return reportStartupError(QStringLiteral("默认档案保存失败：%1\n%2").arg(profilePath, error));
+        return reportStartupError(QStringLiteral("Could not save default profile to %1: %2").arg(profilePath, error),
+                                  QStringLiteral("默认档案保存失败：%1\n%2").arg(profilePath, error));
     }
     windowInterception_ = std::make_unique<WindowInterceptionService>();
     connect(windowInterception_.get(), &WindowInterceptionService::errorOccurred, this, [](const QString& message) {
-        Logger::instance().log(Logger::Level::Warning, message);
+        Logger::instance().log(Logger::Level::Warning, QStringLiteral("Window interception failed: %1").arg(message));
         Logger::instance().flush();
     });
     if (windowInterception_->supported()) windowInterception_->start();
@@ -115,7 +119,7 @@ bool AppComposer::initInstances()
     connect(componentRegistry_.get(), &CourseBarComponentRegistry::changed, courseBar.get(), &CourseBar::reloadConfig);
     connect(&ConfigManager::instance(), &ConfigManager::courseBarChanged, courseBar.get(), &CourseBar::reloadConfig);
     connect(plugins_.get(), &PluginManager::notification, this, [this](const QString& title, const QString& message) {
-        Logger::instance().log(Logger::Level::Warning, title + QStringLiteral(": ") + message);
+        Logger::instance().log(Logger::Level::Warning, QStringLiteral("Plugin notification (%1): %2").arg(title, message));
         if (courseBar) courseBar->showNotification(title + QStringLiteral(": ") + message);
         if (trayMenu_) trayMenu_->showScheduleError(title + QStringLiteral(": ") + message);
     });
@@ -123,7 +127,10 @@ bool AppComposer::initInstances()
         if (trayMenu_) trayMenu_->requestExit(TaskbarTrayMenu::RestartExitCode);
         if (!exitAccepted_) {
             auto candidate = ConfigManager::instance().config(); candidate.pluginConfig.recoveryNextStart = false;
-            QString error; if (!ConfigManager::instance().commit(candidate, &error)) Logger::instance().log(Logger::Level::Error, error);
+            QString error;
+            if (!ConfigManager::instance().commit(candidate, &error))
+                Logger::instance().log(Logger::Level::Error,
+                                       QStringLiteral("Could not clear plugin recovery mode: %1").arg(error));
         }
     });
     connect(&ProfileManager::instance(), &ProfileManager::committed, this, [this] {
@@ -149,6 +156,16 @@ bool AppComposer::initInstances()
     cloud_->setProfileEditorDirty([this] {
         return profileEditorWindow_ && profileEditorWindow_->session()->isDirty();
     });
+    cloud_->setPluginTelemetry([this] {
+        QJsonArray entries;
+        if (plugins_)
+            for (const auto& record : plugins_->records())
+                entries.append(QJsonObject{{QStringLiteral("id"), record->manifest.id},
+                                            {QStringLiteral("running"), record->state == QStringLiteral("运行中")}});
+        return entries;
+    });
+    cloud_->setManagedRestart([this](const QString& id) { return managedRestart(id); });
+    cloud_->setPowerOperationGuard([this] { return managedExitBlockReason(); });
     connect(cloud_.get(), &CloudSyncService::displayConfigApplied, this, [this] {
         ThemeManager::instance().applyConfiguredTheme();
         if (desktopCountdown_) desktopCountdown_->reloadConfig();
@@ -156,11 +173,9 @@ bool AppComposer::initInstances()
     });
     connect(cloud_.get(), &CloudSyncService::cloudProfileSwitchRequested, this,
             [this](const QString& id) { switchProfile(id); });
-    connect(cloud_.get(), &CloudSyncService::notification, this,
-            [this](const QString& title, const QString& message) {
-                Logger::instance().log(Logger::Level::Warning, title + QStringLiteral(": ") + message);
-                if (courseBar) courseBar->showNotification(title + QStringLiteral(": ") + message);
-            });
+    connect(cloud_.get(), &CloudSyncService::managedNotification, this, [this](const QString& message) {
+        if (trayMenu_) trayMenu_->showManagedNotification(message);
+    });
     connect(cloud_.get(), &CloudSyncService::cloudProfileUpdated, this, [this] {
         if (settingsWindow_) settingsWindow_->refreshProfiles();
     });
@@ -201,7 +216,7 @@ bool AppComposer::initInstances()
         QString cloudError;
         if (!cloud_->start(&cloudError))
             Logger::instance().log(Logger::Level::Warning,
-                                   tr("集控同步未启用：%1").arg(cloudError));
+                                   QStringLiteral("Could not start cloud sync: %1").arg(cloudError));
     }
     cleanupDateOverrides();
     dateCleanupTimer_ = new QTimer(this);
@@ -249,9 +264,9 @@ void AppComposer::dropInstances()
     desktopCountdown_.reset();
     QString error;
     if (!ConfigManager::instance().save(&error))
-        Logger::instance().log(Logger::Level::Error, QStringLiteral("配置保存失败：%1").arg(error));
+        Logger::instance().log(Logger::Level::Error, QStringLiteral("Could not save configuration: %1").arg(error));
     if (!ProfileManager::instance().save(&error))
-        Logger::instance().log(Logger::Level::Error, QStringLiteral("档案保存失败：%1").arg(error));
+        Logger::instance().log(Logger::Level::Error, QStringLiteral("Could not save profile: %1").arg(error));
     Logger::instance().log(Logger::Level::Info, "AppComposer dropped, Application will be stopped");
     Logger::instance().flush();
 }
@@ -465,7 +480,8 @@ void AppComposer::cleanupDateOverrides()
     QList<QDate> canceled;
     if (!manager.cleanPastDateOverrides(today, &error, &canceled)) {
         if (error != lastCleanupError_) {
-            Logger::instance().log(Logger::Level::Warning, tr("日期安排清理失败，将重试：%1").arg(error));
+            Logger::instance().log(Logger::Level::Warning,
+                                   QStringLiteral("Could not clean up date overrides. Will retry: %1").arg(error));
             Logger::instance().flush(); lastCleanupError_ = error;
         }
         return;
@@ -514,10 +530,11 @@ bool AppComposer::prepareToExit(int exitCode)
 {
     if (restartPreparing_ || restartAccepted_) return false;
     if (plugins_ && plugins_->publishing()) {
-        QMessageBox::information(agentWindow_.get(), tr("正在发布插件"), tr("请等待插件发布完成后再退出或重启。"));
+        if (!silentManagedRestart_)
+            QMessageBox::information(agentWindow_.get(), tr("正在发布插件"), tr("请等待插件发布完成后再退出或重启。"));
         return false;
     }
-    if(pluginUi_ && !pluginExitGuardReady_) {
+    if(pluginUi_ && !pluginExitGuardReady_ && !silentManagedRestart_) {
         if(pluginExitGuardPending_) return false;
         pluginExitGuardPending_=true;
         const auto profileRequest=pendingProfileId_;
@@ -547,14 +564,16 @@ bool AppComposer::prepareToExit(int exitCode)
     if (plugins_) plugins_->setWritesBlocked(true);
     auto resumePlugins = qScopeGuard([this, &exitAccepted] { if (!exitAccepted && plugins_) plugins_->setWritesBlocked(false); });
     if (profileEditorWindow_ && profileEditorWindow_->session()->isDirty()) {
+        if (silentManagedRestart_) return false;
         showProfileEditorWindow();
         if (!profileEditorWindow_->prepareToClose()) return false;
     }
     const bool restarting = exitCode == TaskbarTrayMenu::RestartExitCode;
     if (pendingProfileId_.isEmpty() && !pendingUiAccess_ && (!restarting || !prepareRestart_)) { exitAccepted = true; return true; }
     QString error;
-    auto report = [this](const QString& message) {
-        Logger::instance().log(Logger::Level::Error, message);
+    auto report = [this, &error](const QString& logMessage, const QString& message) {
+        Logger::instance().log(Logger::Level::Error, QStringLiteral("%1: %2").arg(logMessage, error));
+        if (silentManagedRestart_) return;
         if (pendingUiAccess_) QMessageBox::warning(settingsWindow_.get(), tr("增强置顶切换失败"), message);
         else if (settingsWindow_) settingsWindow_->showProfileError(message);
         else if (trayMenu_) trayMenu_->showScheduleError(message);
@@ -563,7 +582,8 @@ bool AppComposer::prepareToExit(int exitCode)
     if (!pendingProfileId_.isEmpty()) {
         Profile target;
         if (!ProfileManager::instance().readProfile(pendingProfileId_, target, &error)) {
-            report(tr("切换失败，目标档案无法读取：%1").arg(error));
+            report(QStringLiteral("Could not read the target profile for switching"),
+                   tr("切换失败，目标档案无法读取：%1").arg(error));
             return false;
         }
         candidate.profileName = pendingProfileId_;
@@ -575,23 +595,51 @@ bool AppComposer::prepareToExit(int exitCode)
     }
     if (restarting && prepareRestart_) {
         if (!ProfileManager::instance().save(&error)) {
-            report(tr("重启失败，档案保存失败：%1").arg(error));
+            report(QStringLiteral("Could not save the profile before restart"),
+                   tr("重启失败，档案保存失败：%1").arg(error));
             return false;
         }
         if (!prepareRestart_(candidate, dataDirectory_, &error)) {
             if (cancelRestart_) cancelRestart_();
-            report(error);
+            report(QStringLiteral("Could not prepare the application restart"), error);
             return false;
         }
     }
     if (!ConfigManager::instance().commit(candidate, &error)) {
         if (cancelRestart_) cancelRestart_();
-        report(tr("切换失败，配置保存失败：%1").arg(error));
+        report(QStringLiteral("Could not save configuration for switching"),
+               tr("切换失败，配置保存失败：%1").arg(error));
         return false;
     }
     restartAccepted_ = restarting && bool(prepareRestart_);
     exitAccepted = true;
     return true;
+}
+
+QString AppComposer::managedExitBlockReason() const
+{
+    if (!initialized_ || !trayMenu_ || exitAccepted_ || restartPreparing_ || pluginExitGuardPending_)
+        return tr("客户端正在处理另一项操作");
+    if ((profileEditorWindow_ && profileEditorWindow_->session()->isDirty()) ||
+        (plugins_ && plugins_->publishing()))
+        return tr("有未保存的档案编辑或正在发布插件");
+    if (pluginUi_) {
+        if (pluginUi_->guarding()) return tr("插件正在处理未保存的编辑");
+        for (const auto& value : pluginUi_->snapshots())
+            if (value.toObject().value(QStringLiteral("dirty")).toBool())
+                return tr("插件有未保存的编辑");
+    }
+    return {};
+}
+
+QString AppComposer::managedRestart(const QString& profileId)
+{
+    const auto reason = managedExitBlockReason();
+    if (!reason.isEmpty()) return reason;
+    const QScopedValueRollback<bool> silent(silentManagedRestart_, true);
+    const QScopedValueRollback<QString> target(pendingProfileId_, profileId);
+    trayMenu_->requestExit(TaskbarTrayMenu::RestartExitCode);
+    return exitAccepted_ ? QString() : tr("客户端未能准备重启，详见设备日志");
 }
 
 void AppComposer::selectWeekSchedule(const QString& id)

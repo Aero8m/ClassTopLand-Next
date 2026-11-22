@@ -38,6 +38,32 @@ const char* levelColor(Logger::Level level)
     return "\x1b[0m";
 }
 
+bool isStandardStream(const std::ostream& stream)
+{
+    return &stream == &std::cout || &stream == &std::cerr || &stream == &std::clog;
+}
+
+std::string escapeNonAscii(std::string_view text)
+{
+    constexpr char hex[] = "0123456789ABCDEF";
+    const QString decoded = QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
+    std::string escaped;
+    escaped.reserve(text.size());
+    for (const QChar character : decoded) {
+        const auto value = character.unicode();
+        if (value <= 0x7f) {
+            escaped += static_cast<char>(value);
+        } else {
+            escaped += "\\u";
+            escaped += hex[(value >> 12) & 0xf];
+            escaped += hex[(value >> 8) & 0xf];
+            escaped += hex[(value >> 4) & 0xf];
+            escaped += hex[value & 0xf];
+        }
+    }
+    return escaped;
+}
+
 bool prepareColor(std::ostream& stream)
 {
 #ifdef _WIN32
@@ -151,7 +177,12 @@ bool Logger::writeToOutputs(std::string_view plain, std::string_view colored)
     for (const Output& output : outputs_) {
         const std::string_view record = output.enableColor ? colored : plain;
         try {
-            if (!record.empty()) {
+            // Paths, labels and external error details can contain non-ASCII text.
+            if (isStandardStream(*output.stream) &&
+                std::any_of(record.begin(), record.end(), [](unsigned char c) { return c > 0x7f; })) {
+                const std::string escaped = escapeNonAscii(record);
+                output.stream->write(escaped.data(), static_cast<std::streamsize>(escaped.size()));
+            } else if (!record.empty()) {
                 output.stream->write(record.data(), static_cast<std::streamsize>(record.size()));
             }
             if (!*output.stream) success = false;

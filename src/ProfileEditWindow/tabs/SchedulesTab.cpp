@@ -30,7 +30,7 @@ SchedulesTab::SchedulesTab(ProfileEditSession* session, QWidget* parent) : ElaSc
     auto* layout = page(this, tr("课表管理"));
     auto* settings = card(layout);
     settings->addWidget(text(tr("周课表")));
-    weeks_ = new ElaComboBox; weeks_->setFixedHeight(38); weeks_->setAccessibleName(tr("周课表")); settings->addWidget(weeks_);
+    weeks_ = new ElaComboBox; weeks_->setAccessibleName(tr("周课表")); settings->addWidget(weeks_);
     weeks_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     auto* weekActions = new QHBoxLayout;
     auto* create = button(tr("新增课表"), nullptr, true);
@@ -39,7 +39,7 @@ SchedulesTab::SchedulesTab(ProfileEditSession* session, QWidget* parent) : ElaSc
     weekActions->addStretch(); weekActions->addWidget(mode_); settings->addLayout(weekActions);
     auto* courses = card(layout);
     auto* days = new QHBoxLayout;
-    weekdays_ = new ElaComboBox; weekdays_->addItems(dayNames()); weekdays_->setMinimumWidth(120); weekdays_->setFixedHeight(38);
+    weekdays_ = new ElaComboBox; weekdays_->addItems(dayNames()); weekdays_->setMinimumWidth(120);
     weekdays_->setAccessibleName(tr("适用星期"));
     dayName_ = text({}); editDay_ = button(tr("编辑日课表")); removeDay_ = button(tr("移除星期"));
     dayName_->setIsWrapAnywhere(true);
@@ -58,7 +58,7 @@ SchedulesTab::SchedulesTab(ProfileEditSession* session, QWidget* parent) : ElaSc
     table_ = table(courses, {tr("序号"), tr("科目"), tr("开始时间"), tr("结束时间")}, model_);
     auto* timeLines = card(layout, tr("应用时间线"));
     auto* lineActions = new QHBoxLayout;
-    lines_ = new ElaComboBox; lines_->setFixedHeight(38); lines_->setAccessibleName(tr("时间线"));
+    lines_ = new ElaComboBox; lines_->setAccessibleName(tr("时间线"));
     lines_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     apply_ = button(tr("应用到当天")); lineActions->addWidget(lines_, 1); lineActions->addWidget(apply_); timeLines->addLayout(lineActions);
     layout->addStretch();

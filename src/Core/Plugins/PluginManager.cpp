@@ -113,7 +113,8 @@ void PluginManager::start()
         candidate.pluginConfig.recoveryNextStart = false;
         QString error;
         if (!ConfigManager::instance().commit(candidate, &error))
-            Logger::instance().log(Logger::Level::Warning, error);
+            Logger::instance().log(Logger::Level::Warning,
+                                   QStringLiteral("Could not clear plugin recovery mode: %1").arg(error));
     }
     scan();
     courses_->start();

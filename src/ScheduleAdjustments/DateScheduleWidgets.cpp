@@ -9,6 +9,7 @@
 #include <ElaScrollBar.h>
 #include <ElaText.h>
 #include <ElaTheme.h>
+#include <ElaWidgetToolsDef.h>
 #include <QButtonGroup>
 #include <QCloseEvent>
 #include <QEvent>
@@ -63,7 +64,7 @@ private:
 };
 
 namespace {
-constexpr int courseRowHeight = 38;
+constexpr int courseRowHeight = ElaWidgetToolsSize::DefaultListItemHeight;
 
 const QStringList dayNames = {QStringLiteral("周一"), QStringLiteral("周二"), QStringLiteral("周三"),
     QStringLiteral("周四"), QStringLiteral("周五"), QStringLiteral("周六"), QStringLiteral("周日")};
@@ -94,7 +95,6 @@ void fillSources(ElaComboBox* combo, const Profile& profile, const QString& pref
 ElaPushButton* action(const QString& text, QWidget* parent, bool primary = false)
 {
     auto* button = new ElaPushButton(text, parent);
-    button->setFixedHeight(38);
     button->setMinimumWidth(76);
     button->setBorderRadius(6);
     if (primary) AppUi::primary(button);
@@ -252,7 +252,6 @@ FutureDatePicker::FutureDatePicker(QWidget* parent) : ElaCalendarPicker(parent)
     setMinimumWidth(0);
     setMaximumWidth(QWIDGETSIZE_MAX);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    setFixedHeight(38);
     setBorderRadius(6);
     setFocusPolicy(Qt::StrongFocus);
     setAccessibleName(tr("目标日期"));
@@ -332,7 +331,6 @@ RescheduleWindow::RescheduleWindow(QWidget* parent) : ElaDialog(parent)
     source_ = new ElaComboBox(content);
     source_->setObjectName(QStringLiteral("rescheduleSource"));
     source_->setAccessibleName(tr("来源周课表"));
-    source_->setFixedHeight(38);
     auto* dateLabel = AppUi::text(tr("目标日期"), content);
     dateLabel->setWordWrap(false); dateLabel->setBuddy(date_);
     auto* sourceLabel = AppUi::text(tr("来源课表"), content);
@@ -352,7 +350,6 @@ RescheduleWindow::RescheduleWindow(QWidget* parent) : ElaDialog(parent)
     days->setSpacing(4);
     for (int i = 0; i < 7; ++i) {
         auto* button = action(dayNames[i], content);
-        button->setFixedHeight(36);
         button->setMinimumWidth(0);
         button->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
         button->setCheckable(true);
@@ -465,7 +462,6 @@ SwapClassesWindow::SwapClassesWindow(QWidget* parent) : ElaWidget(parent)
     pivot_->setTextPixelSize(16);
     pivot_->appendPivot(tr("换课"));
     pivot_->appendPivot(tr("代课"));
-    pivot_->setFixedHeight(40);
     pivotLayout->addWidget(pivot_);
     root->addWidget(pivotPanel);
     auto* scroll = new ElaScrollArea(this);
@@ -500,7 +496,6 @@ SwapClassesWindow::SwapClassesWindow(QWidget* parent) : ElaWidget(parent)
         auto* heading = AppUi::text(title, panel, 18);
         heading->setWordWrap(false);
         side.restore = action(tr("恢复此日期安排"), panel);
-        side.restore->setFixedHeight(32);
         side.restore->setObjectName(prefix + QStringLiteral("Restore"));
         side.restore->setToolTip(tr("清除此日期全部调休、换课和代课安排，另一日期的安排继续保留。"));
         headingRow->addWidget(heading, 1);
@@ -520,7 +515,6 @@ SwapClassesWindow::SwapClassesWindow(QWidget* parent) : ElaWidget(parent)
         side.source = new ElaComboBox(panel);
         side.source->setObjectName(prefix + QStringLiteral("Source"));
         side.source->setAccessibleName(title + tr("周课表"));
-        side.source->setFixedHeight(38);
         side.source->setMinimumWidth(0);
         side.source->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
         dateRow->addWidget(side.source, 1);

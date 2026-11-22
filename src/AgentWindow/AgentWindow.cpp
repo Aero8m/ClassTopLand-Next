@@ -9,10 +9,12 @@
 #include <ElaPlainTextEdit.h>
 #include <ElaPushButton.h>
 #include <ElaScrollArea.h>
+#include <ElaScrollBar.h>
 #include <ElaScrollPageArea.h>
 #include <ElaText.h>
 #include <ElaTheme.h>
 #include <ElaToolButton.h>
+#include <ElaWidgetToolsDef.h>
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
@@ -31,6 +33,7 @@
 #include <QTextBlock>
 #include <QTextDocument>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 #include <algorithm>
 #include <utility>
 
@@ -38,6 +41,8 @@ namespace
 {
 using namespace Qt::StringLiterals;
 using Permission = AgentService::Permission;
+constexpr int controlHeight = ElaWidgetToolsSize::DefaultControlHeight;
+constexpr qsizetype inlineMarkdownLimit = 24 * 1024;
 
 QString pageKey(const QWidget *page) { return page->property("ElaPageKey").toString(); }
 QString workspaceName(const QString &path)
@@ -53,11 +58,11 @@ QColor chatBackground(ElaThemeType::ThemeMode mode)
 
 QString reasoningPreview(const QString &text)
 {
-    constexpr qsizetype limit = 24 * 1024;
-    if (text.size() <= limit) return text;
-    auto head = text.left(limit);
+    if (text.size() <= inlineMarkdownLimit) return text;
+    const auto suffix = u"\n\n…（仅显示前 24 Ki 字符）"_s;
+    auto head = text.left(inlineMarkdownLimit - suffix.size());
     if (head.at(head.size() - 1).isHighSurrogate()) head.chop(1);
-    return head + u"\n\n…（仅显示前 24 Ki 字符）"_s;
+    return head + suffix;
 }
 
 QString permissionLabel(Permission permission)
@@ -146,7 +151,7 @@ class ActivityButton final : public ElaToolButton
 public:
     explicit ActivityButton(QWidget *parent) : ElaToolButton(parent)
     {
-        setFixedHeight(27);
+        setFixedHeight(controlHeight);
         setCursor(Qt::PointingHandCursor);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         connect(eTheme, &ElaTheme::themeModeChanged, this, [this] { update(); });
@@ -200,7 +205,7 @@ public:
         copy_ = new ElaToolButton(input_);
         copy_->setText(u"复制"_s);
         copy_->setToolTip(u"复制完整原始命令"_s);
-        copy_->setFixedSize(44, 26);
+        copy_->setFixedSize(44, controlHeight);
         heading->addWidget(copy_, 0, Qt::AlignTop);
         inputLayout->addLayout(heading);
         command_ = new QLabel(input_);
@@ -329,7 +334,7 @@ class SendButton final : public ElaToolButton
 public:
     explicit SendButton(QWidget *parent) : ElaToolButton(parent)
     {
-        setFixedSize(32, 32);
+        setFixedSize(controlHeight, controlHeight);
         setCursor(Qt::PointingHandCursor);
         connect(eTheme, &ElaTheme::themeModeChanged, this, [this] { update(); });
     }
@@ -352,15 +357,18 @@ protected:
         painter.setRenderHint(QPainter::Antialiasing);
         painter.setPen(Qt::NoPen);
         painter.setBrush(fill);
-        painter.drawEllipse(QRectF(rect()).adjusted(1, 1, -1, -1));
+        const QRectF bounds(rect());
+        const QPointF center = bounds.center();
+        painter.drawEllipse(bounds.adjusted(1, 1, -1, -1));
         painter.setPen(QPen(ink, 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         if (property("stopping").toBool()) {
             painter.setBrush(ink);
-            painter.drawRoundedRect(QRectF(11, 11, 10, 10), 1, 1);
+            painter.drawRoundedRect(QRectF(center - QPointF(5, 5), QSizeF(10, 10)), 1, 1);
         } else {
-            painter.drawLine(QPointF(16, 22), QPointF(16, 10));
-            painter.drawLine(QPointF(11, 15), QPointF(16, 10));
-            painter.drawLine(QPointF(16, 10), QPointF(21, 15));
+            const QPointF tip = center - QPointF(0, 6);
+            painter.drawLine(tip, center + QPointF(0, 6));
+            painter.drawLine(tip, center - QPointF(5, 1));
+            painter.drawLine(tip, center + QPointF(5, -1));
         }
         if (hasFocus()) {
             painter.setPen(QPen(ElaThemeColor(eTheme->getThemeMode(), BasicText), 1, Qt::DotLine));
@@ -377,7 +385,7 @@ public:
     {
         setIsTransparent(true);
         setAutoFillBackground(false);
-        setFixedSize(30, 30);
+        setFixedSize(controlHeight, controlHeight);
         setCursor(Qt::PointingHandCursor);
         connect(eTheme, &ElaTheme::themeModeChanged, this, [this] { update(); });
     }
@@ -541,11 +549,10 @@ protected:
 
 void setMarkdown(ElaText *label, const QString &text)
 {
-    constexpr qsizetype inlineLimit = 24 * 1024;
     label->setProperty("sourceMarkdown", text);
     if (auto *full = label->parentWidget()->findChild<ElaToolButton *>(u"agentFullMessage"_s))
-        full->setVisible(text.size() > inlineLimit);
-    auto preview = text.left(inlineLimit);
+        full->setVisible(text.size() > inlineMarkdownLimit);
+    auto preview = text.left(inlineMarkdownLimit);
     if (!preview.isEmpty() && preview.at(preview.size() - 1).isHighSurrogate()) preview.chop(1);
     if (label->property("renderedPreview").toString() == preview && label->property("hasPreview").toBool()) return;
     label->setProperty("renderedPreview", preview);
@@ -602,7 +609,7 @@ ElaToolButton *iconButton(ElaIconType::IconName icon, const QString &text, QWidg
     button->setElaIcon(icon);
     button->setToolTip(text);
     button->setAccessibleName(text);
-    button->setFixedSize(34, 34);
+    button->setFixedSize(controlHeight, controlHeight);
     return button;
 }
 
@@ -612,7 +619,7 @@ ElaToolButton *composerButton(QWidget *parent, bool access = false)
     button->setToolButtonStyle(Qt::ToolButtonTextOnly);
     button->setIsTransparent(true);
     button->setBorderRadius(12);
-    button->setFixedHeight(32);
+    button->setFixedHeight(controlHeight);
     button->setCursor(Qt::PointingHandCursor);
     return button;
 }
@@ -628,6 +635,126 @@ ElaText *messageLabel(QWidget *parent, int size = 14)
     return label;
 }
 }
+
+class AgentScrollArea : public ElaScrollArea
+{
+public:
+    explicit AgentScrollArea(QWidget *parent) : ElaScrollArea(parent)
+    {
+        setWidgetResizable(true);
+        setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        setFrameShape(QFrame::NoFrame);
+        viewport()->setAutoFillBackground(false);
+        AppUi::enableTouchScrolling(this);
+
+        auto *bar = static_cast<ElaScrollBar *>(verticalScrollBar());
+        // Range changes stop Ela's wheel animation, so apply wheel input immediately during streaming.
+        bar->setIsSmoothScroll(false);
+        connect(bar, &QScrollBar::rangeChanged, this, [this] { scheduleFollow(); });
+        connect(bar, &QScrollBar::valueChanged, this, [this, bar](int value) {
+            // A shrinking range can clamp the position without user input.
+            if (!restoringPosition_ && lastPosition_ <= bar->maximum())
+                followingEnd_ = value == bar->maximum();
+            lastPosition_ = value;
+        });
+    }
+
+    void scrollToEnd()
+    {
+        followingEnd_ = true;
+        auto *bar = verticalScrollBar();
+        bar->setValue(bar->maximum());
+        scheduleFollow();
+    }
+
+    void restorePosition(int position)
+    {
+        if (followingEnd_) return;
+        QTimer::singleShot(0, this, [this, position] {
+            if (followingEnd_) return;
+            const QScopedValueRollback restoring(restoringPosition_, true);
+            verticalScrollBar()->setValue(position);
+        });
+    }
+
+protected:
+    void wheelEvent(QWheelEvent *event) override
+    {
+        if (event->pixelDelta().isNull()) {
+            ElaScrollArea::wheelEvent(event);
+            return;
+        }
+        auto *bar = verticalScrollBar();
+        const int position = bar->value();
+        bar->setValue(position - event->pixelDelta().y());
+        event->setAccepted(bar->value() != position);
+    }
+
+private:
+    void scheduleFollow()
+    {
+        if (!followingEnd_ || followScheduled_) return;
+        followScheduled_ = true;
+        QTimer::singleShot(0, this, [this] {
+            followScheduled_ = false;
+            if (!followingEnd_) return;
+            auto *bar = verticalScrollBar();
+            bar->setValue(bar->maximum());
+        });
+    }
+
+    int lastPosition_ = 0;
+    bool followingEnd_ = true;
+    bool followScheduled_ = false;
+    bool restoringPosition_ = false;
+};
+
+class ReasoningScrollArea final : public AgentScrollArea
+{
+public:
+    explicit ReasoningScrollArea(QWidget *parent) : AgentScrollArea(parent)
+    {
+        setObjectName(u"agentReasoningView"_s);
+        setStyleSheet(u"#agentReasoningView { background: transparent; border: none; }"_s);
+        text_ = messageLabel(this, 13);
+        text_->setTextFormat(Qt::RichText);
+        text_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        setWidget(text_);
+        text_->setAutoFillBackground(false);
+    }
+
+    void setProcessText(const QString &text)
+    {
+        setMarkdown(text_, text);
+        updateHeight();
+    }
+
+    void refreshTheme(const QString &text)
+    {
+        text_->setProperty("hasPreview", false);
+        setProcessText(text);
+    }
+
+protected:
+    void resizeEvent(QResizeEvent *event) override
+    {
+        AgentScrollArea::resizeEvent(event);
+        updateHeight();
+    }
+
+private:
+    void updateHeight()
+    {
+        constexpr int maximumHeight = 200;
+        // Measure at the full width to see whether the scrollbar is needed.
+        const int width = maximumViewportSize().width();
+        const int height = qBound(0, text_->heightForWidth(width), maximumHeight);
+        if (minimumHeight() != height) setFixedHeight(height);
+    }
+
+    ElaText *text_;
+};
 
 AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
     : ElaWindow(parent), service_(service), pendingWorkspace_(service->defaultWorkspace()),
@@ -678,14 +805,9 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
     notice_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     notice_->hide();
     layout->addWidget(notice_);
-    scroll_ = new ElaScrollArea(chat_);
+    scroll_ = new AgentScrollArea(chat_);
     scroll_->setObjectName(u"agentConversationScroll"_s);
     scroll_->setStyleSheet(u"#agentConversationScroll { background: transparent; border: none; }"_s);
-    scroll_->setWidgetResizable(true);
-    scroll_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    scroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    scroll_->setFrameShape(QFrame::NoFrame);
-    scroll_->viewport()->setAutoFillBackground(false);
     auto *conversation = new QWidget(scroll_);
     messages_ = new QVBoxLayout(conversation);
     messages_->setContentsMargins(4, 12, 8, 16);
@@ -694,12 +816,6 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
     scroll_->setWidget(conversation);
     conversation->setAutoFillBackground(false);
     auto *scrollBar = scroll_->verticalScrollBar();
-    connect(scrollBar, &QScrollBar::rangeChanged, this,
-            [this, scrollBar, previousMaximum = 0](int, int maximum) mutable {
-        if (previousMaximum - scrollBar->value() < 52) followEnd();
-        previousMaximum = maximum;
-    });
-    AppUi::enableTouchScrolling(scroll_);
     layout->addWidget(scroll_, 1);
     latest_ = new LatestButton(scroll_->viewport());
     latest_->setObjectName(u"agentLatest"_s);
@@ -707,10 +823,7 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
     latest_->setAccessibleName(u"回到最新消息"_s);
     scroll_->viewport()->installEventFilter(this);
     latest_->hide();
-    connect(latest_, &ElaToolButton::clicked, this, [this] {
-        scroll_->verticalScrollBar()->setValue(scroll_->verticalScrollBar()->maximum());
-        followEnd();
-    });
+    connect(latest_, &ElaToolButton::clicked, scroll_, &AgentScrollArea::scrollToEnd);
     const auto updateLatest = [this, scrollBar] {
         positionLatest();
         latest_->setVisible(scrollBar->maximum() - scrollBar->value() > 120);
@@ -722,7 +835,7 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
     auto *composer = new ComposerArea(chat_);
     composer->setObjectName(u"agentComposer"_s);
     auto *composerLayout = new QVBoxLayout(composer);
-    composerLayout->setContentsMargins(12, 12, 10, 8);
+    composerLayout->setContentsMargins(12, 12, 10, 10);
     composerLayout->setSpacing(8);
     input_ = new ElaPlainTextEdit(composer);
     input_->setObjectName(u"agentInput"_s);
@@ -762,7 +875,7 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
     options->addWidget(permission_);
     options->addStretch();
     options->addWidget(model_);
-    options->addWidget(send_);
+    options->addWidget(send_, 0, Qt::AlignVCenter);
     composerLayout->addLayout(options);
     layout->addWidget(composer);
     pageLayout->addWidget(chat_);
@@ -818,12 +931,10 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
     connect(service_, &AgentService::busyChanged, this, [this](bool busy) {
         const auto *current = service_->session(session_);
         if (busy && service_->activeSession() == session_ && current && current->events.isEmpty()) render();
-        if (!busy && (!toolCards_.isEmpty() || streamLabel_ || !stream_.isEmpty() || reasoningHeader_ || !reasoning_.isEmpty())) {
-            auto *bar = scroll_->verticalScrollBar();
-            const int position = bar->value();
-            const bool atEnd = bar->maximum() - position < 52;
-            render();
-            if (!atEnd) QTimer::singleShot(0, bar, [bar, position] { bar->setValue(position); });
+        if (!busy) {
+            if (streamLabel_ || !stream_.isEmpty() || reasoningHeader_ || !reasoning_.isEmpty())
+                render(false);
+            toolCards_.clear();
         }
         refreshControls();
     });
@@ -950,8 +1061,9 @@ void AgentWindow::refreshControls()
     send_->setEnabled(active || (!busy && !connection.id.isEmpty()));
 }
 
-void AgentWindow::render()
+void AgentWindow::render(bool resetScroll)
 {
+    const int scrollPosition = scroll_->verticalScrollBar()->value();
     streamTimer_.stop();
     streamLabel_ = nullptr;
     if (approvalLayer_) {
@@ -961,7 +1073,6 @@ void AgentWindow::render()
         approvalCard_ = nullptr;
     }
     reasoningScroll_ = nullptr;
-    reasoningText_ = nullptr;
     reasoningHeader_ = nullptr;
     resetActivities();
     reasoning_.clear();
@@ -1004,14 +1115,15 @@ void AgentWindow::render()
     stream_ = active ? service_->liveText() : QString();
     reasoning_ = active ? service_->liveReasoning() : QString();
     flushReasoning();
-    if (!stream_.isEmpty()) flushStream();
+    flushStream();
     if ((!item || item->events.isEmpty()) && !active)
         addMessage(u"welcome"_s, pendingModel_.id.isEmpty()
             ? u"在「设置 → AI Agent」配置供应商和模型后开始对话。"_s
             : u"可以直接提问，也可以在对话中使用系统工具和开发应用插件。"_s);
     if (!service_->draftName(session_).isEmpty() && item && item->events.isEmpty())
         addMessage(u"draft"_s, u"当前会话已有插件草稿"_s);
-    followEnd();
+    if (resetScroll) scroll_->scrollToEnd();
+    else scroll_->restorePosition(scrollPosition);
 }
 
 void AgentWindow::addEvent(const QJsonObject &event)
@@ -1078,16 +1190,15 @@ void AgentWindow::addEvent(const QJsonObject &event)
     if (kind == "reasoning"_L1) {
         const auto process = service_->reasoningText(session_, event.value(u"reasoningId"_s).toString());
         if (reasoningHeader_) {
+            const auto preview = reasoningPreview(process);
             reasoningHeader_->setText(text);
-            reasoningHeader_->setProperty("processText", process);
-            if (reasoningText_ && reasoningText_->isVisible())
-                setMarkdown(reasoningText_, reasoningPreview(process));
+            reasoningHeader_->setProperty("processText", preview);
+            if (reasoningHeader_->isChecked()) reasoningScroll_->setProcessText(preview);
         } else {
             addReasoning(process, text);
         }
         reasoning_.clear();
         reasoningHeader_ = nullptr;
-        reasoningText_ = nullptr;
         reasoningScroll_ = nullptr;
         return;
     }
@@ -1132,7 +1243,6 @@ void AgentWindow::addRow(QWidget *card, bool right)
 
 void AgentWindow::resetActivities()
 {
-    if (activityHeader_) activityHeader_->setChecked(false);
     activities_ = activityItems_ = nullptr;
     activityHeader_ = nullptr;
     activityLayout_ = nullptr;
@@ -1180,8 +1290,6 @@ void AgentWindow::addActivity(QWidget *widget)
 void AgentWindow::addMessage(const QString &kind, const QString &text, bool final)
 {
     if (kind == u"assistant"_s) resetActivities();
-    const auto *bar = scroll_->verticalScrollBar();
-    const bool follow = bar->maximum() - bar->value() < 52;
     if (kind == "plan"_L1) {
         auto *card = new QWidget(scroll_->widget());
         card->setProperty("activitySummary", u"更新任务步骤"_s);
@@ -1201,7 +1309,6 @@ void AgentWindow::addMessage(const QString &kind, const QString &text, bool fina
         steps->hide();
         connect(header, &ElaToolButton::toggled, steps, &QWidget::setVisible);
         addActivity(card);
-        if (follow) followEnd();
         return;
     }
     if (kind == "tool"_L1) {
@@ -1212,7 +1319,6 @@ void AgentWindow::addMessage(const QString &kind, const QString &text, bool fina
         row->setToolTip(text);
         row->setElaIcon(ElaIconType::Code);
         addActivity(row);
-        if (follow) followEnd();
         return;
     }
     const bool user = kind == "user"_L1;
@@ -1279,7 +1385,6 @@ void AgentWindow::addMessage(const QString &kind, const QString &text, bool fina
     }
     if (kind == "draft"_L1) addActivity(card);
     else addRow(card, user);
-    if (follow) followEnd();
 }
 
 void AgentWindow::addFinalCopy(ElaText *content)
@@ -1290,7 +1395,6 @@ void AgentWindow::addFinalCopy(ElaText *content)
     if (!actions) return;
     auto *copy = iconButton(ElaIconType::Copy, u"复制最终答复"_s, card);
     copy->setObjectName(u"agentFinalCopy"_s);
-    copy->setFixedSize(26, 26);
     actions->insertWidget(0, copy);
     connect(copy, &ElaToolButton::clicked, card, [content] {
         QApplication::clipboard()->setText(content->property("sourceMarkdown").toString());
@@ -1306,8 +1410,6 @@ void AgentWindow::positionLatest()
 void AgentWindow::updateTool(const QJsonObject &event)
 {
     const auto id = event.value(u"id"_s).toString();
-    const auto *bar = scroll_->verticalScrollBar();
-    const bool follow = bar->maximum() - bar->value() < 52;
     if (!toolCards_.contains(id)) {
         auto *card = new QWidget(scroll_->widget());
         card->setProperty("activitySummary", toolLabel(event.value(u"name"_s).toString()));
@@ -1375,17 +1477,13 @@ void AgentWindow::updateTool(const QJsonObject &event)
         approvalLayer_ = nullptr;
         approvalCard_ = nullptr;
     }
-    if (follow) followEnd();
 }
 
 void AgentWindow::flushStream()
 {
     if (stream_.isEmpty()) return;
-    const auto *bar = scroll_->verticalScrollBar();
-    const bool follow = bar->maximum() - bar->value() < 52;
     if (!streamLabel_) addMessage(u"assistant"_s, {});
     setMarkdown(streamLabel_, stream_);
-    if (follow) followEnd();
 }
 
 void AgentWindow::addReasoning(const QString &text, const QString &status)
@@ -1400,58 +1498,21 @@ void AgentWindow::addReasoning(const QString &text, const QString &status)
     reasoningHeader_->setObjectName(u"agentReasoning"_s);
     reasoningHeader_->setCheckable(true);
     reasoningHeader_->setElaIcon(ElaIconType::Clock);
-    reasoningHeader_->setProperty("processText", text);
+    reasoningHeader_->setProperty("processText", reasoningPreview(text));
     reasoningHeader_->setEnabled(!text.isEmpty());
     reasoningHeader_->setToolTip(text.isEmpty() ? u"思考过程仅在本次运行期间可用"_s : u"展开或收起模型返回的思考过程"_s);
     layout->addWidget(reasoningHeader_);
-    auto *details = new QWidget(card);
-    auto *body = new QVBoxLayout(details);
-    body->setContentsMargins(0, 0, 0, 0);
-    reasoningScroll_ = new ElaScrollArea(details);
-    reasoningScroll_->setObjectName(u"agentReasoningView"_s);
-    reasoningScroll_->setStyleSheet(u"#agentReasoningView { background: transparent; border: none; }"_s);
-    reasoningScroll_->setWidgetResizable(true);
-    reasoningScroll_->setFrameShape(QFrame::NoFrame);
-    reasoningScroll_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    reasoningScroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    reasoningScroll_->setFixedHeight(200);
-    reasoningScroll_->viewport()->setAutoFillBackground(false);
-    auto *content = new QWidget(reasoningScroll_);
-    auto *contentLayout = new QVBoxLayout(content);
-    contentLayout->setContentsMargins(0, 0, 0, 0);
-    contentLayout->setSpacing(0);
-    reasoningText_ = messageLabel(content, 13);
-    reasoningText_->setIsWrapAnywhere(false);
-    reasoningText_->setWordWrap(true);
-    reasoningText_->setTextFormat(Qt::RichText);
-    reasoningText_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-    contentLayout->addWidget(reasoningText_);
-    contentLayout->addStretch();
-    reasoningScroll_->setWidget(content);
-    // QScrollArea::setWidget turns on auto-fill; without this the widget paints the
-    // system palette base (dark under Windows dark mode) behind the transparent label.
-    content->setAutoFillBackground(false);
-    reasoningText_->setAutoFillBackground(false);
-    body->addWidget(reasoningScroll_);
     auto *header = reasoningHeader_;
-    auto *view = reasoningText_;
-    auto *scroll = reasoningScroll_;
+    auto *view = new ReasoningScrollArea(card);
+    reasoningScroll_ = view;
+    view->hide();
+    layout->addWidget(view);
     connect(eTheme, &ElaTheme::themeModeChanged, view, [header, view] {
-        if (!view->isVisible()) return;
-        view->setProperty("hasPreview", false);
-        setMarkdown(view, reasoningPreview(header->property("processText").toString()));
+        if (header->isChecked()) view->refreshTheme(header->property("processText").toString());
     });
-    details->hide();
-    layout->addWidget(details);
-    connect(header, &ElaToolButton::toggled, details, [header, view, scroll, details](bool expanded) {
-        if (expanded) {
-            view->setProperty("hasPreview", false);
-            setMarkdown(view, reasoningPreview(header->property("processText").toString()));
-            QTimer::singleShot(0, scroll, [scroll] {
-                scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum());
-            });
-        }
-        details->setVisible(expanded);
+    connect(header, &ElaToolButton::toggled, view, [header, view](bool expanded) {
+        if (expanded) view->refreshTheme(header->property("processText").toString());
+        view->setVisible(expanded);
     });
     addActivity(card);
 }
@@ -1459,27 +1520,13 @@ void AgentWindow::addReasoning(const QString &text, const QString &status)
 void AgentWindow::flushReasoning()
 {
     if (reasoning_.isEmpty()) return;
-    auto *bar = scroll_->verticalScrollBar();
-    const bool follow = bar->maximum() - bar->value() < 52;
-    if (!reasoningHeader_) addReasoning(reasoning_, u"正在思考…"_s);
-    reasoningHeader_->setProperty("processText", reasoning_);
-    if (reasoningText_ && reasoningText_->isVisible() && reasoningScroll_) {
-        auto *inner = reasoningScroll_->verticalScrollBar();
-        const bool followInner = inner->maximum() - inner->value() < 24;
-        setMarkdown(reasoningText_, reasoningPreview(reasoning_));
-        if (followInner)
-            QTimer::singleShot(0, inner, [inner] { inner->setValue(inner->maximum()); });
+    if (!reasoningHeader_) {
+        addReasoning(reasoning_, u"正在思考…"_s);
+        return;
     }
-    if (follow) followEnd();
-}
-
-void AgentWindow::followEnd()
-{
-    auto *bar = scroll_->verticalScrollBar();
-    const auto previous = bar->value();
-    QTimer::singleShot(0, bar, [bar, previous] {
-        if (bar->value() >= previous - 3) bar->setValue(bar->maximum());
-    });
+    const auto preview = reasoningPreview(reasoning_);
+    reasoningHeader_->setProperty("processText", preview);
+    if (reasoningHeader_->isChecked()) reasoningScroll_->setProcessText(preview);
 }
 
 void AgentWindow::modelMenu()

@@ -28,6 +28,7 @@ public:
         QHash<QString, QString> headers;
         // Set for transport failures, oversized responses and unexpected redirects.
         QString transportError;
+        QString transportDiagnostic;
         // Server error.message from the unified error envelope, when present.
         QString message;
 
@@ -43,9 +44,12 @@ public:
     bool hasPending() const { return !replies_.isEmpty(); }
 
     void postJson(const QUrl& url, const QByteArray& bearer, const QJsonObject& body, Handler handler);
+    void postJpeg(const QUrl& url, const QByteArray& bearer, const QByteArray& body, Handler handler);
     void get(const QUrl& url, const QByteArray& bearer, Handler handler);
 
 private:
+    void post(const QUrl& url, const QByteArray& bearer, const QByteArray& body,
+              const QByteArray& contentType, int timeoutMs, Handler handler);
     void send(QNetworkReply* reply, Handler handler);
 
     QNetworkAccessManager* manager_;

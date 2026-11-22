@@ -77,6 +77,8 @@ private:
     // Hides the panel and brings an already created window to the front.
     void presentWindow(QWidget* window);
     bool prepareToExit(int exitCode);
+    QString managedRestart(const QString& profileId);
+    QString managedExitBlockReason() const;
     void syncDateAdjustments();
     QString dataDirectory_;
     QString pendingProfileId_;
@@ -86,6 +88,7 @@ private:
     std::function<void()> cancelRestart_;
     bool restartPreparing_ = false;
     bool restartAccepted_ = false;
+    bool silentManagedRestart_ = false;
     bool switchingProfile_ = false;
     bool initialized_ = false;
     bool shutdown_ = false;

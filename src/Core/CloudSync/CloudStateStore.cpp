@@ -68,6 +68,7 @@ QJsonObject toJson(const Cloud::State& state)
             {QStringLiteral("origin"), state.origin},
             {QStringLiteral("enabled"), state.enabled},
             {QStringLiteral("device_secret"), state.deviceSecret},
+            {QStringLiteral("pending_pair_secret"), state.pendingPairSecret},
             {QStringLiteral("claim_id"), state.claimId},
             {QStringLiteral("pair_code_hash"), state.pairCodeHash},
             {QStringLiteral("device_id"), state.deviceId},
@@ -77,6 +78,7 @@ QJsonObject toJson(const Cloud::State& state)
             {QStringLiteral("attempts"), attempts},
             {QStringLiteral("pending_receipts"), receipts},
             {QStringLiteral("journal"), journal},
+            {QStringLiteral("operation_journal"), state.operationJournal},
             {QStringLiteral("last_sync_at"), state.lastSyncAt.isValid()
                                                  ? state.lastSyncAt.toString(Qt::ISODate)
                                                  : QString()},
@@ -144,8 +146,13 @@ bool fromJson(const QJsonObject& root, Cloud::State& state, QString* error)
     if (!version.isDouble() || version.toInt() != kSchemaVersion)
         return fail(error, QStringLiteral("Unsupported cloud state version"));
     Cloud::State loaded;
+    const auto operation = root.value(QStringLiteral("operation_journal"));
+    if (!operation.isUndefined() && !operation.isObject())
+        return fail(error, QStringLiteral("cloud state: operation journal must be an object"));
+    loaded.operationJournal = operation.toObject();
     if (!readString(root, QStringLiteral("origin"), loaded.origin, error)) return false;
     if (!readString(root, QStringLiteral("device_secret"), loaded.deviceSecret, error)) return false;
+    if (!readString(root, QStringLiteral("pending_pair_secret"), loaded.pendingPairSecret, error)) return false;
     if (!readString(root, QStringLiteral("claim_id"), loaded.claimId, error)) return false;
     if (!readString(root, QStringLiteral("pair_code_hash"), loaded.pairCodeHash, error)) return false;
     if (!readString(root, QStringLiteral("device_id"), loaded.deviceId, error)) return false;

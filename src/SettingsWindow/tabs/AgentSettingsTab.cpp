@@ -108,6 +108,7 @@ AgentSettingsTab::AgentSettingsTab(AgentService *service, QWidget *parent)
     pages_->addWidget(makeWorkspaces());
     pages_->addWidget(makeDrafts());
     layout->addWidget(pages_, 1);
+    openProviders();
     connect(pivot_, &ElaPivot::pivotClicked, this, [this](int index) {
         if (index != 0) cancelProviderRequests();
         pages_->setCurrentIndex(index);

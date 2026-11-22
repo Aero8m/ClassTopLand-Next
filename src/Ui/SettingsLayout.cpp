@@ -4,6 +4,7 @@
 #include <ElaScrollPageArea.h>
 #include <ElaText.h>
 #include <ElaTheme.h>
+#include <ElaWidgetToolsDef.h>
 #include <QAbstractButton>
 #include <QAbstractSpinBox>
 #include <QBoxLayout>
@@ -11,6 +12,7 @@
 #include <QDateTimeEdit>
 #include <QLineEdit>
 #include <QResizeEvent>
+#include <QSlider>
 #include <QVBoxLayout>
 
 namespace AppUi {
@@ -93,6 +95,13 @@ bool SettingsRow::attachEditor(QWidget* editor)
     if (editor_ && editor_ != editor) return false;
     if (editor_ == editor) return true;
     editor_ = editor;
+    if (qobject_cast<QAbstractButton*>(editor) || qobject_cast<QLineEdit*>(editor) ||
+        qobject_cast<QComboBox*>(editor) || qobject_cast<QAbstractSpinBox*>(editor)) {
+        editor->setFixedHeight(ElaWidgetToolsSize::DefaultControlHeight);
+    } else if (const auto* slider = qobject_cast<QSlider*>(editor);
+               slider && slider->orientation() == Qt::Horizontal && slider->tickPosition() == QSlider::NoTicks) {
+        editor->setMinimumHeight(qMax(editor->minimumHeight(), ElaWidgetToolsSize::DefaultControlHeight));
+    }
     expanding_ = qobject_cast<QLineEdit*>(editor) || editor->metaObject()->className() == QByteArray("QWidget");
     editorWidth_ = expanding_ ? 240 : qobject_cast<QComboBox*>(editor) ? 180 :
         qobject_cast<QDateTimeEdit*>(editor) ? 180 : qobject_cast<QAbstractSpinBox*>(editor) ? 150 : 0;
@@ -115,8 +124,9 @@ int SettingsRow::heightForWidth(int width) const
     const int labelHeight = labels_->hasHeightForWidth() ? labels_->heightForWidth(labelWidth) : labels_->sizeHint().height();
     if (!editor_) return labelHeight;
     const int controlWidth = narrow ? width : editorWidth;
-    const int controlHeight = qMax(editor_->minimumHeight(), editor_->hasHeightForWidth() ?
-        editor_->heightForWidth(controlWidth) : editor_->sizeHint().height());
+    const int preferredHeight = editor_->hasHeightForWidth() ?
+        editor_->heightForWidth(controlWidth) : editor_->sizeHint().height();
+    const int controlHeight = qBound(editor_->minimumHeight(), preferredHeight, editor_->maximumHeight());
     return narrow ? labelHeight + 20 + controlHeight : qMax(labelHeight, controlHeight);
 }
 void SettingsRow::arrange()

@@ -208,13 +208,6 @@ bool parseDesktopCountdown(const QJsonValue& value, DesktopCountdownConfig& desk
 }
 } // namespace
 
-bool CloudDisplay::hasPluginComponent(const CourseBarConfig& config)
-{
-    for (const auto& component : config.components)
-        if (component.type == CourseBarComponentType::Plugin) return true;
-    return false;
-}
-
 bool CloudDisplay::buildConfig(const QJsonObject& payload, const Config& current, Config& result,
                                QString* error)
 {

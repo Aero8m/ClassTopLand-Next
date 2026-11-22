@@ -5,14 +5,17 @@
 #include "CloudTypes.h"
 
 #include <QHash>
+#include <QJsonArray>
 #include <QObject>
 #include <QSet>
 #include <QString>
 
 #include <array>
 #include <functional>
+#include <memory>
 
 class QTimer;
+class CloudScreen;
 
 // Device side of the CTX centralized control protocol.
 //
@@ -30,6 +33,9 @@ public:
     // profile currently being edited.
     void setProfileEditorDirty(std::function<bool()> dirty) { profileEditorDirty_ = std::move(dirty); }
     void setWindowRulesReload(std::function<bool(QString*)> reload) { windowRulesReload_ = std::move(reload); }
+    void setPluginTelemetry(std::function<QJsonArray()> read) { pluginTelemetry_ = std::move(read); }
+    void setManagedRestart(std::function<QString(const QString&)> restart) { managedRestart_ = std::move(restart); }
+    void setPowerOperationGuard(std::function<QString()> guard) { powerOperationGuard_ = std::move(guard); }
 
     // Loads the private state, takes the single-instance lock and schedules the
     // first sync. Configuration errors never abort application startup.
@@ -57,7 +63,7 @@ signals:
     // current profile, so profile lists can be refreshed.
     void cloudProfileUpdated();
     void cloudProfileSwitchRequested(const QString& profileId);
-    void notification(const QString& title, const QString& message);
+    void managedNotification(const QString& message);
 
 private:
     using Step = std::function<void()>;
@@ -65,14 +71,18 @@ private:
     void scheduleNext(int milliseconds);
     void tick();
     void beginCycle(bool manual);
-    void finishCycle(quint64 token, const QString& error, int nextDelayMs);
+    void finishCycle(quint64 token, const QString& error, int nextDelayMs, const QString& diagnostic = {});
     void setStatus(Cloud::Status status);
-    void report(const QString& message, bool notify = false);
-    void notifyOnce(const QString& key, const QString& title, const QString& message);
+    void report(const QString& message, const QString& detail = {});
 
     void resumeJournals(quint64 token, Step done);
     void flushReceipts(quint64 token, Step done);
     void doSync(quint64 token);
+    void pollOperation(quint64 token);
+    bool recoverOperation(QString* error);
+    void executeOperation(quint64 token, const QJsonObject& task);
+    void sendOperationResult(quint64 token, const QString& id, const QString& status,
+                             const QString& reason, const QString& bootId = {});
     void processNextChannel(quint64 token, int index,
                             const std::array<Cloud::Target, 2>& targets, Step done);
     void processChannel(quint64 token, const Cloud::Target& target, Step done);
@@ -100,23 +110,31 @@ private:
 
     CloudStateStore store_;
     CloudApi* api_;
+    std::unique_ptr<CloudScreen> screen_;
     QTimer* timer_ = nullptr;
     Cloud::State state_;
     Cloud::Status status_ = Cloud::Status::Unbound;
     QString statusError_;
     std::function<bool()> profileEditorDirty_;
     std::function<bool(QString*)> windowRulesReload_;
+    std::function<QJsonArray()> pluginTelemetry_;
+    std::function<QString(const QString&)> managedRestart_;
+    std::function<QString()> powerOperationGuard_;
     bool started_ = false;
     bool inFlight_ = false;
     bool pairing_ = false;
     bool manual_ = false;
     bool lockHeld_ = false;
+    bool managedRestartAccepted_ = false;
+    bool qtPowerEnabled_ = false;
+    bool qtScreenSnapshotsEnabled_ = false;
+    bool bootProbeStarted_ = false;
+    QString powerBootId_;
     quint64 cycleToken_ = 0;
     int backoffMs_ = 10000;
     int pendingSyncAfterMs_ = 25000;
     QHash<QString, QDateTime> retryAfter_;
     QHash<QString, QString> blockSignature_;
-    QSet<QString> notified_;
     QString cloudProfileName_;
     bool cloudProfileExists_ = false;
 };

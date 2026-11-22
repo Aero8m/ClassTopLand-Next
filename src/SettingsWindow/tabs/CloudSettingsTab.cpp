@@ -63,7 +63,8 @@ CloudSettingsTab::CloudSettingsTab(CloudSyncService* cloud, QWidget* parent)
     codeLayout->addWidget(pair_);
     row(server, tr("配对码"), codeBox, QStringLiteral("cloudPairBox"));
     auto* serverHint = text(
-        tr("配对码由管理员在集控网页生成，有效期 10 分钟。配对成功后会自动创建云端档案并切换为当前档案（需重启一次）。"),
+        tr("配对码由管理员在集控网页生成，有效期 10 分钟。首次配对会创建并切换到云端档案（需重启一次）。"
+           "重新配对时，请使用原设备详情页生成的配对码。"),
         this, 12);
     serverHint->setWordWrap(true);
     server->addWidget(serverHint);
@@ -104,8 +105,8 @@ CloudSettingsTab::CloudSettingsTab(CloudSyncService* cloud, QWidget* parent)
     };
     addHint(tr("设备凭证只保存在本机 cloud/state.json，不会写入主配置或导出档案；非本机服务器必须使用 https://，"
                "本机联调可使用 http://127.0.0.1。"));
-    addHint(tr("云端只管理课表档案、课程条组件、外观和桌面倒计时。未保存的档案编辑、插件课程条组件会让对应通道"
-               "显示为阻塞，处理后会以新的尝试自动重试。"));
+    addHint(tr("新的展示配置会覆盖受管设置并替换整个课程条布局，包括本机添加的插件组件。"
+               "云端档案有未保存编辑时，课表会在保存或放弃编辑后继续同步。"));
     layout->addStretch();
 
     connect(originSave_, &ElaPushButton::clicked, this, &CloudSettingsTab::saveOrigin);
@@ -176,6 +177,7 @@ void CloudSettingsTab::refresh()
     enable_->setEnabled(bound && !unavailable);
     code_->setEnabled(!snap.busy && !unavailable);
     pair_->setEnabled(!snap.busy && !unavailable);
+    pair_->setText(bound ? tr("重新配对") : tr("配对"));
     syncNow_->setEnabled(bound && !snap.busy && !unavailable);
     unbind_->setEnabled(snap.hasCredential || bound);
     reset_->setVisible(snap.status == Cloud::Status::Corrupt);
@@ -239,8 +241,8 @@ void CloudSettingsTab::pair()
     const Cloud::Snapshot snap = cloud_->snapshot();
     if (!snap.deviceId.isEmpty() &&
         !AppUi::confirm(this, tr("重新配对"),
-                        tr("当前设备已绑定。使用配对码重新绑定会清除旧的云端代次和待发回执，"
-                           "已应用的本地内容会保留。确定继续？")))
+                        tr("请确认配对码来自原设备详情页。配对到同一设备时会保留本机同步状态，"
+                           "配对到其他设备时会按新设备重新同步。确定继续？")))
         return;
     cloud_->pair(code);
 }

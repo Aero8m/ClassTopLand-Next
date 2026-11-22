@@ -9,6 +9,7 @@
 class ElaLineEdit;
 class ElaPushButton;
 class ElaRollerPicker;
+class ElaScrollArea;
 class ElaScrollPage;
 class ElaTableView;
 class ElaText;
@@ -61,6 +62,7 @@ public:
     std::function<QString()> submit;
     bool confirmed = false;
 private:
+    ElaScrollArea* content_;
     QVBoxLayout* body_;
     ElaText* error_;
 };
@@ -68,5 +70,16 @@ private:
 bool run(FormDialog* dialog);
 bool confirm(QWidget* parent, const QString& title, const QString& message);
 enum class UnsavedChoice { Cancel, Discard, Save };
+
+class UnsavedDialog final : public ElaContentDialog {
+public:
+    UnsavedDialog(QWidget* parent, const QString& message);
+    void onMiddleButtonClicked() override;
+    void onRightButtonClicked() override;
+    UnsavedChoice choice() const { return choice_; }
+private:
+    UnsavedChoice choice_ = UnsavedChoice::Cancel;
+};
+
 UnsavedChoice unsaved(QWidget* parent, const QString& message = QStringLiteral("档案有未保存的更改"));
 }

@@ -1,0 +1,4 @@
+#pragma once
+
+#define CTX_BUILD_COMMIT "@CTX_BUILD_COMMIT@"
+#define CTX_BUILD_TIME "@CTX_BUILD_TIME@"

@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 4.0)
 project(ClassTopLand-Next)
 
+execute_process(COMMAND git rev-parse HEAD
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE CTX_BUILD_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+string(TIMESTAMP CTX_BUILD_TIME "%Y-%m-%dT%H:%M:%SZ" UTC)
+configure_file(cmake/BuildInfo.h.in generated/BuildInfo.h @ONLY)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
@@ -136,6 +142,12 @@ add_executable(ClassTopLand-Next
         src/Core/CloudSync/CloudDisplayConfig.h
         src/Core/CloudSync/CloudEndpoint.cpp
         src/Core/CloudSync/CloudEndpoint.h
+        src/Core/CloudSync/CloudOperations.cpp
+        src/Core/CloudSync/CloudOperations.h
+        src/Core/CloudSync/CloudPower.cpp
+        src/Core/CloudSync/CloudPower.h
+        src/Core/CloudSync/CloudScreen.cpp
+        src/Core/CloudSync/CloudScreen.h
         src/Core/CloudSync/CloudStateStore.cpp
         src/Core/CloudSync/CloudStateStore.h
         src/Core/CloudSync/CloudSyncService.cpp
@@ -224,6 +236,11 @@ if (MSVC)
 endif ()
 
 if (WIN32)
+    option(CTX_ENABLE_SCREEN_PREVIEW "Build Windows screen preview support" ON)
+    if (CTX_ENABLE_SCREEN_PREVIEW)
+        target_compile_definitions(ClassTopLand-Next PRIVATE CTX_SCREEN_PREVIEW)
+        target_link_libraries(ClassTopLand-Next d3d11 windowsapp)
+    endif ()
     set_target_properties(ClassTopLand-Next PROPERTIES
             WIN32_EXECUTABLE "$<CONFIG:Release>")
     enable_language(RC)
@@ -248,6 +265,8 @@ if (WIN32)
             VERBATIM)
 endif ()
 
+target_include_directories(ClassTopLand-Next PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_compile_definitions(ClassTopLand-Next PRIVATE CTX_BUILD_TYPE="$<CONFIG>")
 target_link_libraries(ClassTopLand-Next
         classtopland_windows
         Qt::Core

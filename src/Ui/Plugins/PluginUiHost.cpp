@@ -3,42 +3,9 @@
 #include "../../Core/Plugins/PluginManager.h"
 #include "../UiWidgets.h"
 #include "PluginNativeView.h"
-#include <ElaContentDialog.h>
-#include <ElaText.h>
 #include <QTimer>
 #include <QUuid>
-#include <QVBoxLayout>
 
-namespace
-{
-class PluginUnsavedDialog final : public ElaContentDialog
-{
-  public:
-    explicit PluginUnsavedDialog(QWidget *parent) : ElaContentDialog(parent)
-    {
-        setLeftButtonText(QStringLiteral("取消"));
-        setMiddleButtonText(QStringLiteral("放弃"));
-        setRightButtonText(QStringLiteral("保存"));
-        auto *body = new QWidget(this);
-        body->setMinimumWidth(440);
-        auto *layout = new QVBoxLayout(body);
-        layout->setContentsMargins(28, 24, 28, 24);
-        layout->addWidget(AppUi::text(QStringLiteral("插件页面有未保存的更改"), body, 22));
-        setCentralWidget(body);
-        setWindowModality(Qt::WindowModal);
-    }
-    void onMiddleButtonClicked() override
-    {
-        choice = AppUi::UnsavedChoice::Discard;
-        close();
-    }
-    void onRightButtonClicked() override
-    {
-        choice = AppUi::UnsavedChoice::Save;
-    }
-    AppUi::UnsavedChoice choice = AppUi::UnsavedChoice::Cancel;
-};
-} // namespace
 PluginUiHost::PluginUiHost(PluginManager *manager, QObject *parent) : QObject(parent), manager_(manager)
 {
     manager_->preparePluginStop = [this](const QString &plugin, GuardCompletion completion) {
@@ -108,9 +75,10 @@ PluginUiHost::PluginUiHost(PluginManager *manager, QObject *parent) : QObject(pa
             const auto view = views_.value(instance);
             if (view.kind != QStringLiteral("componentSettings"))
                 continue;
+            const auto typeId = view.plugin + QLatin1Char('/') + view.contribution;
             bool exists = false;
             for (const auto &component : components)
-                if (component.instanceId == view.component)
+                if (component.instanceId == view.component && component.typeId == typeId)
                     exists = true;
             if (!exists && view.widget)
                 view.widget->deleteLater();
@@ -323,8 +291,9 @@ void PluginUiHost::request(const QString &plugin, const QString &method, const Q
             return;
         }
         auto candidate = ConfigManager::instance().config();
+        const auto typeId = entry.plugin + QLatin1Char('/') + entry.contribution;
         for (auto &component : candidate.courseBarConfig.components)
-            if (component.instanceId == entry.component)
+            if (component.instanceId == entry.component && component.typeId == typeId)
             {
                 if (!commit)
                 {
@@ -441,11 +410,12 @@ void PluginUiHost::guardReady()
         return;
     }
     emit revealRequested(entry.plugin, guardInstance_);
-    auto *prompt = new PluginUnsavedDialog(entry.widget->window());
+    auto *prompt = new AppUi::UnsavedDialog(entry.widget, QStringLiteral("插件页面有未保存的更改"));
+    prompt->setWindowModality(Qt::WindowModal);
     prompt_ = prompt;
     const auto instance = guardInstance_;
     connect(prompt, &QDialog::finished, this, [this, prompt, instance] {
-        const auto choice = prompt->choice;
+        const auto choice = prompt->choice();
         prompt->deleteLater();
         prompt_.clear();
         if (!guarding_ || instance != guardInstance_)

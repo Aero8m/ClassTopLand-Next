@@ -353,7 +353,7 @@ void ProfileSettingsTab::exportProfile()
                 details->setWidget(notice);
                 notice->setAutoFillBackground(false);
                 dialog->field(tr("转换说明"), details);
-                details->setFixedSize(440, 220);
+                details->setFixedHeight(220);
                 QString conversionError;
                 auto preview = [&] {
                     const bool valid = ProfileExchange::serialize(candidate, format, contents, &warnings, &conversionError,

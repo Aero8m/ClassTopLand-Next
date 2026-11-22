@@ -2,6 +2,7 @@
 
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QMetaEnum>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -51,16 +52,27 @@ void CloudApi::abortAll()
 void CloudApi::postJson(const QUrl& url, const QByteArray& bearer, const QJsonObject& body,
                         Handler handler)
 {
+    post(url, bearer, QJsonDocument(body).toJson(QJsonDocument::Compact), "application/json", 15000,
+         std::move(handler));
+}
+
+void CloudApi::postJpeg(const QUrl& url, const QByteArray& bearer, const QByteArray& body, Handler handler)
+{
+    post(url, bearer, body, "image/jpeg", 5000, std::move(handler));
+}
+
+void CloudApi::post(const QUrl& url, const QByteArray& bearer, const QByteArray& body,
+                   const QByteArray& contentType, int timeoutMs, Handler handler)
+{
     QNetworkRequest request(url);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::ManualRedirectPolicy);
-    request.setTransferTimeout(15000);
+    request.setTransferTimeout(timeoutMs);
     request.setRawHeader("Accept", "application/json");
-    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    request.setRawHeader("Content-Type", contentType);
     request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("ClassTopLand-Next"));
     if (!bearer.isEmpty()) request.setRawHeader("Authorization", "Bearer " + bearer);
-    const QByteArray payload = QJsonDocument(body).toJson(QJsonDocument::Compact);
-    send(manager_->post(request, payload), std::move(handler));
+    send(manager_->post(request, body), std::move(handler));
 }
 
 void CloudApi::get(const QUrl& url, const QByteArray& bearer, Handler handler)
@@ -105,10 +117,20 @@ void CloudApi::send(QNetworkReply* reply, Handler handler)
                     reply->attribute(QNetworkRequest::RedirectionTargetAttribute).toUrl();
                 if (transfer->tooLarge || result.body.size() > kMaxResponseBytes) {
                     result.transportError = QStringLiteral("服务器响应超过 2 MiB");
+                    result.transportDiagnostic = QStringLiteral("Server response exceeds 2 MiB");
                 } else if (!redirect.isEmpty()) {
                     result.transportError = QStringLiteral("服务器返回了未预期的重定向");
+                    result.transportDiagnostic = QStringLiteral("Unexpected server redirect");
                 } else if (reply->error() != QNetworkReply::NoError && result.status == 0) {
                     result.transportError = reply->errorString();
+                    if (reply->error() == QNetworkReply::ConnectionRefusedError) {
+                        result.transportDiagnostic = QStringLiteral("Connection refused");
+                    } else {
+                        const auto errors = QMetaEnum::fromType<QNetworkReply::NetworkError>();
+                        result.transportDiagnostic = QStringLiteral("Network error %1 (%2): %3")
+                            .arg(reply->error()).arg(QString::fromLatin1(errors.valueToKey(reply->error())),
+                                                     result.transportError);
+                    }
                 }
                 result.message = serverMessage(result.body);
                 reply->deleteLater();

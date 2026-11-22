@@ -574,7 +574,7 @@ void AgentService::recordPluginChange(const QString &plugin, const QString &vers
 
 bool AgentService::continueSession(const QString &id, QString *error)
 {
-    if (!start(id, u"继续上次未完成任务。先检查文件、插件运行版本及上次工具结果，接续未完成步骤，不重复已经完成的操作。"_s, error)) return false;
+    if (!start(id, u"继续"_s, error)) return false;
     for (const auto &plugin : plugins_->workspace()->list()) {
         const auto name = plugin.toObject().value(u"id"_s).toString();
         QString failure;

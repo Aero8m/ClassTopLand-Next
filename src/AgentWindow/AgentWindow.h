@@ -6,10 +6,11 @@
 
 class ElaPlainTextEdit;
 class ElaPushButton;
-class ElaScrollArea;
 class ElaText;
 class ElaToolButton;
 class QVBoxLayout;
+class AgentScrollArea;
+class ReasoningScrollArea;
 
 class AgentWindow final : public ElaWindow
 {
@@ -36,7 +37,7 @@ private:
     void syncNavigation();
     void select(const QString &id);
     void refreshControls();
-    void render();
+    void render(bool resetScroll = true);
     void addEvent(const QJsonObject &event);
     void updateTool(const QJsonObject &event);
     void addToolEvent(const QJsonObject &event);
@@ -50,7 +51,6 @@ private:
     void ensureActivities();
     void resetActivities();
     void addRow(QWidget *card, bool right = false);
-    void followEnd();
     void send();
     void modelMenu();
     void permissionMenu();
@@ -60,11 +60,10 @@ private:
 
     AgentService *service_;
     QWidget *newPage_, *chat_;
-    ElaScrollArea *scroll_ = nullptr;
+    AgentScrollArea *scroll_ = nullptr;
     QVBoxLayout *messages_;
     ElaText *title_, *notice_, *streamLabel_ = nullptr;
-    ElaScrollArea *reasoningScroll_ = nullptr;
-    ElaText *reasoningText_ = nullptr;
+    ReasoningScrollArea *reasoningScroll_ = nullptr;
     ElaToolButton *reasoningHeader_ = nullptr, *activityHeader_ = nullptr;
     QWidget *activities_ = nullptr, *activityItems_ = nullptr;
     QVBoxLayout *activityLayout_ = nullptr;

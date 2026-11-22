@@ -31,7 +31,7 @@ AppearanceSettingsTab::AppearanceSettingsTab(QWidget* parent) : ElaScrollPage(pa
     colorButton_ = new ElaPushButton(this);
     colorButton_->setObjectName(QStringLiteral("themeColorButton"));
     colorButton_->setAccessibleName(tr("选择主题色"));
-    colorButton_->setFixedSize(64, 40);
+    colorButton_->setFixedWidth(64);
     colorButton_->setBorderRadius(6);
     colorButton_->setCursor(Qt::PointingHandCursor);
     row->addWidget(colorButton_, 0, Qt::AlignVCenter);

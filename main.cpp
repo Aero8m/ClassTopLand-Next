@@ -89,7 +89,8 @@ int main(int argc, char* argv[])
         }
         if (!app.startApp()) return 1;
         if (!startupError.isEmpty()) {
-            Logger::instance().log(Logger::Level::Warning, startupError);
+            Logger::instance().log(Logger::Level::Warning,
+                                   QStringLiteral("Could not start in the configured UIAccess mode: %1").arg(startupError));
             Logger::instance().flush();
             QTimer::singleShot(0, &a, [startupError] {
                 QMessageBox::warning(nullptr, QStringLiteral("增强置顶启动失败"), startupError);
@@ -112,7 +113,7 @@ int main(int argc, char* argv[])
         instance.release();
         if (!QProcess::startDetached(QCoreApplication::applicationFilePath(), arguments, workingDirectory)) {
             const QString error = QStringLiteral("无法重启 ClassTopLand-Next，请手动重新启动应用。");
-            Logger::instance().log(Logger::Level::Error, error);
+            Logger::instance().log(Logger::Level::Error, "Could not restart ClassTopLand-Next. Please restart the application manually.");
             Logger::instance().flush();
             QMessageBox::critical(nullptr, QStringLiteral("重启失败"), error);
             return 1;

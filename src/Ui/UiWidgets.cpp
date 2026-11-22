@@ -11,6 +11,7 @@
 #include <ElaTableView.h>
 #include <ElaText.h>
 #include <ElaTheme.h>
+#include <ElaWidgetToolsDef.h>
 #include <QHeaderView>
 #include <QApplication>
 #include <QAbstractScrollArea>
@@ -203,7 +204,7 @@ void sizeActionButtonImpl(ElaPushButton* control)
 {
     // Include the shadow and comfortable padding on both sides of the text.
     control->setMinimumWidth(qMax(112, control->fontMetrics().horizontalAdvance(control->text()) + 40));
-    control->setFixedHeight(44);
+    control->setFixedHeight(ElaWidgetToolsSize::DefaultControlHeight);
     control->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
 }
 }
@@ -316,7 +317,6 @@ ElaTableView* table(QVBoxLayout* layout, const QStringList& headers, QStandardIt
     view->setSelectionBehavior(QAbstractItemView::SelectRows);
     view->setSelectionMode(QAbstractItemView::SingleSelection);
     view->verticalHeader()->hide();
-    view->verticalHeader()->setDefaultSectionSize(44);
     view->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     view->horizontalHeader()->setMinimumSectionSize(64);
     view->setShowGrid(false);
@@ -354,7 +354,7 @@ void emptyState(ElaTableView* view, ElaText* label)
     const int rows = view->model()->rowCount();
     label->setVisible(rows == 0);
     view->setVisible(rows != 0);
-    view->setFixedHeight(qBound(180, 44 * rows + 42, 440));
+    view->setFixedHeight(qBound(180, view->verticalHeader()->length() + 42, 440));
 }
 void error(QWidget* parent, const QString& message)
 {
@@ -371,7 +371,7 @@ TimePicker::TimePicker(QTime value, QWidget* parent) : QWidget(parent)
     for (int i = 0; i < 3; ++i) picker_->setRollerWidth(i, 66);
     if (!value.isValid()) value = QTime(8, 0);
     picker_->setCurrentIndex({value.hour(), value.minute(), value.second()});
-    picker_->setFixedSize(198, 38);
+    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     auto* layout = new QHBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(picker_);
@@ -390,6 +390,71 @@ void TimePicker::setTime(QTime value)
     picker_->setCurrentIndex({value.hour(), value.minute(), value.second()});
 }
 
+namespace {
+constexpr int dialogPreferredWidth = 440;
+constexpr int dialogSideMargin = 28;
+
+class DialogText final : public ElaText {
+public:
+    DialogText(const QString& value, QWidget* parent, int pixelSize = 14) : ElaText(value, pixelSize, parent)
+    {
+        setTextFormat(Qt::PlainText);
+        setIsWrapAnywhere(true);
+    }
+
+    QSize minimumSizeHint() const override { return {0, fontMetrics().height()}; }
+    QSize sizeHint() const override
+    {
+        const int width = qBound(1, fontMetrics().horizontalAdvance(this->text()), dialogPreferredWidth - 2 * dialogSideMargin);
+        return {width, heightForWidth(width)};
+    }
+    int heightForWidth(int width) const override
+    {
+        const auto metrics = fontMetrics();
+        const auto bounds = metrics.boundingRect(QRect(0, 0, qMax(1, width), 0),
+            Qt::AlignLeft | Qt::AlignVCenter | Qt::TextWordWrap | Qt::TextWrapAnywhere, this->text());
+        return qMax(metrics.height(), bounds.height());
+    }
+};
+
+class DialogContent final : public ElaScrollArea {
+public:
+    explicit DialogContent(QWidget* body, QWidget* parent) : ElaScrollArea(parent)
+    {
+        setWidgetResizable(true);
+        setWidget(body);
+        body->setAutoFillBackground(false);
+        body->installEventFilter(this);
+        auto policy = sizePolicy();
+        policy.setHeightForWidth(true);
+        setSizePolicy(policy);
+        enableTouchScrolling(this, Qt::Horizontal | Qt::Vertical);
+    }
+
+    QSize minimumSizeHint() const override { return {0, 0}; }
+    QSize sizeHint() const override
+    {
+        const int width = qMax(dialogPreferredWidth, widget()->layout()->totalMinimumSize().width());
+        return {width, heightForWidth(width)};
+    }
+    int heightForWidth(int width) const override
+    {
+        auto* layout = widget()->layout();
+        const int bodyWidth = qMax(width, layout->totalMinimumSize().width());
+        const int height = layout->totalHeightForWidth(bodyWidth);
+        return height < 0 ? layout->totalSizeHint().height() : height;
+    }
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override
+    {
+        if (watched == widget() && event->type() == QEvent::LayoutRequest)
+            updateGeometry();
+        return ElaScrollArea::eventFilter(watched, event);
+    }
+};
+}
+
 FormDialog::FormDialog(QWidget* parent, const QString& title, const QString& action) : ElaContentDialog(parent->window())
 {
     setLeftButtonText(QStringLiteral("取消"));
@@ -401,24 +466,24 @@ FormDialog::FormDialog(QWidget* parent, const QString& title, const QString& act
         if (control->text() == action) primary(control);
     }
     auto* body = new QWidget(this);
-    body->setMinimumWidth(440);
     body_ = new QVBoxLayout(body);
-    body_->setContentsMargins(28, 24, 28, 24);
+    body_->setContentsMargins(dialogSideMargin, 24, dialogSideMargin, 24);
     body_->setSpacing(12);
-    body_->addWidget(text(title, body, 22));
-    error_ = text({}, body);
+    body_->addWidget(new DialogText(title, body, 22));
+    error_ = new DialogText({}, body);
     error_->setObjectName(QStringLiteral("validationError"));
     error_->hide();
     body_->addWidget(error_);
-    setCentralWidget(body);
+    content_ = new DialogContent(body, this);
+    setCentralWidget(content_);
 }
 void FormDialog::field(const QString& label, QWidget* editor)
 {
-    auto* title = text(label);
+    auto* title = new DialogText(label, content_->widget());
     if (auto* edit = qobject_cast<ElaLineEdit*>(editor)) title->setBuddy(edit);
+    if (auto* combo = qobject_cast<ElaComboBox*>(editor))
+        combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     body_->insertWidget(body_->count() - 1, title);
-    if (qobject_cast<ElaLineEdit*>(editor) || qobject_cast<ElaComboBox*>(editor)) editor->setFixedHeight(38);
-    else editor->setMinimumHeight(38);
     editor->setAccessibleName(label);
     body_->insertWidget(body_->count() - 1, editor);
 }
@@ -428,13 +493,20 @@ ElaLineEdit* FormDialog::line(const QString& label, const QString& value)
 }
 void FormDialog::message(const QString& message)
 {
-    auto* label = text(message); label->setMaximumWidth(440);
-    body_->insertWidget(body_->count() - 1, label);
+    body_->insertWidget(body_->count() - 1, new DialogText(message, content_->widget()));
 }
 void FormDialog::onMiddleButtonClicked()
 {
     const QString failure = submit ? submit() : QString();
-    if (!failure.isEmpty()) { error_->setText(failure); error_->show(); adjustSize(); return; }
+    if (!failure.isEmpty()) {
+        error_->setText(failure);
+        error_->show();
+        content_->updateGeometry();
+        QTimer::singleShot(0, this, [this] {
+            if (isVisible()) content_->ensureWidgetVisible(error_, 0, 8);
+        });
+        return;
+    }
     confirmed = true;
     close();
 }
@@ -453,25 +525,27 @@ bool confirm(QWidget* parent, const QString& title, const QString& message)
     return run(dialog);
 }
 
-class UnsavedDialog final : public ElaContentDialog {
-public:
-    UnsavedDialog(QWidget* parent, const QString& message) : ElaContentDialog(parent->window()) {
-        setLeftButtonText(QStringLiteral("取消")); setMiddleButtonText(QStringLiteral("放弃")); setRightButtonText(QStringLiteral("保存"));
-        for (auto* control : findChildren<ElaPushButton*>()) sizeActionButton(control);
-        auto* body = new QWidget(this);
-        auto* layout = new QVBoxLayout(body); layout->setContentsMargins(28, 24, 28, 24);
-        layout->addWidget(text(message, body, 22));
-        setCentralWidget(body);
-    }
-    void onMiddleButtonClicked() override { choice = UnsavedChoice::Discard; close(); }
-    void onRightButtonClicked() override { choice = UnsavedChoice::Save; }
-    UnsavedChoice choice = UnsavedChoice::Cancel;
-};
+UnsavedDialog::UnsavedDialog(QWidget* parent, const QString& message) : ElaContentDialog(parent->window())
+{
+    setLeftButtonText(QStringLiteral("取消"));
+    setMiddleButtonText(QStringLiteral("放弃"));
+    setRightButtonText(QStringLiteral("保存"));
+    for (auto* control : findChildren<ElaPushButton*>()) sizeActionButton(control);
+    auto* body = new QWidget(this);
+    auto* layout = new QVBoxLayout(body);
+    layout->setContentsMargins(dialogSideMargin, 24, dialogSideMargin, 24);
+    layout->addWidget(new DialogText(message, body, 22));
+    setCentralWidget(new DialogContent(body, this));
+}
+
+void UnsavedDialog::onMiddleButtonClicked() { choice_ = UnsavedChoice::Discard; close(); }
+void UnsavedDialog::onRightButtonClicked() { choice_ = UnsavedChoice::Save; }
+
 UnsavedChoice unsaved(QWidget* parent, const QString& message)
 {
     auto* dialog = new UnsavedDialog(parent, message);
     dialog->exec();
-    const auto choice = dialog->choice;
+    const auto choice = dialog->choice();
     QTimer::singleShot(0, dialog, &QObject::deleteLater);
     return choice;
 }

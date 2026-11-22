@@ -38,7 +38,7 @@ DesktopCountdownSettingsTab::DesktopCountdownSettingsTab(QWidget* parent) : ElaS
     row(basics, tr("中文事件名称"), label_, QStringLiteral("desktopCountdownLabelTag"));
     english_ = new ElaLineEdit(this); english_->setFixedWidth(280);
     row(basics, tr("英文事件名称"), english_, QStringLiteral("desktopCountdownEnglishTag"));
-    date_ = new ElaCalendarPicker(this); date_->setFixedSize(198, 38);
+    date_ = new ElaCalendarPicker(this); date_->setFixedWidth(198);
     row(basics, tr("目标日期"), date_, QStringLiteral("desktopCountdownDate"));
     time_ = new TimePicker(QTime(0, 0), this);
     row(basics, tr("目标时间"), time_, QStringLiteral("desktopCountdownTime"));

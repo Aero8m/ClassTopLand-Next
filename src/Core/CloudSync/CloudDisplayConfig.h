@@ -11,8 +11,6 @@
 // v2 optionally manages window rules and plugin enabled preferences.
 namespace CloudDisplay {
 
-bool hasPluginComponent(const CourseBarConfig& config);
-
 // Failure leaves result untouched. The caller still runs
 // ConfigManager::validateCandidate before committing.
 bool buildConfig(const QJsonObject& payload, const Config& current, Config& result,

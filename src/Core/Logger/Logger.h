@@ -34,7 +34,7 @@ public:
     // Filtered messages succeed without writing. No outputs means failure.
     // A failed stream does not prevent writing to the remaining streams.
     bool log(Level level, std::string_view message);
-    // QString messages are written as UTF-8.
+    // QString messages are encoded as UTF-8. Standard streams escape non-ASCII characters.
     bool log(Level level, const QString& message);
     // Keep string literals unambiguous with the QString overload.
     bool log(Level level, const char* message);

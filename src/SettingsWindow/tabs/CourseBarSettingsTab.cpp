@@ -47,7 +47,7 @@ QString componentName(CourseBarComponentType type)
 ElaPushButton* smallButton(const QString& title, const QString& accessible, QWidget* parent)
 {
     auto* button = new ElaPushButton(title, parent);
-    button->setFixedSize(title.size() > 1 ? 64 : 36, 34);
+    button->setFixedWidth(title.size() > 1 ? 64 : 36);
     button->setBorderRadius(6);
     button->setAccessibleName(accessible);
     button->setToolTip(accessible);
@@ -402,7 +402,6 @@ void CourseBarSettingsTab::refresh()
             edit->setPlaceholderText(tr("显示文本"));
             edit->setText(component.text);
             edit->setMinimumWidth(120);
-            edit->setFixedHeight(38);
             bodyLayout->addWidget(edit);
             connect(edit, &ElaLineEdit::editingFinished, this, [this, i, edit] {
                 if (edit->text() == config_.components.at(i).text) return;
