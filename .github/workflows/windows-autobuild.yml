@@ -86,9 +86,14 @@ jobs:
 
       - name: Configure and build Release
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DCTX_UPDATE_BUILD_NUMBER=${{ steps.version.outputs.update_sequence }}"
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCTX_BUILD_TESTS=ON "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DCTX_UPDATE_BUILD_NUMBER=${{ steps.version.outputs.update_sequence }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmake --build build --parallel 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run core tests
+        run: |
+          ctest --test-dir build --output-on-failure --no-tests=error
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Stage application and Qt dependencies

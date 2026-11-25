@@ -47,6 +47,39 @@ add_subdirectory(third_party/ElaWidgetTools-Plus/ElaWidgetTools)
 
 include(cmake/Curl.cmake)
 
+add_library(classtopland_core STATIC
+        src/Core/Model/ReminderConfig.cpp
+        src/Core/Model/ReminderConfig.h
+        src/Core/Reminders/ReminderService.cpp
+        src/Core/Reminders/ReminderService.h
+        src/Core/ProfileValidation/ProfileOperations.cpp
+        src/Core/ProfileValidation/ProfileOperations.h
+        src/Core/ProfileValidation/ProfileValidation.cpp
+        src/Core/ProfileValidation/ProfileValidation.h
+        src/Core/DateSchedule/DateSchedule.cpp
+        src/Core/DateSchedule/DateSchedule.h
+        src/Core/ConfigManager/ConfigManager.cpp
+        src/Core/ConfigManager/ConfigManager.h
+        src/Core/CourseRefreshService/CourseRefreshService.cpp
+        src/Core/CourseRefreshService/CourseRefreshService.h
+        src/Core/ProfileManager/ProfileExchange.cpp
+        src/Core/ProfileManager/ProfileExchange.h
+        src/Core/ProfileManager/ProfileManager.cpp
+        src/Core/ProfileManager/ProfileManager.h
+        src/ProfileEditWindow/ProfileEditSession.cpp
+        src/ProfileEditWindow/ProfileEditSession.h)
+target_link_libraries(classtopland_core PUBLIC Qt6::Core PRIVATE yaml-cpp::yaml-cpp)
+if (MSVC)
+    target_compile_options(classtopland_core PRIVATE /utf-8)
+endif ()
+
+option(CTX_BUILD_TESTS "Build ClassTopLand Next tests" OFF)
+if (CTX_BUILD_TESTS)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+    enable_testing()
+    add_subdirectory(tests)
+endif ()
+
 add_executable(ClassTopLand-Next
         main.cpp
         src/AgentWindow/AgentWindow.cpp
@@ -64,10 +97,6 @@ add_executable(ClassTopLand-Next
         src/Core/Agent/AgentTools.cpp
         src/Core/Agent/AgentService.cpp
         src/Core/Agent/AgentService.h
-        src/Core/Model/ReminderConfig.cpp
-        src/Core/Model/ReminderConfig.h
-        src/Core/Reminders/ReminderService.cpp
-        src/Core/Reminders/ReminderService.h
         src/SettingsWindow/tabs/ReminderSettingsTab.cpp
         src/SettingsWindow/tabs/ReminderSettingsTab.h
         src/Core/Plugins/PluginIo.cpp
@@ -104,10 +133,6 @@ add_executable(ClassTopLand-Next
         src/Core/Plugins/PluginRuntime.h
         src/Core/Plugins/ProfileMutationService.cpp
         src/Core/Plugins/ProfileMutationService.h
-        src/Core/ProfileValidation/ProfileOperations.cpp
-        src/Core/ProfileValidation/ProfileOperations.h
-        src/Core/ProfileValidation/ProfileValidation.cpp
-        src/Core/ProfileValidation/ProfileValidation.h
         src/Ui/Plugins/PluginUiHost.cpp
         src/Ui/Plugins/PluginUiHost.h
         src/Ui/Plugins/PluginHistoryDialog.cpp
@@ -137,8 +162,6 @@ add_executable(ClassTopLand-Next
         src/Core/Model/Schedule.h
         src/Core/Model/Subject.h
         src/Core/Model/TimeLine.h
-        src/Core/DateSchedule/DateSchedule.cpp
-        src/Core/DateSchedule/DateSchedule.h
         src/ScheduleAdjustments/DateScheduleWidgets.cpp
         src/ScheduleAdjustments/DateScheduleWidgets.h
 
@@ -161,16 +184,8 @@ add_executable(ClassTopLand-Next
         src/Core/CloudSync/CloudSyncService.cpp
         src/Core/CloudSync/CloudSyncService.h
         src/Core/CloudSync/CloudTypes.h
-        src/Core/ConfigManager/ConfigManager.cpp
-        src/Core/ConfigManager/ConfigManager.h
-        src/Core/CourseRefreshService/CourseRefreshService.cpp
-        src/Core/CourseRefreshService/CourseRefreshService.h
         src/Core/Logger/Logger.cpp
         src/Core/Logger/Logger.h
-        src/Core/ProfileManager/ProfileExchange.cpp
-        src/Core/ProfileManager/ProfileExchange.h
-        src/Core/ProfileManager/ProfileManager.cpp
-        src/Core/ProfileManager/ProfileManager.h
         src/Core/ThemeManager/ThemeManager.cpp
         src/Core/ThemeManager/ThemeManager.h
 
@@ -194,8 +209,6 @@ add_executable(ClassTopLand-Next
         src/CourseBar/BuiltinComponents/TextTip/TextTip.cpp
         src/CourseBar/BuiltinComponents/TextTip/TextTip.h
 
-        src/ProfileEditWindow/ProfileEditSession.cpp
-        src/ProfileEditWindow/ProfileEditSession.h
         src/Ui/UiWidgets.cpp
         src/Ui/UiWidgets.h
         src/ProfileEditWindow/ProfileEditWindow.cpp
@@ -295,6 +308,7 @@ endif ()
 target_include_directories(ClassTopLand-Next PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_compile_definitions(ClassTopLand-Next PRIVATE CTX_BUILD_TYPE="$<CONFIG>")
 target_link_libraries(ClassTopLand-Next
+        classtopland_core
         classtopland_windows
         Qt::Core
         Qt::Gui
@@ -304,7 +318,6 @@ target_link_libraries(ClassTopLand-Next
         CURL::libcurl
         Qt::UiTools
         Ela::WidgetTools
-        yaml-cpp::yaml-cpp
 )
 
 if (CTX_CURL_LICENSE)

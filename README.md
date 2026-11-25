@@ -255,13 +255,25 @@ Windows 构建会复制 ElaWidgetTools 动态库，并自动调用同套件的 `
 
 分发时请保留部署后的 DLL 和插件目录。制作支持应用内更新的安装包时，还需随主程序打包 ClassTopLand-Next-Update.exe。Debug 构建请改用对应构建目录和 `windeployqt --debug`。
 
+### 本地运行测试
+
+在同一个 x64 开发者终端中，使用包含 Qt Test 的 Qt 套件执行以下命令：
+
+```powershell
+cmake -S . -B build-tests -G Ninja -DCMAKE_BUILD_TYPE=Release -DCTX_BUILD_TESTS=ON
+cmake --build build-tests --parallel
+ctest --test-dir build-tests --output-on-failure --no-tests=error
+```
+
+测试覆盖日期课表、课程刷新、档案交换、配置与档案持久化、档案校验与编辑、提醒。测试通过临时目录读写数据，无需启动桌面应用。普通构建默认关闭 `CTX_BUILD_TESTS`。
+
 ### GitHub Actions 自动构建
 
 仓库提供 [Windows Autobuild](./.github/workflows/windows-autobuild.yml) 工作流：
 
-- 推送到 `main`：编译 Windows x64 Release、制作安装包、上传 Actions artifact，并在原仓库 `Aero8m/ClassTopLand-Next` 发布自动构建正式版本并设为 Latest。
-- 向 `main` 提交 PR：编译、打包并上传 artifact，不发布 Release。
-- 手动构建：在 Actions → Windows Autobuild → Run workflow 选择分支；默认只生成 artifact。在 `main` 上勾选 `publish_release` 可同时发布正式版本并设为 Latest。
+- 推送到 `main`：编译并测试 Windows x64 Release、制作安装包、上传 Actions artifact，并在原仓库 `Aero8m/ClassTopLand-Next` 发布自动构建正式版本并设为 Latest。
+- 向 `main` 提交 PR：编译、测试、打包并上传 artifact。
+- 手动构建：在 Actions → Windows Autobuild → Run workflow 选择分支，默认只生成 artifact。在原仓库的 `main` 上勾选 `publish_release` 可同时发布正式版本并设为 Latest。
 
 流程使用 `windows-2022`、MSVC 2022 x64、Qt 6.9.3、CMake 4.0.3 和 Ninja。runner 自带的 CMake 可能低于项目最低要求，因此工作流会单独安装固定版本。Qt 安装结果通过 Actions cache 复用；源码及两个子模块每次按对应提交检出。
 
@@ -279,7 +291,7 @@ ClassTopLand-Next-setup_build_<7位提交号>-amd64.exe
 
 镜像站通过独立定时任务拉取 GitHub Release 安装包，校验大小和 SHA-256 后提供下载。镜像随后为符合条件的新构建发布 update.json，客户端通过 Autobuild 查版本和下载安装包。镜像仍独立于 Actions 发布流程。
 
-当前自动构建验证编译、依赖文件和安装包生成，不自动验证界面或实际安装运行。原 Autobuild 脚本中的明文 PAT 应撤销，迁移时不要将其放入仓库。
+三种触发方式均在 Release 编译后运行 CTest。测试全部通过后才整理打包目录、制作并上传安装包。测试失败、超时或未发现用例都会中止流程，失败用例的输出显示在 Actions 日志中。界面交互和实际安装运行仍需手动验证。原 Autobuild 脚本中的明文 PAT 应撤销，迁移时不要将其放入仓库。
 
 ## 数据与备份
 
@@ -347,6 +359,7 @@ ClassTopLand-Next/
 ├── resourecs.qrc            # Qt 资源清单
 ├── res/                     # 图标、提醒图片与启动标识
 ├── examples/profiles/       # 示例档案
+├── tests/                   # Qt Test 核心业务与持久化测试
 ├── src/
 │   ├── Core/                # 数据模型、配置、档案、课程刷新、主题与日志
 │   ├── CourseBar/           # 课程条与内置组件
