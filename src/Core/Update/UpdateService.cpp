@@ -3,13 +3,13 @@
 #include <BuildInfo.h>
 #include <QCryptographicHash>
 #include <QDir>
+#include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRegularExpression>
-#include <QSaveFile>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QUrl>
@@ -22,6 +22,7 @@
 namespace {
 constexpr auto FirstAutomaticCheck = std::chrono::seconds(15);
 constexpr auto AutomaticCheckInterval = std::chrono::hours(6);
+constexpr int MaxDownloadAttempts = 3;
 constexpr qint64 MaxJsonBytes = 64 * 1024;
 constexpr qint64 MaxInstallerBytes = 256 * 1024 * 1024;
 constexpr auto Host = "autobuild.aero8m.cn";
@@ -38,16 +39,34 @@ QNetworkRequest requestFor(const QUrl& url)
     return request;
 }
 
+int httpStatus(QNetworkReply* reply)
+{
+    return reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+}
+
 bool ok(QNetworkReply* reply)
 {
-    return reply->error() == QNetworkReply::NoError
-        && reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 200;
+    return reply->error() == QNetworkReply::NoError && httpStatus(reply) == 200;
 }
 }
 
+struct UpdateService::Download {
+    explicit Download(const QString& path) : file(path) {}
+    QFile file;
+    QCryptographicHash hash{QCryptographicHash::Sha256};
+    qint64 received = 0;
+    qint64 responseEnd = 0;
+    int attempts = 0;
+    bool writeFailed = false;
+    bool responseRejected = false;
+};
+
 UpdateService::UpdateService(QObject* parent)
-    : QObject(parent), network_(new QNetworkAccessManager(this)), automaticTimer_(new QTimer(this))
+    : QObject(parent), network_(new QNetworkAccessManager(this)),
+      automaticTimer_(new QTimer(this)), retryTimer_(new QTimer(this))
 {
+    retryTimer_->setSingleShot(true);
+    connect(retryTimer_, &QTimer::timeout, this, &UpdateService::requestDownload);
     automaticTimer_->setSingleShot(true);
     connect(automaticTimer_, &QTimer::timeout, this, [this] {
         if (!automaticUpdates_) return;
@@ -89,7 +108,7 @@ void UpdateService::setState(State state, const QString& message)
 
 void UpdateService::fail(const QString& message)
 {
-    stage_.reset();
+    discardDownload();
     installer_.path.clear();
     setState(state_ == State::Downloading ? State::Available : State::Failed, message);
 }
@@ -134,9 +153,11 @@ void UpdateService::check()
 
 void UpdateService::checkForUpdate(bool automatic)
 {
-    if (!supported() || reply_ || state_ == State::Preparing || (automatic && state_ == State::Ready)) return;
+    if (!supported() || state_ == State::Checking || state_ == State::Preparing
+        || (automatic && (state_ == State::Downloading || state_ == State::Ready))) return;
+    stopRequest();
+    discardDownload();
     automaticRequest_ = automatic;
-    stage_.reset();
     installer_ = {};
     filename_.clear();
     notes_.clear();
@@ -191,12 +212,15 @@ void UpdateService::getSmall(const QUrl& url, const QByteArray& body, JsonHandle
     connect(reply, &QNetworkReply::finished, this, [this, reply, data, handler = std::move(handler)] {
         reply_ = nullptr;
         reply->deleteLater();
+        if (data->size() <= MaxJsonBytes && reply->bytesAvailable() > 0)
+            data->append(reply->read(MaxJsonBytes + 1 - data->size()));
         if (data->size() > MaxJsonBytes) {
             fail(tr("镜像返回的数据过大。"));
         } else if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 404) {
             fail(tr("镜像暂未提供所请求的更新文件。"));
         } else if (!ok(reply)) {
-            fail(tr("无法读取 Autobuild 镜像，请稍后重试。"));
+            if (state_ == State::Downloading) retryDownload(tr("暂时无法获取镜像下载地址。"));
+            else fail(tr("无法读取 Autobuild 镜像，请稍后重试。"));
         } else {
             handler(*data);
         }
@@ -244,14 +268,24 @@ void UpdateService::startDownload(bool automatic)
     automaticRequest_ = automatic;
     percent_ = 0;
     setState(State::Downloading, tr("正在下载安装包…"));
-    resolve(filename_, [this](const QUrl& url) { download(url); });
+    stage_ = std::make_unique<QTemporaryDir>(QDir::temp().filePath(QStringLiteral("ClassTopLand-Next-update-XXXXXX")));
+    if (!stage_->isValid()) {
+        fail(tr("无法为更新创建暂存目录。"));
+        return;
+    }
+    download_ = std::make_unique<Download>(stage_->filePath(filename_ + QStringLiteral(".part")));
+    if (!download_->file.open(QIODevice::WriteOnly)) {
+        fail(tr("无法写入安装包，请检查暂存目录权限和磁盘空间。"));
+        return;
+    }
+    requestDownload();
 }
 
 void UpdateService::cancelDownload()
 {
     if (state_ != State::Downloading) return;
     stopRequest();
-    stage_.reset();
+    discardDownload();
     setState(State::Available, tr("下载已取消。"));
 }
 
@@ -265,74 +299,142 @@ void UpdateService::stopRequest()
     reply->deleteLater();
 }
 
+void UpdateService::discardDownload()
+{
+    retryTimer_->stop();
+    download_.reset();
+    stage_.reset();
+}
+
+void UpdateService::requestDownload()
+{
+    if (state_ != State::Downloading || !download_ || reply_) return;
+    ++download_->attempts;
+    resolve(filename_, [this](const QUrl& url) { download(url); });
+}
+
 void UpdateService::download(const QUrl& url)
 {
-    stage_ = std::make_unique<QTemporaryDir>(QDir::temp().filePath(QStringLiteral("ClassTopLand-Next-update-XXXXXX")));
-    if (!stage_->isValid()) {
-        fail(tr("无法为更新创建暂存目录。"));
-        return;
-    }
-
-    const QString path = stage_->filePath(filename_);
-    struct Download {
-        explicit Download(const QString& name) : file(name) {}
-        QSaveFile file;
-        QCryptographicHash hash{QCryptographicHash::Sha256};
-        qint64 received = 0;
-        bool writeFailed = false;
-    };
-    auto output = std::make_shared<Download>(path);
-    if (!output->file.open(QIODevice::WriteOnly)) {
-        fail(tr("无法写入安装包，请检查暂存目录权限和磁盘空间。"));
-        return;
-    }
+    download_->responseEnd = 0;
+    download_->responseRejected = false;
     auto request = requestFor(url);
+    request.setTransferTimeout(45000);
     request.setRawHeader("Accept-Encoding", "identity");
+    if (download_->received > 0)
+        request.setRawHeader("Range", "bytes=" + QByteArray::number(download_->received) + '-');
+
     auto* reply = network_->get(request);
     reply->setReadBufferSize(256 * 1024);
     reply_ = reply;
-    connect(reply, &QIODevice::readyRead, this, [this, reply, output] {
-        while (reply->bytesAvailable() > 0) {
-            const auto chunk = reply->read(128 * 1024);
-            if (chunk.isEmpty()) break;
-            output->received += chunk.size();
-            if (output->received > installer_.size || output->file.write(chunk) != chunk.size()) {
-                output->writeFailed = true;
-                reply->abort();
-                return;
-            }
-            output->hash.addData(chunk);
-        }
-        const int percent = int(output->received * 100 / installer_.size);
-        if (percent != percent_) {
-            percent_ = percent;
+    connect(reply, &QIODevice::readyRead, this, [this, reply] {
+        if (!readDownload(reply)) reply->abort();
+        else if (const int progress = int(download_->received * 100 / installer_.size); progress != percent_) {
+            percent_ = progress;
             emit changed();
         }
     });
     QTimer::singleShot(15 * 60 * 1000, reply, [reply] { if (reply->isRunning()) reply->abort(); });
-    connect(reply, &QNetworkReply::finished, this, [this, reply, output, path] {
-        reply_ = nullptr;
-        reply->deleteLater();
-        const QString error = [this, reply, &output] {
-            if (output->writeFailed) return tr("安装包大小超限或磁盘写入失败。");
-            if (!ok(reply)) return tr("安装包下载失败，请稍后重试。");
-            if (output->received != installer_.size || output->hash.result() != installer_.sha256)
-                return tr("安装包大小或 SHA-256 校验失败。");
-            if (!output->file.commit()) return tr("无法保存已下载的安装包。");
-            return QString();
-        }();
-        if (!error.isEmpty()) {
-            if (output->file.isOpen()) {
-                output->file.cancelWriting();
-                output->file.commit();
+    connect(reply, &QNetworkReply::finished, this, [this, reply] { finishDownload(reply); });
+}
+
+bool UpdateService::beginDownloadResponse(QNetworkReply* reply)
+{
+    auto& output = *download_;
+    if (httpStatus(reply) == 200) {
+        // A server that ignores Range is sending a new full copy.
+        if (output.received > 0) {
+            if (!output.file.resize(0) || !output.file.seek(0)) {
+                output.writeFailed = true;
+                return false;
             }
-            fail(error);
-            return;
+            output.received = 0;
+            output.hash.reset();
         }
-        installer_.path = path;
-        if (automaticRequest_) setState(State::Ready, readyMessage());
-        else requestInstall(true);
-    });
+        output.responseEnd = installer_.size;
+        return true;
+    }
+    if (httpStatus(reply) != 206) return false;
+    static const QRegularExpression range(QStringLiteral("\\Abytes ([0-9]+)-([0-9]+)/([0-9]+)\\z"));
+    const auto match = range.match(QString::fromLatin1(reply->rawHeader("Content-Range")));
+    if (!match.hasMatch()) return false;
+    bool startOk = false, endOk = false, totalOk = false;
+    const auto start = match.capturedView(1).toLongLong(&startOk);
+    const auto end = match.capturedView(2).toLongLong(&endOk);
+    const auto total = match.capturedView(3).toLongLong(&totalOk);
+    if (!startOk || !endOk || !totalOk || start != output.received
+        || start > end || end >= total || total != installer_.size) return false;
+    output.responseEnd = end + 1;
+    return true;
+}
+
+bool UpdateService::readDownload(QNetworkReply* reply)
+{
+    auto& output = *download_;
+    if (output.writeFailed || output.responseRejected) return false;
+    if (!output.responseEnd && !beginDownloadResponse(reply)) {
+        output.responseRejected = true;
+        return false;
+    }
+    while (reply->bytesAvailable() > 0) {
+        const auto chunk = reply->read(128 * 1024);
+        if (chunk.isEmpty()) break;
+        if (chunk.size() > output.responseEnd - output.received) {
+            output.responseRejected = true;
+            return false;
+        }
+        if (output.file.write(chunk) != chunk.size()) {
+            output.writeFailed = true;
+            return false;
+        }
+        output.received += chunk.size();
+        output.hash.addData(chunk);
+    }
+    return true;
+}
+
+void UpdateService::finishDownload(QNetworkReply* reply)
+{
+    reply_ = nullptr;
+    reply->deleteLater();
+    const bool validResponse = readDownload(reply);
+    auto& output = *download_;
+    if (output.writeFailed) {
+        fail(tr("写入安装包失败，请检查磁盘空间。"));
+        return;
+    }
+    if (!validResponse || output.received != installer_.size) {
+        const int status = httpStatus(reply);
+        if (status != 0 && status != 200 && status != 206)
+            retryDownload(tr("镜像下载请求失败（HTTP %1）。").arg(status));
+        else
+            retryDownload(tr("安装包传输中断或镜像响应不完整。"));
+        return;
+    }
+    if (output.hash.result() != installer_.sha256) {
+        fail(tr("安装包 SHA-256 校验失败。请重新检查更新。"));
+        return;
+    }
+    const QString path = stage_->filePath(filename_);
+    if (!output.file.flush() || !output.file.rename(path)) {
+        fail(tr("无法保存已下载的安装包。"));
+        return;
+    }
+    download_.reset();
+    percent_ = 100;
+    installer_.path = path;
+    if (automaticRequest_) setState(State::Ready, readyMessage());
+    else requestInstall(true);
+}
+
+void UpdateService::retryDownload(const QString& reason)
+{
+    if (download_->attempts >= MaxDownloadAttempts || download_->received == installer_.size) {
+        fail(tr("%1 可以重新检查更新或重试下载。").arg(reason));
+        return;
+    }
+    retryTimer_->start(1000 * download_->attempts);
+    setState(State::Downloading, tr("%1 正在重试下载（%2/%3）…")
+        .arg(reason).arg(download_->attempts + 1).arg(MaxDownloadAttempts));
 }
 
 void UpdateService::requestInstall(bool restartAfterInstall)

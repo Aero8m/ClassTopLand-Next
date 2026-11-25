@@ -1,5 +1,6 @@
 #include "AgentWindow.h"
 
+#include "../Ui/MarkdownDocument.h"
 #include "../Ui/UiWidgets.h"
 #include "../Core/Plugins/PluginWorkspace.h"
 #include "../Ui/Plugins/PluginHistoryDialog.h"
@@ -541,12 +542,6 @@ QString toolLabel(const QString &name)
     return name;
 }
 
-class MessageDocument final : public QTextDocument
-{
-protected:
-    QVariant loadResource(int, const QUrl &) override { return {}; }
-};
-
 void setMarkdown(ElaText *label, const QString &text)
 {
     label->setProperty("sourceMarkdown", text);
@@ -557,24 +552,10 @@ void setMarkdown(ElaText *label, const QString &text)
     if (label->property("renderedPreview").toString() == preview && label->property("hasPreview").toBool()) return;
     label->setProperty("renderedPreview", preview);
     label->setProperty("hasPreview", true);
-    MessageDocument document;
+    AppUi::MarkdownDocument document;
     document.setDefaultFont(label->font());
     document.setDefaultStyleSheet(u"pre { white-space: pre-wrap; font-family: Consolas; } code { font-family: Consolas; }"_s);
-    document.setMarkdown(preview, QTextDocument::MarkdownFeatures(QTextDocument::MarkdownDialectGitHub) |
-                               QTextDocument::MarkdownNoHTML);
-    QList<QPair<int, int>> images;
-    for (auto block = document.begin(); block.isValid(); block = block.next())
-        for (auto it = block.begin(); !it.atEnd(); ++it) {
-            const auto fragment = it.fragment();
-            if (fragment.isValid() && fragment.charFormat().isImageFormat())
-                images.append({fragment.position(), fragment.length()});
-        }
-    for (auto it = images.crbegin(); it != images.crend(); ++it) {
-        QTextCursor cursor(&document);
-        cursor.setPosition(it->first);
-        cursor.setPosition(it->first + it->second, QTextCursor::KeepAnchor);
-        cursor.insertText(u"[图片]"_s, QTextCharFormat());
-    }
+    document.setSource(preview);
     const auto codeBlock = [](const QTextBlock &block) {
         if (!block.isValid()) return false;
         const auto format = block.blockFormat();

@@ -80,6 +80,8 @@ add_executable(ClassTopLand-Next
         src/Core/Plugins/PluginActionRegistry.cpp
         src/Core/Plugins/PluginActionRegistry.h
         src/Core/Plugins/PluginContributions.cpp
+        src/Ui/MarkdownDocument.cpp
+        src/Ui/MarkdownDocument.h
         src/Ui/SettingsLayout.cpp
         src/Ui/SettingsLayout.h
         src/Ui/Plugins/PluginPageWidgets.cpp

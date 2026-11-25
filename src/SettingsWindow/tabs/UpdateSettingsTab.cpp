@@ -3,17 +3,20 @@
 #include "../../Core/CloudSync/CloudOperations.h"
 #include "../../Core/ConfigManager/ConfigManager.h"
 #include "../../Core/Update/UpdateService.h"
+#include "../../Ui/MarkdownDocument.h"
 #include "../../Ui/SettingsLayout.h"
 #include "../../Ui/UiWidgets.h"
 
 #include <ElaMessageBar.h>
-#include <ElaPlainTextEdit.h>
 #include <ElaProgressBar.h>
 #include <ElaPushButton.h>
 #include <ElaText.h>
+#include <ElaTheme.h>
 #include <ElaToggleSwitch.h>
 #include <QDesktopServices>
+#include <QPalette>
 #include <QSignalBlocker>
+#include <QTextBlock>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -72,10 +75,28 @@ UpdateSettingsTab::UpdateSettingsTab(UpdateService* update, QWidget* parent) : E
 
     auto* releaseNotes = new SettingsSection(this);
     releaseNotes->setTitle(tr("更新日志"));
-    auto* notes = new ElaPlainTextEdit(releaseNotes);
-    notes->setReadOnly(true);
+    auto* notes = text({}, releaseNotes);
+    notes->setObjectName(QStringLiteral("updateReleaseNotes"));
     notes->setAccessibleName(tr("更新日志"));
-    notes->setFixedHeight(144);
+    notes->setIsWrapAnywhere(false);
+    notes->setWordWrap(true);
+    notes->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    notes->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    notes->setTextFormat(Qt::RichText);
+    notes->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    const auto updateLinkColor = [notes] {
+        auto palette = notes->palette();
+        palette.setColor(QPalette::Link, eTheme->getThemeColor(eTheme->getThemeMode(), ElaThemeType::PrimaryNormal));
+        notes->setPalette(palette);
+    };
+    updateLinkColor();
+    connect(eTheme, &ElaTheme::themeModeChanged, notes, updateLinkColor);
+    connect(notes, &QLabel::linkActivated, notes, [](const QString& link) {
+        const QUrl url(link, QUrl::StrictMode);
+        if (url.isValid() && !url.host().isEmpty() && url.userInfo().isEmpty()
+            && (url.scheme() == QStringLiteral("https") || url.scheme() == QStringLiteral("http")))
+            QDesktopServices::openUrl(url);
+    });
     releaseNotes->bodyLayout()->addWidget(notes);
     layout->addWidget(releaseNotes);
     layout->addStretch();
@@ -100,14 +121,26 @@ UpdateSettingsTab::UpdateSettingsTab(UpdateService* update, QWidget* parent) : E
         const auto state = update->state();
         const bool downloading = state == State::Downloading;
         status->setText(update->message().isEmpty() ? tr("可以手动检查 Autobuild 上的新版本。") : update->message());
-        releaseNotes->setVisible(!update->notes().trimmed().isEmpty());
-        if (notes->toPlainText() != update->notes()) notes->setPlainText(update->notes());
+        const QString markdown = update->notes();
+        releaseNotes->setVisible(!markdown.trimmed().isEmpty());
+        if (notes->property("sourceMarkdown").toString() != markdown) {
+            notes->setProperty("sourceMarkdown", markdown);
+            MarkdownDocument document;
+            document.setDefaultFont(notes->font());
+            document.setSource(markdown);
+            const auto first = document.firstBlock();
+            const bool hasTitle = first.blockFormat().headingLevel() > 0 && first.text().trimmed() == tr("更新日志");
+            releaseNotes->setTitle(hasTitle ? QString() : tr("更新日志"));
+            notes->setText(document.toHtml());
+        }
         progress->setValue(update->percent());
         progress->setVisible(downloading);
         cancel->setVisible(downloading);
         install->setVisible(state == State::Available || state == State::Ready);
         install->setText(state == State::Ready ? tr("立即安装") : tr("下载并安装"));
-        check->setEnabled(state != State::Checking && !downloading && state != State::Preparing);
+        check->setText(downloading ? tr("重新检查") : tr("检查更新"));
+        check->setToolTip(downloading ? tr("停止当前下载并重新检查更新") : QString());
+        check->setEnabled(state != State::Checking && state != State::Preparing);
         automatic->setEnabled(state != State::Preparing);
         const QSignalBlocker blocker(automatic);
         automatic->setIsToggled(update->automaticUpdates());

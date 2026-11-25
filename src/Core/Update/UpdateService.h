@@ -50,11 +50,18 @@ signals:
     void installRequested(bool restartAfterInstall);
 
 private:
+    struct Download;
     using JsonHandler = std::function<void(const QByteArray&)>;
     void resolve(const QString& filename, std::function<void(const QUrl&)> handler);
     void readManifest(const QByteArray& contents);
     void getSmall(const QUrl& url, const QByteArray& body, JsonHandler handler);
+    void requestDownload();
     void download(const QUrl& url);
+    bool readDownload(QNetworkReply* reply);
+    bool beginDownloadResponse(QNetworkReply* reply);
+    void finishDownload(QNetworkReply* reply);
+    void retryDownload(const QString& reason);
+    void discardDownload();
     void fail(const QString& message);
     void setState(State state, const QString& message = {});
     void checkForUpdate(bool automatic);
@@ -65,8 +72,10 @@ private:
 
     QNetworkAccessManager* network_;
     QTimer* automaticTimer_;
+    QTimer* retryTimer_;
     QNetworkReply* reply_ = nullptr;
     std::unique_ptr<QTemporaryDir> stage_;
+    std::unique_ptr<Download> download_;
     UpdateInstaller installer_;
     QString filename_;
     QString notes_;
