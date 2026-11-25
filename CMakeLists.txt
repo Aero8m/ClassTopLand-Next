@@ -213,6 +213,8 @@ add_executable(ClassTopLand-Next
         src/SettingsWindow/tabs/AgentSettingsTab.h
         src/Core/Update/UpdateService.cpp
         src/Core/Update/UpdateService.h
+        src/SettingsWindow/tabs/UpdateSettingsTab.cpp
+        src/SettingsWindow/tabs/UpdateSettingsTab.h
         src/SettingsWindow/AboutDialog.cpp
         src/SettingsWindow/AboutDialog.h
         src/SettingsWindow/tabs/AppearanceSettingsTab.cpp

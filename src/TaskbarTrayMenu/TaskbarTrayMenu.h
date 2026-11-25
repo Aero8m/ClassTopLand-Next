@@ -6,6 +6,7 @@
 #include <utility>
 
 class QAbstractButton;
+class ElaIconButton;
 class QScrollArea;
 class QGridLayout;
 class QCloseEvent;
@@ -23,6 +24,12 @@ public:
     // Handled by main after AppComposer has saved data and destroyed its windows.
     static constexpr int RestartExitCode = 1000;
     static constexpr int UpdateExitCode = 1001;
+    static constexpr int UpdateOnQuitExitCode = 1002;
+    static constexpr bool isUpdateExitCode(int code)
+    {
+        return code == UpdateExitCode || code == UpdateOnQuitExitCode;
+    }
+    void setUpdateOnQuit(bool ready);
     void showManagedNotification(const QString& message);
 
     explicit TaskbarTrayMenu(QWidget* parent = nullptr);
@@ -52,6 +59,7 @@ public slots:
 
 Q_SIGNALS:
     void exitAccepted(int exitCode);
+    void quitRequested();
     // The user asked for one of the AppComposer-owned windows. The panel never creates
     // or owns them, so it stays a pure presentation layer.
     void settingsRequested();
@@ -88,6 +96,7 @@ private:
     ElaText* scheduleEmpty_ = nullptr;
     ElaText* scheduleMore_ = nullptr;
     ElaText* scheduleError_ = nullptr;
+    ElaIconButton* quitButton_ = nullptr;
     QList<QAbstractButton*> scheduleCards_;
     QString selectedScheduleId_;
     QString scheduleStatus_;

@@ -17,5 +17,6 @@ struct Config
     PluginConfig pluginConfig;
     QJsonObject agentConfig;
     ReminderConfig reminderConfig;
+    bool automaticUpdates = false;
 };
 #endif //CLASSTOPLAND_NEXT_CONFIG_H

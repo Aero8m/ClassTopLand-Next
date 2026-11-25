@@ -73,7 +73,7 @@ UpdatePlatform::Handoff::~Handoff()
 }
 
 bool UpdatePlatform::Handoff::prepare(const UpdateInstaller& installer, const QStringList& arguments,
-                                      const QString& workingDirectory, QString* error)
+                                      const QString& workingDirectory, bool restartAfterInstall, QString* error)
 {
     using namespace UpdateWindows;
     if (commit_ || !installed() || installer.sha256.size() != 32 || installer.size <= 0
@@ -128,7 +128,8 @@ bool UpdatePlatform::Handoff::prepare(const UpdateInstaller& installer, const QS
             + L" " + std::to_wstring(installer.size)
             + L" " + QString::fromLatin1(installer.sha256.toHex()).toStdWString();
     command += L" " + quote(QDir::toNativeSeparators(workingDirectory).toStdWString());
-    for (const auto& argument : arguments) command += L" " + quote(argument.toStdWString());
+    if (!restartAfterInstall) command += L" " + quote(ExitAfterUpdate);
+    else for (const auto& argument : arguments) command += L" " + quote(argument.toStdWString());
 
     STARTUPINFOEXW startup{};
     startup.StartupInfo.cb = sizeof(startup);

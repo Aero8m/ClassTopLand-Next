@@ -18,7 +18,7 @@ public:
     Handoff& operator=(const Handoff&) = delete;
 
     bool prepare(const UpdateInstaller& installer, const QStringList& arguments,
-                 const QString& workingDirectory, QString* error);
+                 const QString& workingDirectory, bool restartAfterInstall, QString* error);
     void commit();
 
 private:

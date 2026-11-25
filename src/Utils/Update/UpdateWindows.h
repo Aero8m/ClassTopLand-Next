@@ -11,6 +11,7 @@ inline constexpr auto GateName = L"Global\\ClassTopLand-Next-Update-{DDB10F20-69
 inline constexpr auto LauncherName = L"ClassTopLand-Next-Update.exe";
 inline constexpr auto AppName = L"ClassTopLand-Next.exe";
 inline constexpr auto Completed = L"complete";
+inline constexpr auto ExitAfterUpdate = L"--ctl-autobuild-exit";
 
 class Handle {
 public:

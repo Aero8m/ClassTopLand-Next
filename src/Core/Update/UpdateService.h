@@ -9,6 +9,7 @@
 class QNetworkAccessManager;
 class QNetworkReply;
 class QTemporaryDir;
+class QTimer;
 class QUrl;
 
 struct UpdateInstaller {
@@ -34,6 +35,10 @@ public:
     int percent() const { return percent_; }
     const UpdateInstaller& installer() const { return installer_; }
 
+    bool automaticUpdates() const { return automaticUpdates_; }
+    bool readyToInstallOnQuit() const { return automaticUpdates_ && state_ == State::Ready; }
+    void setAutomaticUpdates(bool enabled);
+    void installOnQuit();
     void check();
     void downloadAndInstall();
     void cancelDownload();
@@ -42,7 +47,7 @@ public:
 
 signals:
     void changed();
-    void installRequested();
+    void installRequested(bool restartAfterInstall);
 
 private:
     using JsonHandler = std::function<void(const QByteArray&)>;
@@ -52,9 +57,14 @@ private:
     void download(const QUrl& url);
     void fail(const QString& message);
     void setState(State state, const QString& message = {});
-    void requestInstall();
+    void checkForUpdate(bool automatic);
+    void startDownload(bool automatic);
+    void stopRequest();
+    void requestInstall(bool restartAfterInstall);
+    QString readyMessage() const;
 
     QNetworkAccessManager* network_;
+    QTimer* automaticTimer_;
     QNetworkReply* reply_ = nullptr;
     std::unique_ptr<QTemporaryDir> stage_;
     UpdateInstaller installer_;
@@ -64,4 +74,6 @@ private:
     State state_ = State::Idle;
     int build_ = 0;
     int percent_ = 0;
+    bool automaticUpdates_ = false;
+    bool automaticRequest_ = false;
 };

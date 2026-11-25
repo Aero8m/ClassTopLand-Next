@@ -103,8 +103,8 @@ int main(int argc, char* argv[])
             }, [&] { preparedRestart.reset(); });
         }
 #ifdef Q_OS_WIN
-        app.setUpdateHandler([&](const UpdateInstaller& installer, QString* error) {
-            return preparedUpdate.prepare(installer, startup.arguments, workingDirectory, error);
+        app.setUpdateHandler([&](const UpdateInstaller& installer, bool restartAfterInstall, QString* error) {
+            return preparedUpdate.prepare(installer, startup.arguments, workingDirectory, restartAfterInstall, error);
         });
 #endif
         if (!app.startApp()) return 1;
@@ -122,7 +122,7 @@ int main(int argc, char* argv[])
         app.shutdown();
     }
 #ifdef Q_OS_WIN
-    if (exitCode == TaskbarTrayMenu::UpdateExitCode) {
+    if (TaskbarTrayMenu::isUpdateExitCode(exitCode)) {
         instance.release();
         preparedUpdate.commit();
         return 0;

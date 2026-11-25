@@ -384,21 +384,18 @@ void TaskbarTrayMenu::initUI()
     restart->setToolTip(tr("重启应用"));
     restart->setAccessibleName(restart->toolTip());
     restart->setCursor(Qt::PointingHandCursor);
-    auto* quit = new ElaIconButton(ElaIconType::ArrowRightFromBracket, 20, ElaWidgetToolsSize::DefaultControlHeight, ElaWidgetToolsSize::DefaultControlHeight, footer_);
-    quit->setObjectName(QStringLiteral("quitButton"));
-    quit->setBorderRadius(6);
-    quit->setToolTip(tr("退出应用"));
-    quit->setAccessibleName(quit->toolTip());
-    quit->setCursor(Qt::PointingHandCursor);
+    quitButton_ = new ElaIconButton(ElaIconType::ArrowRightFromBracket, 20, ElaWidgetToolsSize::DefaultControlHeight, ElaWidgetToolsSize::DefaultControlHeight, footer_);
+    quitButton_->setObjectName(QStringLiteral("quitButton"));
+    quitButton_->setBorderRadius(6);
+    setUpdateOnQuit(false);
+    quitButton_->setCursor(Qt::PointingHandCursor);
     footerLayout->addWidget(restart);
-    footerLayout->addWidget(quit);
+    footerLayout->addWidget(quitButton_);
     mainLayout->addWidget(footer_);
     connect(restart, &ElaIconButton::clicked, this, [this] {
         requestExit(RestartExitCode);
     });
-    connect(quit, &ElaIconButton::clicked, this, [this] {
-        requestExit(0);
-    });
+    connect(quitButton_, &ElaIconButton::clicked, this, &TaskbarTrayMenu::quitRequested);
     setFixedWidth(PanelWidth);
     adjustSize();
 }
@@ -590,6 +587,13 @@ void TaskbarTrayMenu::hideMenu()
 void TaskbarTrayMenu::showManagedNotification(const QString& message)
 {
     if (trayIcon_) trayIcon_->showMessage(tr("教室通知"), message, QSystemTrayIcon::Information);
+}
+
+void TaskbarTrayMenu::setUpdateOnQuit(bool ready)
+{
+    const QString action = ready ? tr("退出并安装更新") : tr("退出应用");
+    quitButton_->setToolTip(action);
+    quitButton_->setAccessibleName(action);
 }
 
 void TaskbarTrayMenu::requestExit(int exitCode)

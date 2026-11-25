@@ -13,12 +13,15 @@
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QUrl>
+#include <chrono>
 
 #ifdef Q_OS_WIN
 #include "../../Utils/Update/UpdatePlatform.h"
 #endif
 
 namespace {
+constexpr auto FirstAutomaticCheck = std::chrono::seconds(15);
+constexpr auto AutomaticCheckInterval = std::chrono::hours(6);
 constexpr qint64 MaxJsonBytes = 64 * 1024;
 constexpr qint64 MaxInstallerBytes = 256 * 1024 * 1024;
 constexpr auto Host = "autobuild.aero8m.cn";
@@ -43,16 +46,19 @@ bool ok(QNetworkReply* reply)
 }
 
 UpdateService::UpdateService(QObject* parent)
-    : QObject(parent), network_(new QNetworkAccessManager(this))
+    : QObject(parent), network_(new QNetworkAccessManager(this)), automaticTimer_(new QTimer(this))
 {
+    automaticTimer_->setSingleShot(true);
+    connect(automaticTimer_, &QTimer::timeout, this, [this] {
+        if (!automaticUpdates_) return;
+        automaticTimer_->start(AutomaticCheckInterval);
+        checkForUpdate(true);
+    });
 }
 
 UpdateService::~UpdateService()
 {
-    if (reply_) {
-        disconnect(reply_, nullptr, this, nullptr);
-        reply_->abort();
-    }
+    stopRequest();
 }
 
 int UpdateService::currentBuild()
@@ -88,9 +94,48 @@ void UpdateService::fail(const QString& message)
     setState(state_ == State::Downloading ? State::Available : State::Failed, message);
 }
 
+void UpdateService::setAutomaticUpdates(bool enabled)
+{
+    if (automaticUpdates_ == enabled || (enabled && !supported())) return;
+    automaticUpdates_ = enabled;
+    if (enabled) {
+        automaticTimer_->start(FirstAutomaticCheck);
+    } else {
+        automaticTimer_->stop();
+        if (automaticRequest_ && state_ == State::Downloading) {
+            cancelDownload();
+            return;
+        }
+        if (automaticRequest_ && state_ == State::Checking) {
+            stopRequest();
+            setState(State::Idle);
+            return;
+        }
+    }
+    if (state_ == State::Ready) setState(State::Ready, readyMessage());
+    else emit changed();
+}
+
+QString UpdateService::readyMessage() const
+{
+    return automaticUpdates_ ? tr("安装包已校验，将在退出时安装。")
+                             : tr("安装包已校验，可以安装更新。");
+}
+
+void UpdateService::installOnQuit()
+{
+    if (readyToInstallOnQuit()) requestInstall(false);
+}
+
 void UpdateService::check()
 {
-    if (!supported() || reply_ || state_ == State::Preparing) return;
+    checkForUpdate(false);
+}
+
+void UpdateService::checkForUpdate(bool automatic)
+{
+    if (!supported() || reply_ || state_ == State::Preparing || (automatic && state_ == State::Ready)) return;
+    automaticRequest_ = automatic;
     stage_.reset();
     installer_ = {};
     filename_.clear();
@@ -185,29 +230,39 @@ void UpdateService::readManifest(const QByteArray& contents)
     notes_ = notes.toString();
     installer_ = {{}, QByteArray::fromHex(digest.toLatin1()), size};
     setState(State::Available, tr("发现新版本，构建 %1。").arg(build));
+    if (automaticRequest_ && automaticUpdates_) startDownload(true);
 }
 
 void UpdateService::downloadAndInstall()
 {
-    if (state_ == State::Ready) {
-        requestInstall();
-    } else if (state_ == State::Available) {
-        percent_ = 0;
-        setState(State::Downloading, tr("正在下载安装包…"));
-        resolve(filename_, [this](const QUrl& url) { download(url); });
-    }
+    if (state_ == State::Ready) requestInstall(true);
+    else if (state_ == State::Available) startDownload(false);
+}
+
+void UpdateService::startDownload(bool automatic)
+{
+    automaticRequest_ = automatic;
+    percent_ = 0;
+    setState(State::Downloading, tr("正在下载安装包…"));
+    resolve(filename_, [this](const QUrl& url) { download(url); });
 }
 
 void UpdateService::cancelDownload()
 {
-    if (state_ != State::Downloading || !reply_) return;
+    if (state_ != State::Downloading) return;
+    stopRequest();
+    stage_.reset();
+    setState(State::Available, tr("下载已取消。"));
+}
+
+void UpdateService::stopRequest()
+{
+    if (!reply_) return;
     auto* reply = reply_;
     reply_ = nullptr;
     disconnect(reply, nullptr, this, nullptr);
     reply->abort();
     reply->deleteLater();
-    stage_.reset();
-    setState(State::Available, tr("下载已取消。"));
 }
 
 void UpdateService::download(const QUrl& url)
@@ -275,14 +330,15 @@ void UpdateService::download(const QUrl& url)
             return;
         }
         installer_.path = path;
-        requestInstall();
+        if (automaticRequest_) setState(State::Ready, readyMessage());
+        else requestInstall(true);
     });
 }
 
-void UpdateService::requestInstall()
+void UpdateService::requestInstall(bool restartAfterInstall)
 {
     setState(State::Preparing, tr("正在准备退出并安装…"));
-    emit installRequested();
+    emit installRequested(restartAfterInstall);
 }
 
 void UpdateService::installationDeferred(const QString& message)

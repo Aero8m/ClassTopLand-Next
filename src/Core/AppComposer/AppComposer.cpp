@@ -19,6 +19,7 @@
 #include "../WindowInterception/WindowInterceptionService.h"
 #include "../../Utils/UiAccess/UiAccess.h"
 
+#include <ElaMessageBar.h>
 #include <QApplication>
 #include <QFileInfo>
 #include <QGuiApplication>
@@ -183,6 +184,27 @@ bool AppComposer::initInstances()
     trayMenu_ = std::make_unique<TaskbarTrayMenu>();
     connect(trayMenu_.get(), &TaskbarTrayMenu::pluginsRequested, this, &AppComposer::showPluginCenter);
     trayMenu_->setExitGuard([this](int exitCode) { return prepareToExit(exitCode); });
+    update_ = std::make_unique<UpdateService>();
+    const auto loadUpdatePreference = [this] {
+        if (update_) update_->setAutomaticUpdates(ConfigManager::instance().config().automaticUpdates);
+    };
+    connect(&ConfigManager::instance(), &ConfigManager::committed, update_.get(), loadUpdatePreference);
+    connect(update_.get(), &UpdateService::changed, trayMenu_.get(), [this] {
+        trayMenu_->setUpdateOnQuit(update_->readyToInstallOnQuit());
+    });
+    connect(update_.get(), &UpdateService::installRequested, this, [this](bool restartAfterInstall) {
+        if (!initialized_ || !trayMenu_ || exitAccepted_ || restartPreparing_ || restartAccepted_
+            || pluginExitGuardPending_ || pluginExitGuardReady_) {
+            update_->installationDeferred(tr("客户端正在处理另一项退出操作，请稍后重试。"));
+            return;
+        }
+        trayMenu_->requestExit(restartAfterInstall ? TaskbarTrayMenu::UpdateExitCode : TaskbarTrayMenu::UpdateOnQuitExitCode);
+    });
+    connect(trayMenu_.get(), &TaskbarTrayMenu::quitRequested, this, [this] {
+        if (update_->readyToInstallOnQuit()) update_->installOnQuit();
+        else trayMenu_->requestExit(0);
+    });
+    loadUpdatePreference();
     connect(trayMenu_.get(), &TaskbarTrayMenu::exitAccepted, this, [this] {
         exitAccepted_ = true;
         // Do not allow queued settings actions to delete or change the selected
@@ -314,15 +336,6 @@ void AppComposer::showSettingsWindow()
     if (!initialized_) return;
     if (!settingsWindow_) {
         if (!agent_) agent_ = std::make_unique<AgentService>(dataDirectory_, plugins_.get());
-        update_ = std::make_unique<UpdateService>();
-        connect(update_.get(), &UpdateService::installRequested, this, [this] {
-            if (!initialized_ || !trayMenu_ || exitAccepted_ || restartPreparing_ || restartAccepted_
-                || pluginExitGuardPending_ || pluginExitGuardReady_) {
-                update_->installationDeferred(tr("客户端正在处理另一项退出操作，请稍后重试。"));
-                return;
-            }
-            trayMenu_->requestExit(TaskbarTrayMenu::UpdateExitCode);
-        });
         settingsWindow_ = std::make_unique<SettingsWindow>(nullptr, windowInterception_.get(), plugins_.get(), pluginUi_.get(), componentRegistry_.get(), cloud_.get(), agent_.get(), update_.get());
         connect(settingsWindow_.get(), &SettingsWindow::profileEditorRequested,
                 this, &AppComposer::showProfileEditorWindow);
@@ -537,7 +550,7 @@ void AppComposer::changeUiAccess(bool enabled)
     if (!pluginExitGuardPending_ && !pluginExitGuardReady_ && !restartAccepted_ && settingsWindow_) settingsWindow_->setUiAccessSwitching(false);
 }
 
-void AppComposer::setUpdateHandler(std::function<bool(const UpdateInstaller&, QString*)> prepare)
+void AppComposer::setUpdateHandler(std::function<bool(const UpdateInstaller&, bool, QString*)> prepare)
 {
     prepareUpdate_ = std::move(prepare);
 }
@@ -545,10 +558,15 @@ void AppComposer::setUpdateHandler(std::function<bool(const UpdateInstaller&, QS
 bool AppComposer::prepareToExit(int exitCode)
 {
     if (restartPreparing_ || restartAccepted_) return false;
-    const bool updating = exitCode == TaskbarTrayMenu::UpdateExitCode;
+    const bool updating = TaskbarTrayMenu::isUpdateExitCode(exitCode);
+    const auto deferUpdate = [this, exitCode](const QString& message) {
+        update_->installationDeferred(message);
+        if (exitCode == TaskbarTrayMenu::UpdateOnQuitExitCode)
+            ElaMessageBar::warning(ElaMessageBarType::TopRight, tr("更新暂缓"), message, 5000, trayMenu_.get());
+    };
     if (plugins_ && plugins_->publishing()) {
         if (updating) {
-            update_->installationDeferred(tr("插件正在发布，请在发布完成后重试。"));
+            deferUpdate(tr("插件正在发布，请在发布完成后重试。"));
             return false;
         }
         if (!silentManagedRestart_)
@@ -563,7 +581,7 @@ bool AppComposer::prepareToExit(int exitCode)
         pluginUi_->prepareAll([this,exitCode,profileRequest,uiAccessRequest](bool allowed) {
             pluginExitGuardPending_=false;
             if(!allowed || !initialized_ || shutdown_) {
-                if (exitCode == TaskbarTrayMenu::UpdateExitCode && update_)
+                if (TaskbarTrayMenu::isUpdateExitCode(exitCode) && update_)
                     update_->installationDeferred(tr("已取消退出。安装包已准备好，可以重试。"));
                 if(uiAccessRequest && settingsWindow_)settingsWindow_->setUiAccessSwitching(false);
                 return;
@@ -597,13 +615,14 @@ bool AppComposer::prepareToExit(int exitCode)
         if (!profileEditorWindow_->prepareToClose()) return false;
     }
     if (updating) {
+        const bool restartAfterInstall = exitCode == TaskbarTrayMenu::UpdateExitCode;
         QString error;
         if (!ProfileManager::instance().save(&error) || !ConfigManager::instance().save(&error)) {
-            update_->installationDeferred(tr("无法保存当前数据：%1").arg(error));
+            deferUpdate(tr("无法保存当前数据：%1").arg(error));
             return false;
         }
-        if (!prepareUpdate_ || !prepareUpdate_(update_->installer(), &error)) {
-            update_->installationDeferred(error.isEmpty() ? tr("无法准备安装。") : error);
+        if (!prepareUpdate_ || !prepareUpdate_(update_->installer(), restartAfterInstall, &error)) {
+            deferUpdate(error.isEmpty() ? tr("无法准备安装。") : error);
             return false;
         }
         update_->transferInstaller();

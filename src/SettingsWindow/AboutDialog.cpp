@@ -1,9 +1,6 @@
 #include "AboutDialog.h"
 
 #include <ElaImageCard.h>
-#include <ElaPlainTextEdit.h>
-#include <ElaProgressBar.h>
-#include <ElaPushButton.h>
 #include <ElaText.h>
 #include <ElaTheme.h>
 #include <QApplication>
@@ -16,7 +13,7 @@
 #include "../Core/CloudSync/CloudOperations.h"
 #include "../Core/Update/UpdateService.h"
 
-AboutDialog::AboutDialog(UpdateService* update, QWidget* parent) : ElaDialog(parent)
+AboutDialog::AboutDialog(QWidget* parent) : ElaDialog(parent)
 {
     setWindowTitle(QStringLiteral("关于"));
     setWindowIcon(QApplication::windowIcon());
@@ -82,49 +79,5 @@ AboutDialog::AboutDialog(UpdateService* update, QWidget* parent) : ElaDialog(par
     // ElaAppBar already reserves its height in the window contents margins.
     layout->setContentsMargins(30, 30, 30, 30);
     layout->addLayout(contentLayout);
-    if (update && update->supported()) {
-        auto* status = new ElaText(this);
-        status->setWordWrap(true);
-        status->setTextFormat(Qt::PlainText);
-        auto* notes = new ElaPlainTextEdit(this);
-        notes->setReadOnly(true);
-        notes->setAccessibleName(QStringLiteral("更新日志"));
-        notes->setFixedHeight(86);
-        auto* progress = new ElaProgressBar(this);
-        auto* check = new ElaPushButton(QStringLiteral("检查更新"), this);
-        auto* install = new ElaPushButton(QStringLiteral("下载并安装"), this);
-        auto* cancel = new ElaPushButton(QStringLiteral("取消下载"), this);
-        auto* actions = new QHBoxLayout;
-        actions->addWidget(check);
-        actions->addWidget(install);
-        actions->addWidget(cancel);
-        actions->addStretch();
-        layout->addWidget(status);
-        layout->addWidget(notes);
-        layout->addWidget(progress);
-        layout->addLayout(actions);
-
-        connect(check, &ElaPushButton::clicked, update, &UpdateService::check);
-        connect(install, &ElaPushButton::clicked, update, &UpdateService::downloadAndInstall);
-        connect(cancel, &ElaPushButton::clicked, update, &UpdateService::cancelDownload);
-        const auto render = [=] {
-            using State = UpdateService::State;
-            const auto state = update->state();
-            status->setText(update->message());
-            if (notes->toPlainText() != update->notes()) notes->setPlainText(update->notes());
-            progress->setValue(update->percent());
-            progress->setVisible(state == State::Downloading);
-            cancel->setVisible(state == State::Downloading);
-            install->setVisible(state == State::Available || state == State::Ready);
-            install->setText(state == State::Ready ? QStringLiteral("安装更新") : QStringLiteral("下载并安装"));
-            check->setEnabled(state != State::Checking && state != State::Downloading && state != State::Preparing);
-        };
-        connect(update, &UpdateService::changed, this, render);
-        render();
-    } else {
-        auto* mirror = new ElaPushButton(QStringLiteral("前往 Autobuild 下载"), this);
-        connect(mirror, &ElaPushButton::clicked, this, [] { QDesktopServices::openUrl(UpdateService::mirrorPage()); });
-        layout->addWidget(mirror, 0, Qt::AlignLeft);
-    }
     setFixedSize(QSize(480, 400).expandedTo(minimumSizeHint()));
 }

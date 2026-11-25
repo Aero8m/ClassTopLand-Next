@@ -155,10 +155,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         return int(result);
     }
     gate.reset();
-    const bool started = restart(directory + L"\\" + AppName, argv[7], argc, argv);
-    if (!started)
+    const bool exitAfterUpdate = argc > 8 && std::wstring_view(argv[8]) == ExitAfterUpdate;
+    if (!exitAfterUpdate && !restart(directory + L"\\" + AppName, argv[7], argc, argv)) {
         report(L"无法启动 ClassTopLand Next。安装结果代码：" + std::to_wstring(result) + L"。请尝试手动启动。");
-    else if (result != ERROR_SUCCESS && result != ERROR_CANCELLED)
+        return 1;
+    }
+    if (result != ERROR_SUCCESS && result != ERROR_CANCELLED)
         report(L"更新安装未完成。结果代码：" + std::to_wstring(result) + L"。");
-    return started ? int(result) : 1;
+    return int(result);
 }

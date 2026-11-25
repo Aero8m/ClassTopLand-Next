@@ -54,7 +54,7 @@ public:
     // event loop returns, so cleanup no longer depends on scope-exit timing.
     // Safe to call more than once.
     void shutdown();
-    void setUpdateHandler(std::function<bool(const UpdateInstaller&, QString*)> prepare);
+    void setUpdateHandler(std::function<bool(const UpdateInstaller&, bool, QString*)> prepare);
 
 private slots:
     // Create each window on demand and always reuse that one instance.
@@ -89,7 +89,7 @@ private:
     std::optional<bool> startupUiAccessOverride_;
     std::function<bool(const Config&, const QString&, QString*)> prepareRestart_;
     std::function<void()> cancelRestart_;
-    std::function<bool(const UpdateInstaller&, QString*)> prepareUpdate_;
+    std::function<bool(const UpdateInstaller&, bool, QString*)> prepareUpdate_;
     bool restartPreparing_ = false;
     bool restartAccepted_ = false;
     bool silentManagedRestart_ = false;

@@ -157,6 +157,7 @@ QJsonObject toJson(const Config& config)
     return {{QStringLiteral("version"), kFormatVersion},
             {QStringLiteral("config"), QJsonObject{{QStringLiteral("profileName"), config.profileName},
                                                    {QStringLiteral("reminderConfig"), Reminders::toJson(config.reminderConfig)},
+                                                   {QStringLiteral("automaticUpdates"), config.automaticUpdates},
                                                    {QStringLiteral("agentConfig"), config.agentConfig},
                                                    {QStringLiteral("pluginConfig"), QJsonObject{{QStringLiteral("plugins"), plugins}, {QStringLiteral("recoveryNextStart"), config.pluginConfig.recoveryNextStart}}},
                                                    {QStringLiteral("desktopCountdownConfig"), desktopCountdown},
@@ -174,6 +175,10 @@ bool fromJson(const QJsonObject& root, Config& config, QString* error)
     const QJsonValue configValue = root.value(QStringLiteral("config"));
     if (!configValue.isObject()) return fail(error, QStringLiteral("config must be an object"));
     const QJsonObject data = configValue.toObject();
+    const auto automaticUpdates = data.value(QStringLiteral("automaticUpdates"));
+    if (!automaticUpdates.isUndefined() && !automaticUpdates.isBool())
+        return fail(error, QStringLiteral("config.automaticUpdates must be a boolean"));
+    config.automaticUpdates = automaticUpdates.toBool();
     if (!Reminders::fromJson(data.value(QStringLiteral("reminderConfig")), config.reminderConfig, error)) return false;
     const QJsonValue profileName = data.value(QStringLiteral("profileName"));
     if (!profileName.isString()) return fail(error, QStringLiteral("config.profileName must be a string"));

@@ -3,12 +3,10 @@
 
 #include <ElaDialog.h>
 
-class UpdateService;
-
 class AboutDialog final : public ElaDialog
 {
 public:
-    explicit AboutDialog(UpdateService* update, QWidget* parent = nullptr);
+    explicit AboutDialog(QWidget* parent = nullptr);
 };
 
 #endif

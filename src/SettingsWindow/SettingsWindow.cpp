@@ -9,6 +9,7 @@
 #include "tabs/CourseBarSettingsTab.h"
 #include "tabs/DesktopCountdownSettingsTab.h"
 #include "tabs/ReminderSettingsTab.h"
+#include "tabs/UpdateSettingsTab.h"
 #include "tabs/WindowInterceptionSettingsTab.h"
 
 #include <QScreen>
@@ -78,6 +79,8 @@ void SettingsWindow::initUI()
         agentTab_ = new AgentSettingsTab(agent_, this);
         addPageNode(QStringLiteral("AI Agent"), agentTab_, ElaIconType::Robot);
     }
+    if (update_)
+        addPageNode(QStringLiteral("更新"), new UpdateSettingsTab(update_, this), ElaIconType::ArrowRotateRight);
     addFooterNode(QStringLiteral("关于"), aboutNodeKey_, 0, ElaIconType::CircleInfo);
     connect(this, &ElaWindow::navigationNodeClicked, this,
             [this](ElaNavigationType::NavigationNodeType, const QString& nodeKey) {
@@ -95,7 +98,7 @@ void SettingsWindow::openAgentPage(const QString &draftSession)
 
 void SettingsWindow::showAboutDialog()
 {
-    if (!aboutDialog_) aboutDialog_ = new AboutDialog(update_, this);
+    if (!aboutDialog_) aboutDialog_ = new AboutDialog(this);
     if (!aboutDialog_->isVisible()) {
         // Center on the settings window, keeping the dialog inside its screen.
         const QRect available = screen()->availableGeometry();
