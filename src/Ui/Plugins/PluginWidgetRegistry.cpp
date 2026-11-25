@@ -63,6 +63,21 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QWidget>
+
+PluginToggleSwitch::PluginToggleSwitch(QWidget *parent) : ElaToggleSwitch(parent), nativeSize_(minimumSize())
+{
+}
+
+bool PluginToggleSwitch::restoreMinimumSize()
+{
+    const QSize minimum = minimumSize().expandedTo(nativeSize_);
+    const QSize maximum = maximumSize().expandedTo(nativeSize_);
+    if (minimum == minimumSize() && maximum == maximumSize()) return false;
+    setMaximumSize(maximum);
+    setMinimumSize(minimum);
+    return true;
+}
+
 void PluginWidgetRegistry::applyTheme(QWidget *widget, bool descendants)
 {
     const auto mode = eTheme->getThemeMode();
@@ -310,6 +325,22 @@ bool PluginWidgetRegistry::write(QObject *object, const QString &name, const QJs
         }
         if (!validateOnly) toggle->setIsToggled(value.toBool());
         return true;
+    }
+    if (auto *toggle = qobject_cast<PluginToggleSwitch *>(object))
+    {
+        const bool width = name == QStringLiteral("minimumWidth") || name == QStringLiteral("maximumWidth");
+        const bool height = name == QStringLiteral("minimumHeight") || name == QStringLiteral("maximumHeight");
+        if (width || height)
+        {
+            const auto native = toggle->minimumSizeHint();
+            if (const int dimension = value.toInt(-1);
+                dimension < (width ? native.width() : native.height()) || dimension > QWIDGETSIZE_MAX)
+            {
+                *error = QStringLiteral("开关尺寸不能小于原生尺寸 %1 × %2，且必须在 Qt 尺寸范围内")
+                    .arg(native.width()).arg(native.height());
+                return false;
+            }
+        }
     }
     const auto propertyName =
         object->metaObject()->indexOfProperty(name.toUtf8()) >= 0 ? name : QStringLiteral("p") + name;

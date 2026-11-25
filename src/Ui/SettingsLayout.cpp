@@ -105,25 +105,36 @@ bool SettingsRow::attachEditor(QWidget* editor)
     expanding_ = qobject_cast<QLineEdit*>(editor) || editor->metaObject()->className() == QByteArray("QWidget");
     editorWidth_ = expanding_ ? 240 : qobject_cast<QComboBox*>(editor) ? 180 :
         qobject_cast<QDateTimeEdit*>(editor) ? 180 : qobject_cast<QAbstractSpinBox*>(editor) ? 150 : 0;
-    if (!editorWidth_) editorWidth_ = qMax(1, editor->sizeHint().width());
+    editorMinimumWidth_ = editor->minimumWidth();
+    editorMaximumWidth_ = qMax(editorMinimumWidth_, editor->maximumWidth());
+    if (!editorWidth_)
+        editorWidth_ = qMax(1, editor->sizeHint().expandedTo(editor->minimumSizeHint()).width());
+    editorWidth_ = qBound(editorMinimumWidth_, editorWidth_, editorMaximumWidth_);
     body_->addWidget(editor, expanding_ ? 1 : 0, Qt::AlignVCenter);
     arrange(); return true;
 }
 void SettingsRow::detachEditor(QWidget* editor)
 {
     if (editor_ != editor) return;
-    body_->removeWidget(editor); editor_.clear(); updateGeometry();
+    body_->removeWidget(editor);
+    editor->setMinimumWidth(editorMinimumWidth_);
+    editor->setMaximumWidth(editorMaximumWidth_);
+    editor_.clear();
+    expanding_ = false;
+    updateGeometry();
 }
 int SettingsRow::heightForWidth(int width) const
 {
     // Layout queries precede resizeEvent: predict the direction from the
     // requested width so ancestors reserve the stacked row's full height.
     const bool narrow = editor_ && width < 160 + 20 + editorWidth_;
-    const int editorWidth = expanding_ ? qMax(editorWidth_, (width - 20) / 2) : editorWidth_;
+    const int editorWidth = expanding_ ? qBound(editorWidth_, (width - 20) / 2, editorMaximumWidth_) : editorWidth_;
     const int labelWidth = qMax(1, !editor_ || narrow ? width : width - 20 - editorWidth);
     const int labelHeight = labels_->hasHeightForWidth() ? labels_->heightForWidth(labelWidth) : labels_->sizeHint().height();
     if (!editor_) return labelHeight;
-    const int controlWidth = narrow ? width : editorWidth;
+    const int controlWidth = narrow
+        ? qBound(editorMinimumWidth_, width, expanding_ ? editorMaximumWidth_ : editorWidth_)
+        : editorWidth;
     const int preferredHeight = editor_->hasHeightForWidth() ?
         editor_->heightForWidth(controlWidth) : editor_->sizeHint().height();
     const int controlHeight = qBound(editor_->minimumHeight(), preferredHeight, editor_->maximumHeight());
@@ -134,8 +145,9 @@ void SettingsRow::arrange()
     if (!editor_) return;
     const bool narrow = width() < 160 + 20 + editorWidth_;
     body_->setDirection(narrow ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight);
-    const int minimum = narrow ? 0 : editorWidth_;
-    const int maximum = expanding_ ? QWIDGETSIZE_MAX : qMax(1, qMin(editorWidth_, width()));
+    // Stacking the labels above the editor lets narrow rows retain native minimum widths.
+    const int minimum = narrow ? editorMinimumWidth_ : editorWidth_;
+    const int maximum = expanding_ ? editorMaximumWidth_ : qMax(minimum, qMin(editorWidth_, width()));
     editor_->setMinimumWidth(minimum); editor_->setMaximumWidth(maximum);
     editor_->setSizePolicy(expanding_ ? QSizePolicy::Expanding : QSizePolicy::Preferred, QSizePolicy::Fixed);
 }

@@ -1,5 +1,6 @@
 #include "UpdateSettingsTab.h"
 
+#include "../../Core/CloudSync/CloudOperations.h"
 #include "../../Core/ConfigManager/ConfigManager.h"
 #include "../../Core/Update/UpdateService.h"
 #include "../../Ui/SettingsLayout.h"
@@ -21,10 +22,18 @@ UpdateSettingsTab::UpdateSettingsTab(UpdateService* update, QWidget* parent) : E
     using namespace AppUi;
     setObjectName(QStringLiteral("updateSettingsTab"));
     auto* layout = page(this, tr("更新"), 24);
-    auto* version = card(layout, UpdateService::currentBuild() > 0
-        ? tr("当前构建 %1").arg(UpdateService::currentBuild()) : tr("当前为本地构建"));
+    const bool installed = update->supported();
+    auto* version = card(layout, installed ? tr("已安装版本") : tr("当前运行版本"));
+    const int build = UpdateService::currentBuild();
+    const QString buildId = CloudOperations::buildId();
+    const QString versionText = build > 0
+        ? tr("Autobuild 构建 #%1 · Git 提交 %2").arg(build).arg(buildId)
+        : (buildId == QStringLiteral("local") ? tr("本地构建") : tr("本地构建（%1）").arg(buildId));
+    auto* versionLabel = text(versionText, this);
+    versionLabel->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+    version->addWidget(versionLabel);
 
-    if (!update->supported()) {
+    if (!installed) {
         version->addWidget(text(tr("应用内更新适用于通过 Autobuild 安装的 Windows x64 版本。"), this));
         auto* mirror = button(tr("前往 Autobuild 下载"), this);
         version->addWidget(mirror, 0, Qt::AlignLeft);

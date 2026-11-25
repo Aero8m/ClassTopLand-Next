@@ -111,6 +111,15 @@ PluginNativeView::PluginNativeView(const QString &package, const QString &file, 
     }
     objects_ = loader.objects;
     nativeStyles_ = loader.nativeStyles;
+    for (auto it = objects_.cbegin(); it != objects_.cend(); ++it)
+    {
+        auto *toggle = qobject_cast<PluginToggleSwitch *>(it.value().data());
+        if (toggle && toggle->restoreMinimumSize())
+            diagnostics_.append(QJsonObject{{QStringLiteral("code"), QStringLiteral("UI_CONTROL_SIZE_NORMALIZED")},
+                {QStringLiteral("severity"), QStringLiteral("warning")}, {QStringLiteral("object"), it.key()},
+                {QStringLiteral("property"), QStringLiteral("size")}, {QStringLiteral("file"), file},
+                {QStringLiteral("message"), QStringLiteral("开关的尺寸约束小于原生尺寸，已按原生尺寸调整")}});
+    }
     if (!component() && !finalizePageWidgets()) return;
     if (component())
     {

@@ -7,9 +7,10 @@ class PluginToggleSwitch final : public ElaToggleSwitch
     Q_OBJECT
     Q_PROPERTY(bool checked READ checked WRITE setChecked NOTIFY toggled)
   public:
-    explicit PluginToggleSwitch(QWidget *parent = nullptr) : ElaToggleSwitch(parent)
-    {
-    }
+    explicit PluginToggleSwitch(QWidget *parent = nullptr);
+    QSize sizeHint() const override { return nativeSize_; }
+    QSize minimumSizeHint() const override { return nativeSize_; }
+    bool restoreMinimumSize();
     bool checked() const
     {
         return getIsToggled();
@@ -18,6 +19,8 @@ class PluginToggleSwitch final : public ElaToggleSwitch
     {
         setIsToggled(value);
     }
+  private:
+    const QSize nativeSize_;
 };
 class PluginWidgetRegistry
 {

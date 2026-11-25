@@ -49,6 +49,8 @@ private:
     QBoxLayout* body_;
     QPointer<QWidget> editor_;
     int editorWidth_ = 0;
+    int editorMinimumWidth_ = 0;
+    int editorMaximumWidth_ = QWIDGETSIZE_MAX;
     bool expanding_ = false;
 };
 
