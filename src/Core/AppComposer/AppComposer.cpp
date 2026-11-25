@@ -15,6 +15,7 @@
 #include "../ThemeManager/ThemeManager.h"
 #include "../Reminders/ReminderService.h"
 #include "../CloudSync/CloudSyncService.h"
+#include "../Update/UpdateService.h"
 #include "../WindowInterception/WindowInterceptionService.h"
 #include "../../Utils/UiAccess/UiAccess.h"
 
@@ -253,6 +254,7 @@ void AppComposer::dropInstances()
     if (pluginUi_) pluginUi_->closeDialogs();
     if (plugins_) plugins_->stopAll();
     settingsWindow_.reset();
+    update_.reset();
     agent_.reset();
     windowInterception_.reset();
     profileEditorWindow_.reset();
@@ -312,7 +314,16 @@ void AppComposer::showSettingsWindow()
     if (!initialized_) return;
     if (!settingsWindow_) {
         if (!agent_) agent_ = std::make_unique<AgentService>(dataDirectory_, plugins_.get());
-        settingsWindow_ = std::make_unique<SettingsWindow>(nullptr, windowInterception_.get(), plugins_.get(), pluginUi_.get(), componentRegistry_.get(), cloud_.get(), agent_.get());
+        update_ = std::make_unique<UpdateService>();
+        connect(update_.get(), &UpdateService::installRequested, this, [this] {
+            if (!initialized_ || !trayMenu_ || exitAccepted_ || restartPreparing_ || restartAccepted_
+                || pluginExitGuardPending_ || pluginExitGuardReady_) {
+                update_->installationDeferred(tr("客户端正在处理另一项退出操作，请稍后重试。"));
+                return;
+            }
+            trayMenu_->requestExit(TaskbarTrayMenu::UpdateExitCode);
+        });
+        settingsWindow_ = std::make_unique<SettingsWindow>(nullptr, windowInterception_.get(), plugins_.get(), pluginUi_.get(), componentRegistry_.get(), cloud_.get(), agent_.get(), update_.get());
         connect(settingsWindow_.get(), &SettingsWindow::profileEditorRequested,
                 this, &AppComposer::showProfileEditorWindow);
         connect(settingsWindow_.get(), &SettingsWindow::profileSwitchRequested,
@@ -526,10 +537,20 @@ void AppComposer::changeUiAccess(bool enabled)
     if (!pluginExitGuardPending_ && !pluginExitGuardReady_ && !restartAccepted_ && settingsWindow_) settingsWindow_->setUiAccessSwitching(false);
 }
 
+void AppComposer::setUpdateHandler(std::function<bool(const UpdateInstaller&, QString*)> prepare)
+{
+    prepareUpdate_ = std::move(prepare);
+}
+
 bool AppComposer::prepareToExit(int exitCode)
 {
     if (restartPreparing_ || restartAccepted_) return false;
+    const bool updating = exitCode == TaskbarTrayMenu::UpdateExitCode;
     if (plugins_ && plugins_->publishing()) {
+        if (updating) {
+            update_->installationDeferred(tr("插件正在发布，请在发布完成后重试。"));
+            return false;
+        }
         if (!silentManagedRestart_)
             QMessageBox::information(agentWindow_.get(), tr("正在发布插件"), tr("请等待插件发布完成后再退出或重启。"));
         return false;
@@ -542,6 +563,8 @@ bool AppComposer::prepareToExit(int exitCode)
         pluginUi_->prepareAll([this,exitCode,profileRequest,uiAccessRequest](bool allowed) {
             pluginExitGuardPending_=false;
             if(!allowed || !initialized_ || shutdown_) {
+                if (exitCode == TaskbarTrayMenu::UpdateExitCode && update_)
+                    update_->installationDeferred(tr("已取消退出。安装包已准备好，可以重试。"));
                 if(uiAccessRequest && settingsWindow_)settingsWindow_->setUiAccessSwitching(false);
                 return;
             }
@@ -562,11 +585,30 @@ bool AppComposer::prepareToExit(int exitCode)
     QScopedValueRollback<bool> preparing(restartPreparing_, true);
     bool exitAccepted = false;
     if (plugins_) plugins_->setWritesBlocked(true);
-    auto resumePlugins = qScopeGuard([this, &exitAccepted] { if (!exitAccepted && plugins_) plugins_->setWritesBlocked(false); });
+    auto resumePlugins = qScopeGuard([this, &exitAccepted, updating] {
+        if (exitAccepted) return;
+        if (plugins_) plugins_->setWritesBlocked(false);
+        if (updating && update_)
+            update_->installationDeferred(tr("已取消退出。安装包已准备好，可以重试。"));
+    });
     if (profileEditorWindow_ && profileEditorWindow_->session()->isDirty()) {
         if (silentManagedRestart_) return false;
         showProfileEditorWindow();
         if (!profileEditorWindow_->prepareToClose()) return false;
+    }
+    if (updating) {
+        QString error;
+        if (!ProfileManager::instance().save(&error) || !ConfigManager::instance().save(&error)) {
+            update_->installationDeferred(tr("无法保存当前数据：%1").arg(error));
+            return false;
+        }
+        if (!prepareUpdate_ || !prepareUpdate_(update_->installer(), &error)) {
+            update_->installationDeferred(error.isEmpty() ? tr("无法准备安装。") : error);
+            return false;
+        }
+        update_->transferInstaller();
+        exitAccepted = true;
+        return true;
     }
     const bool restarting = exitCode == TaskbarTrayMenu::RestartExitCode;
     if (pendingProfileId_.isEmpty() && !pendingUiAccess_ && (!restarting || !prepareRestart_)) { exitAccepted = true; return true; }

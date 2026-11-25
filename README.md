@@ -85,6 +85,12 @@ ClassTopLand Next 将当天课程、上下课倒计时和日期显示在桌面�
 
 同一用户数据目录仅允许运行一个实例。重复启动会显示“程序已经运行”弹窗并退出，可从系统托盘打开已有程序；正常重启、切换档案与 UIAccess 权限切换按原有流程交接。异常退出后再次启动会自动回收失效的实例锁。
 
+### 软件更新
+
+从 Autobuild 安装支持更新的 Windows x64 版本后，可以在「设置 → 关于 → 检查更新」查看新的自动构建和更新日志。点击「下载并安装」后，应用通过 Autobuild 下载完整安装包并校验大小和 SHA-256。退出前会处理未保存的档案及插件草稿，然后请求管理员授权。安装只显示进度，成功后自动启动新版。拒绝授权会恢复启动原程序。安装器要求重启 Windows 时，应用会提示手动重启。
+
+使用旧版本时，请先从 [Autobuild](https://autobuild.aero8m.cn/ClassTopLand-Next) 手动安装一次支持更新的版本。源码构建和便携运行也可通过该目录手动下载安装包。
+
 ### 提醒
 
 在「设置 → 提醒」中设置总开关、上课／下课／课前提醒的独立开关、课前提前分钟数，以及三类提醒的文本。默认保持上课、下课和课前 2 分钟提醒；文本支持 `{科目}`、`{节次}`，也可填写固定文字。结束编辑后保存，可恢复默认文本或测试展示。空白文本不能保存；保存失败时原设置继续生效，输入内容保留以便修改或重试。
@@ -245,7 +251,7 @@ Windows 构建会复制 ElaWidgetTools 动态库，并自动调用同套件的 `
 .\build\ClassTopLand-Next.exe
 ```
 
-分发时请保留部署后的 DLL 和插件目录，不要只复制可执行文件。Debug 构建请改用对应构建目录和 `windeployqt --debug`。
+分发时请保留部署后的 DLL 和插件目录。制作支持应用内更新的安装包时，还需随主程序打包 ClassTopLand-Next-Update.exe。Debug 构建请改用对应构建目录和 `windeployqt --debug`。
 
 ### GitHub Actions 自动构建
 
@@ -257,7 +263,7 @@ Windows 构建会复制 ElaWidgetTools 动态库，并自动调用同套件的 `
 
 流程使用 `windows-2022`、MSVC 2022 x64、Qt 6.9.3、CMake 4.0.3 和 Ninja。runner 自带的 CMake 可能低于项目最低要求，因此工作流会单独安装固定版本。Qt 安装结果通过 Actions cache 复用；源码及两个子模块每次按对应提交检出。
 
-构建号取实际检出提交的前 7 位，工作流仅在临时工作区替换 `src/VERSION.h` 中的 `|BUILD_VERSION|`。CMake 保留 EXE 完整性标签规范化与 Qt 部署步骤；随后独立整理打包目录并用 `windeployqt` 部署运行依赖，最后调用 [Inno Setup 脚本](./packaging/windows/setup.iss) 生成：
+安装包文件名中的构建标识取实际检出提交的前 7 位，工作流仅在临时工作区替换 `src/VERSION.h` 中的 `|BUILD_VERSION|`。CMake 保留 EXE 完整性标签规范化与 Qt 部署步骤；随后独立整理打包目录并用 `windeployqt` 部署运行依赖，最后调用 [Inno Setup 脚本](./packaging/windows/setup.iss) 生成：
 
 ```text
 ClassTopLand-Next-setup_build_<7位提交号>-amd64.exe
@@ -267,9 +273,9 @@ ClassTopLand-Next-setup_build_<7位提交号>-amd64.exe
 
 安装包可在该次 Actions 运行页面的 Artifacts 下载，保留 14 天；自动发布成功后也可从 Releases 下载。安装脚本沿用现有安装包的 AppId、可选桌面快捷方式和所有用户开机启动快捷方式，使用管理员安装到 Program Files。工作流打包时排除 VC++ 运行库安装器。
 
-发布任务独立运行，仅该任务申请 `contents: write`，通过 GitHub 自动提供的 `GITHUB_TOKEN` 认证，无需保存个人 PAT。tag 为 7 位提交号，标题为 `build <构建号>`，更新日志取本次提交信息。每次发布均为正式 Release，并设为 Latest；GitHub 同时只保留一个 Latest 标记，因此历史版本不会同时显示 Latest。重跑同一提交时上传替换同名安装包，不删除已有 Release 或 tag；已有 tag 指向其他提交时直接失败。重跑已有版本时同步更新发布说明、取消 prerelease 并设为 Latest。发布说明保留提交信息生成的更新日志和自动构建提示，不再额外附加完整提交 SHA 行。
+发布任务独立运行，仅该任务申请 contents: write，通过 GitHub 自动提供的 GITHUB_TOKEN 认证。tag 为 7 位提交号，标题为 build <构建标识>，更新日志取本次提交信息。自动发布使用 GITHUB_RUN_NUMBER 作为应用内更新序号，将同一个值编入应用并写入 Release 正文的机器可读标记。新建 Release 时设为 Latest。重跑同一标签时保留已经公开的安装包和发布说明。已有 tag 指向其他提交时直接失败。
 
-镜像站通过服务器端独立的定时任务主动拉取 GitHub Release 安装包，下载后校验文件大小与 SHA-256，再提供下载。镜像同步不属于 GitHub Actions 工作流，也不需要在 Actions 中配置镜像站上传凭据；同步失败不影响 GitHub Release 发布。
+镜像站通过独立定时任务拉取 GitHub Release 安装包，校验大小和 SHA-256 后提供下载。镜像随后为符合条件的新构建发布 update.json，客户端通过 Autobuild 查版本和下载安装包。镜像仍独立于 Actions 发布流程。
 
 当前自动构建验证编译、依赖文件和安装包生成，不自动验证界面或实际安装运行。原 Autobuild 脚本中的明文 PAT 应撤销，迁移时不要将其放入仓库。
 

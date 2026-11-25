@@ -5,6 +5,10 @@ execute_process(COMMAND git rev-parse HEAD
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         OUTPUT_VARIABLE CTX_BUILD_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 string(TIMESTAMP CTX_BUILD_TIME "%Y-%m-%dT%H:%M:%SZ" UTC)
+set(CTX_UPDATE_BUILD_NUMBER 0 CACHE STRING "Release sequence used by the Autobuild updater")
+if (NOT CTX_UPDATE_BUILD_NUMBER MATCHES "^(0|[1-9][0-9]*)$" OR CTX_UPDATE_BUILD_NUMBER GREATER 2147483647)
+    message(FATAL_ERROR "CTX_UPDATE_BUILD_NUMBER must be an integer from 0 to 2147483647")
+endif ()
 configure_file(cmake/BuildInfo.h.in generated/BuildInfo.h @ONLY)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -207,6 +211,8 @@ add_executable(ClassTopLand-Next
         src/SettingsWindow/SettingsWindow.h
         src/SettingsWindow/tabs/AgentSettingsTab.cpp
         src/SettingsWindow/tabs/AgentSettingsTab.h
+        src/Core/Update/UpdateService.cpp
+        src/Core/Update/UpdateService.h
         src/SettingsWindow/AboutDialog.cpp
         src/SettingsWindow/AboutDialog.h
         src/SettingsWindow/tabs/AppearanceSettingsTab.cpp
@@ -245,6 +251,19 @@ if (WIN32)
             WIN32_EXECUTABLE "$<CONFIG:Release>")
     enable_language(RC)
     target_sources(ClassTopLand-Next PRIVATE app.rc)
+    add_executable(ClassTopLand-Next-Update WIN32
+            src/Utils/Update/UpdateLauncher.cpp
+            src/Utils/Update/UpdateWindows.h)
+    set_target_properties(ClassTopLand-Next-Update PROPERTIES AUTOMOC OFF AUTORCC OFF AUTOUIC OFF)
+    target_link_libraries(ClassTopLand-Next-Update PRIVATE bcrypt shell32 user32 advapi32)
+    if (MSVC)
+        target_compile_options(ClassTopLand-Next-Update PRIVATE /utf-8)
+        target_link_options(ClassTopLand-Next-Update PRIVATE "/MANIFESTUAC:level='asInvoker' uiAccess='false'")
+    endif ()
+    add_dependencies(ClassTopLand-Next ClassTopLand-Next-Update)
+    target_sources(ClassTopLand-Next PRIVATE
+            src/Utils/Update/UpdatePlatform.cpp
+            src/Utils/Update/UpdatePlatform.h)
     target_include_directories(ClassTopLand-Next PRIVATE
             "$<$<COMPILE_LANGUAGE:RC>:${CMAKE_CURRENT_SOURCE_DIR}>")
     set_source_files_properties(app.rc PROPERTIES OBJECT_DEPENDS

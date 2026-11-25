@@ -22,6 +22,7 @@ class TaskbarTrayMenu : public ElaWidget
 public:
     // Handled by main after AppComposer has saved data and destroyed its windows.
     static constexpr int RestartExitCode = 1000;
+    static constexpr int UpdateExitCode = 1001;
     void showManagedNotification(const QString& message);
 
     explicit TaskbarTrayMenu(QWidget* parent = nullptr);

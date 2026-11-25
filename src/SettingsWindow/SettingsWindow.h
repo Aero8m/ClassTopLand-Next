@@ -8,6 +8,7 @@ class PluginManager;
 class PluginUiHost;
 class CourseBarComponentRegistry;
 class AboutDialog;
+class UpdateService;
 class CourseBarSettingsTab;
 class CloudSettingsTab;
 class CloudSyncService;
@@ -21,7 +22,7 @@ class SettingsWindow : public ElaWindow
 {
     Q_OBJECT
 public:
-    SettingsWindow(QWidget *parent = nullptr, WindowInterceptionService* interception = nullptr, PluginManager* plugins = nullptr, PluginUiHost* pluginUi = nullptr, CourseBarComponentRegistry* registry = nullptr, CloudSyncService* cloud = nullptr, AgentService* agent = nullptr);
+    SettingsWindow(QWidget *parent = nullptr, WindowInterceptionService* interception = nullptr, PluginManager* plugins = nullptr, PluginUiHost* pluginUi = nullptr, CourseBarComponentRegistry* registry = nullptr, CloudSyncService* cloud = nullptr, AgentService* agent = nullptr, UpdateService* update = nullptr);
     ~SettingsWindow();
     void refreshProfiles();
     void openAgentPage(const QString &draftSession);
@@ -45,6 +46,7 @@ private:
     CourseBarComponentRegistry* registry_ = nullptr;
     CloudSyncService* cloud_ = nullptr;
     AgentService* agent_ = nullptr;
+    UpdateService* update_ = nullptr;
     void initUI();
     WindowInterceptionService* interception_ = nullptr;
     void showAboutDialog();

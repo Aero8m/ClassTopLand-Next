@@ -27,6 +27,8 @@ class PluginManager;
 class PluginUiHost;
 class CourseBarComponentRegistry;
 class CloudSyncService;
+class UpdateService;
+struct UpdateInstaller;
 
 #define DATA_PATH (QDir::homePath()+"/ClassTopLand-Next_Data")
 #define CONFIG_FILE_PATH (DATA_PATH+"/MainConfig.json")
@@ -52,6 +54,7 @@ public:
     // event loop returns, so cleanup no longer depends on scope-exit timing.
     // Safe to call more than once.
     void shutdown();
+    void setUpdateHandler(std::function<bool(const UpdateInstaller&, QString*)> prepare);
 
 private slots:
     // Create each window on demand and always reuse that one instance.
@@ -86,6 +89,7 @@ private:
     std::optional<bool> startupUiAccessOverride_;
     std::function<bool(const Config&, const QString&, QString*)> prepareRestart_;
     std::function<void()> cancelRestart_;
+    std::function<bool(const UpdateInstaller&, QString*)> prepareUpdate_;
     bool restartPreparing_ = false;
     bool restartAccepted_ = false;
     bool silentManagedRestart_ = false;
@@ -105,6 +109,7 @@ private:
     std::unique_ptr<ReminderService> reminders_;
     std::unique_ptr<WindowInterceptionService> windowInterception_;
     std::unique_ptr<TaskbarTrayMenu> trayMenu_;
+    std::unique_ptr<UpdateService> update_;
     std::unique_ptr<SettingsWindow> settingsWindow_;
     std::unique_ptr<AgentService> agent_;
     std::unique_ptr<AgentWindow> agentWindow_;

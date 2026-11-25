@@ -13,9 +13,9 @@
 
 #include <QScreen>
 
-SettingsWindow::SettingsWindow(QWidget* parent, WindowInterceptionService* interception, PluginManager* plugins, PluginUiHost* pluginUi, CourseBarComponentRegistry* registry, CloudSyncService* cloud, AgentService* agent)
+SettingsWindow::SettingsWindow(QWidget* parent, WindowInterceptionService* interception, PluginManager* plugins, PluginUiHost* pluginUi, CourseBarComponentRegistry* registry, CloudSyncService* cloud, AgentService* agent, UpdateService* update)
     : ElaWindow(parent), plugins_(plugins), pluginUi_(pluginUi), registry_(registry),
-      cloud_(cloud), agent_(agent), interception_(interception)
+      cloud_(cloud), agent_(agent), update_(update), interception_(interception)
 {
     setIsDefaultClosed(false);
     connect(this, &ElaWindow::closeButtonClicked, this, [this] { close(); });
@@ -95,7 +95,7 @@ void SettingsWindow::openAgentPage(const QString &draftSession)
 
 void SettingsWindow::showAboutDialog()
 {
-    if (!aboutDialog_) aboutDialog_ = new AboutDialog(this);
+    if (!aboutDialog_) aboutDialog_ = new AboutDialog(update_, this);
     if (!aboutDialog_->isVisible()) {
         // Center on the settings window, keeping the dialog inside its screen.
         const QRect available = screen()->availableGeometry();

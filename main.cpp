@@ -9,6 +9,9 @@
 #include "src/TaskbarTrayMenu/TaskbarTrayMenu.h"
 #include "src/Utils/SingleInstance/SingleInstance.h"
 #include "src/Utils/UiAccess/UiAccess.h"
+#ifdef Q_OS_WIN
+#include "src/Utils/Update/UpdatePlatform.h"
+#endif
 
 namespace {
 bool acquireInstance(SingleInstance& instance, int& argc, char* argv[])
@@ -36,6 +39,14 @@ int main(int argc, char* argv[])
 {
     for(int index=1;index<argc;++index)
         if(QString::fromLocal8Bit(argv[index])==QStringLiteral("--plugin-preview")) return runPluginPreview(argc,argv);
+#ifdef Q_OS_WIN
+    if (UpdatePlatform::installationBusy()) {
+        QApplication application(argc, argv);
+        QMessageBox::information(nullptr, QStringLiteral("正在更新"),
+                                 QStringLiteral("请等待 ClassTopLand Next 安装完成。"));
+        return 1;
+    }
+#endif
     const auto startup = UiAccess::inspectStartup(argc, argv, DATA_PATH);
     if (startup.exitRequested) return startup.exitCode;
     SingleInstance instance(startup.dataDirectory);
@@ -75,6 +86,10 @@ int main(int argc, char* argv[])
 
     const QString workingDirectory = QDir::currentPath();
     std::unique_ptr<UiAccess::Restart> preparedRestart;
+#ifdef Q_OS_WIN
+    UpdatePlatform::Handoff preparedUpdate;
+    QTimer::singleShot(3000, &a, [] { UpdatePlatform::cleanCompleted(); });
+#endif
     int exitCode;
     {
         AppComposer app(startup.dataDirectory);
@@ -87,6 +102,11 @@ int main(int argc, char* argv[])
                                                 directory, startup.arguments, error);
             }, [&] { preparedRestart.reset(); });
         }
+#ifdef Q_OS_WIN
+        app.setUpdateHandler([&](const UpdateInstaller& installer, QString* error) {
+            return preparedUpdate.prepare(installer, startup.arguments, workingDirectory, error);
+        });
+#endif
         if (!app.startApp()) return 1;
         if (!startupError.isEmpty()) {
             Logger::instance().log(Logger::Level::Warning,
@@ -101,6 +121,13 @@ int main(int argc, char* argv[])
         // still alive, instead of relying on scope-exit destructor ordering.
         app.shutdown();
     }
+#ifdef Q_OS_WIN
+    if (exitCode == TaskbarTrayMenu::UpdateExitCode) {
+        instance.release();
+        preparedUpdate.commit();
+        return 0;
+    }
+#endif
     if (exitCode == TaskbarTrayMenu::RestartExitCode) {
         if (preparedRestart) {
             preparedRestart->commit();
