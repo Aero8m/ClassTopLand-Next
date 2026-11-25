@@ -54,20 +54,22 @@ AboutDialog::AboutDialog(QWidget* parent) : ElaDialog(parent)
     addText(QStringLiteral("GNU General Public License v2"));
     addText(QStringLiteral("Qt 运行版本：%1").arg(QString::fromLatin1(qVersion())));
 
-    auto* repository = addText({});
-    repository->setTextFormat(Qt::RichText);
-    repository->setTextInteractionFlags(Qt::TextBrowserInteraction);
-    const auto updateRepository = [repository] {
-        const auto color = eTheme->getThemeColor(eTheme->getThemeMode(), ElaThemeType::PrimaryNormal);
-        repository->setText(QStringLiteral(
-            "<a href=\"https://github.com/Aero8m/ClassTopLand-Next\" style=\"color:%1\">"
-            "GitHub：Aero8m/ClassTopLand-Next</a>").arg(color.name()));
+    const auto addLink = [this, &addText](const QString& name, const QUrl& url) {
+        auto* label = addText({});
+        label->setTextFormat(Qt::RichText);
+        label->setTextInteractionFlags(Qt::TextBrowserInteraction);
+        const auto updateLink = [label, name, url] {
+            const auto color = eTheme->getThemeColor(eTheme->getThemeMode(), ElaThemeType::PrimaryNormal);
+            label->setText(QStringLiteral("<a href=\"%1\" style=\"color:%2\">%3</a>")
+                               .arg(url.toString().toHtmlEscaped(), color.name(), name.toHtmlEscaped()));
+        };
+        updateLink();
+        connect(eTheme, &ElaTheme::themeModeChanged, label, updateLink);
+        connect(label, &QLabel::linkActivated, this, [url] { QDesktopServices::openUrl(url); });
     };
-    updateRepository();
-    connect(eTheme, &ElaTheme::themeModeChanged, repository, updateRepository);
-    connect(repository, &QLabel::linkActivated, this, [](const QString& link) {
-        QDesktopServices::openUrl(QUrl(link));
-    });
+    addLink(QStringLiteral("GitHub：Aero8m/ClassTopLand-Next"),
+            QUrl(QStringLiteral("https://github.com/Aero8m/ClassTopLand-Next")));
+    addLink(QStringLiteral("Aero8m Project Autobuild"), QUrl(QStringLiteral("https://autobuild.aero8m.cn")));
     textLayout->addStretch();
 
     auto* contentLayout = new QHBoxLayout;
