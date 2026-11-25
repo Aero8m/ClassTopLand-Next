@@ -1,8 +1,10 @@
 #include "UpdateService.h"
+#include "CurlTransfer.h"
 
 #include <BuildInfo.h>
 #include <QCryptographicHash>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -23,10 +25,23 @@ namespace {
 constexpr auto FirstAutomaticCheck = std::chrono::seconds(15);
 constexpr auto AutomaticCheckInterval = std::chrono::hours(6);
 constexpr int MaxDownloadAttempts = 3;
+constexpr int MaxDownloadRedirects = 3;
+constexpr qint64 MinimumRangeBytes = 256 * 1024;
+constexpr qint64 InitialRangeBytes = 2 * 1024 * 1024;
+constexpr qint64 MaximumRangeBytes = 8 * 1024 * 1024;
+constexpr qint64 TargetRangeTimeMs = 2500;
+constexpr auto DownloadProgressTimeout = std::chrono::seconds(20);
+constexpr auto DownloadTimeLimit = std::chrono::minutes(15);
 constexpr qint64 MaxJsonBytes = 64 * 1024;
 constexpr qint64 MaxInstallerBytes = 256 * 1024 * 1024;
 constexpr auto Host = "autobuild.aero8m.cn";
 const QString Directory = QStringLiteral("/ClassTopLand-Next/");
+
+bool isMirrorUrl(const QUrl& url)
+{
+    return url.isValid() && url.scheme() == QStringLiteral("https") && url.host() == QLatin1String(Host)
+        && url.port(443) == 443 && url.userInfo().isEmpty() && !url.hasFragment();
+}
 
 QNetworkRequest requestFor(const QUrl& url)
 {
@@ -54,17 +69,29 @@ struct UpdateService::Download {
     explicit Download(const QString& path) : file(path) {}
     QFile file;
     QCryptographicHash hash{QCryptographicHash::Sha256};
+    QElapsedTimer rangeTimer;
     qint64 received = 0;
+    qint64 rangeSize = InitialRangeBytes;
+    qint64 rangeLimit = MaximumRangeBytes;
+    qint64 requestStart = 0;
+    qint64 requestEnd = 0;
     qint64 responseEnd = 0;
     int attempts = 0;
     bool writeFailed = false;
     bool responseRejected = false;
+    bool retrying = false;
+    int redirects = 0;
 };
 
 UpdateService::UpdateService(QObject* parent)
     : QObject(parent), network_(new QNetworkAccessManager(this)),
-      automaticTimer_(new QTimer(this)), retryTimer_(new QTimer(this))
+      automaticTimer_(new QTimer(this)), retryTimer_(new QTimer(this)), downloadDeadline_(new QTimer(this))
 {
+    downloadDeadline_->setSingleShot(true);
+    connect(downloadDeadline_, &QTimer::timeout, this, [this] {
+        stopRequest();
+        fail(tr("安装包下载超过 15 分钟。可以重新检查更新或重试下载。"));
+    });
     retryTimer_->setSingleShot(true);
     connect(retryTimer_, &QTimer::timeout, this, &UpdateService::requestDownload);
     automaticTimer_->setSingleShot(true);
@@ -184,9 +211,7 @@ void UpdateService::resolve(const QString& filename, std::function<void(const QU
         const auto data = response.value(QStringLiteral("data")).toObject();
         const QUrl url(data.value(QStringLiteral("raw_url")).toString(), QUrl::StrictMode);
         const QString returnedPath = url.path();
-        if (code != 200 || !url.isValid()
-            || url.scheme() != QStringLiteral("https") || url.host() != QLatin1String(Host)
-            || url.port(443) != 443 || !url.userInfo().isEmpty() || url.hasFragment()
+        if (code != 200 || !isMirrorUrl(url)
             || (returnedPath != QStringLiteral("/p") + path && returnedPath != QStringLiteral("/d") + path)) {
             fail(tr("镜像返回了无效的下载地址。"));
             return;
@@ -278,6 +303,7 @@ void UpdateService::startDownload(bool automatic)
         fail(tr("无法写入安装包，请检查暂存目录权限和磁盘空间。"));
         return;
     }
+    downloadDeadline_->start(DownloadTimeLimit);
     requestDownload();
 }
 
@@ -291,6 +317,7 @@ void UpdateService::cancelDownload()
 
 void UpdateService::stopRequest()
 {
+    if (transfer_) transfer_->cancel();
     if (!reply_) return;
     auto* reply = reply_;
     reply_ = nullptr;
@@ -302,6 +329,7 @@ void UpdateService::stopRequest()
 void UpdateService::discardDownload()
 {
     retryTimer_->stop();
+    downloadDeadline_->stop();
     download_.reset();
     stage_.reset();
 }
@@ -309,38 +337,36 @@ void UpdateService::discardDownload()
 void UpdateService::requestDownload()
 {
     if (state_ != State::Downloading || !download_ || reply_) return;
-    ++download_->attempts;
+    if (download_->attempts++ > 0) network_->clearConnectionCache();
+    download_->redirects = 0;
     resolve(filename_, [this](const QUrl& url) { download(url); });
 }
 
 void UpdateService::download(const QUrl& url)
 {
-    download_->responseEnd = 0;
-    download_->responseRejected = false;
-    auto request = requestFor(url);
-    request.setTransferTimeout(45000);
-    request.setRawHeader("Accept-Encoding", "identity");
-    if (download_->received > 0)
-        request.setRawHeader("Range", "bytes=" + QByteArray::number(download_->received) + '-');
-
-    auto* reply = network_->get(request);
-    reply->setReadBufferSize(256 * 1024);
-    reply_ = reply;
-    connect(reply, &QIODevice::readyRead, this, [this, reply] {
-        if (!readDownload(reply)) reply->abort();
-        else if (const int progress = int(download_->received * 100 / installer_.size); progress != percent_) {
-            percent_ = progress;
-            emit changed();
-        }
-    });
-    QTimer::singleShot(15 * 60 * 1000, reply, [reply] { if (reply->isRunning()) reply->abort(); });
-    connect(reply, &QNetworkReply::finished, this, [this, reply] { finishDownload(reply); });
+    auto& output = *download_;
+    output.requestStart = output.received;
+    output.requestEnd = qMin(output.requestStart + output.rangeSize, installer_.size);
+    output.responseEnd = 0;
+    output.responseRejected = false;
+    if (!transfer_) transfer_ = std::make_unique<CurlTransfer>();
+    const auto range = QByteArray::number(output.requestStart) + '-' + QByteArray::number(output.requestEnd - 1);
+    output.rangeTimer.start();
+    if (!transfer_->start(url, range, output.attempts > 1,
+            std::chrono::duration_cast<std::chrono::milliseconds>(DownloadProgressTimeout).count(),
+            [this](int status, const QByteArray& contentRange, QByteArrayView bytes) {
+                return readDownload(status, contentRange, bytes);
+            },
+            [this, url](const CurlTransfer::Result& result) {
+                finishDownload(url, result.status, result.redirect, result.stalled);
+            }))
+        fail(tr("无法启动 libcurl 下载。可以从 Autobuild 手动下载安装包。"));
 }
 
-bool UpdateService::beginDownloadResponse(QNetworkReply* reply)
+bool UpdateService::beginDownloadResponse(int status, const QByteArray& contentRange)
 {
     auto& output = *download_;
-    if (httpStatus(reply) == 200) {
+    if (status == 200) {
         // A server that ignores Range is sending a new full copy.
         if (output.received > 0) {
             if (!output.file.resize(0) || !output.file.seek(0)) {
@@ -353,58 +379,99 @@ bool UpdateService::beginDownloadResponse(QNetworkReply* reply)
         output.responseEnd = installer_.size;
         return true;
     }
-    if (httpStatus(reply) != 206) return false;
+    if (status != 206) return false;
     static const QRegularExpression range(QStringLiteral("\\Abytes ([0-9]+)-([0-9]+)/([0-9]+)\\z"));
-    const auto match = range.match(QString::fromLatin1(reply->rawHeader("Content-Range")));
+    const auto match = range.match(QString::fromLatin1(contentRange));
     if (!match.hasMatch()) return false;
     bool startOk = false, endOk = false, totalOk = false;
     const auto start = match.capturedView(1).toLongLong(&startOk);
     const auto end = match.capturedView(2).toLongLong(&endOk);
     const auto total = match.capturedView(3).toLongLong(&totalOk);
     if (!startOk || !endOk || !totalOk || start != output.received
-        || start > end || end >= total || total != installer_.size) return false;
+        || start > end || end >= output.requestEnd || total != installer_.size
+        || end - start + 1 < qMin(MinimumRangeBytes, output.requestEnd - start)) return false;
     output.responseEnd = end + 1;
     return true;
 }
 
-bool UpdateService::readDownload(QNetworkReply* reply)
+bool UpdateService::readDownload(int status, const QByteArray& contentRange, QByteArrayView bytes)
 {
     auto& output = *download_;
     if (output.writeFailed || output.responseRejected) return false;
-    if (!output.responseEnd && !beginDownloadResponse(reply)) {
+    if ((!output.responseEnd && !beginDownloadResponse(status, contentRange))
+        || bytes.size() > output.responseEnd - output.received) {
         output.responseRejected = true;
         return false;
     }
-    while (reply->bytesAvailable() > 0) {
-        const auto chunk = reply->read(128 * 1024);
-        if (chunk.isEmpty()) break;
-        if (chunk.size() > output.responseEnd - output.received) {
-            output.responseRejected = true;
-            return false;
-        }
-        if (output.file.write(chunk) != chunk.size()) {
-            output.writeFailed = true;
-            return false;
-        }
-        output.received += chunk.size();
-        output.hash.addData(chunk);
+    if (output.file.write(bytes.data(), bytes.size()) != bytes.size()) {
+        output.writeFailed = true;
+        return false;
     }
+    output.received += bytes.size();
+    output.hash.addData(bytes);
+    scheduleDownloadProgress();
     return true;
 }
 
-void UpdateService::finishDownload(QNetworkReply* reply)
+void UpdateService::scheduleDownloadProgress()
 {
-    reply_ = nullptr;
-    reply->deleteLater();
-    const bool validResponse = readDownload(reply);
+    if (progressPending_) return;
+    progressPending_ = true;
+    // Slots can cancel or restart a download. Invoke them outside the libcurl callback.
+    QTimer::singleShot(0, this, [this] {
+        progressPending_ = false;
+        if (!download_ || state_ != State::Downloading) return;
+        const int progress = int(download_->received * 100 / installer_.size);
+        const bool resumed = download_->retrying && !retryTimer_->isActive() && !reply_;
+        if (resumed) {
+            download_->retrying = false;
+            message_ = tr("正在下载安装包…");
+        }
+        if (progress != percent_ || resumed) {
+            percent_ = progress;
+            emit changed();
+        }
+    });
+}
+
+void UpdateService::finishDownload(const QUrl& url, int status, const QUrl& redirect, bool stalled)
+{
     auto& output = *download_;
+    if (status >= 300 && status < 400) {
+        const auto target = url.resolved(redirect);
+        if (redirect.isEmpty() || !isMirrorUrl(target) || ++output.redirects > MaxDownloadRedirects) {
+            fail(tr("镜像返回了无法使用的下载重定向。"));
+            return;
+        }
+        download(target);
+        return;
+    }
+    const bool validResponse = output.responseEnd && !output.responseRejected;
     if (output.writeFailed) {
         fail(tr("写入安装包失败，请检查磁盘空间。"));
         return;
     }
+    const qint64 rangeBytes = output.received - output.requestStart;
+    if (validResponse && output.received == output.responseEnd && output.received < installer_.size) {
+        if (output.responseEnd < output.requestEnd)
+            output.rangeLimit = qMin(output.rangeLimit, rangeBytes);
+        const qint64 estimated = rangeBytes * TargetRangeTimeMs / qMax(qint64(1), output.rangeTimer.elapsed());
+        const qint64 smallest = qMin(output.rangeLimit, qMax(MinimumRangeBytes, output.rangeSize / 2));
+        const qint64 largest = qMin(output.rangeLimit, output.rangeSize * 2);
+        output.rangeSize = qBound(smallest, estimated, largest);
+        output.attempts = 1;
+        output.redirects = 0;
+        download(url);
+        return;
+    }
     if (!validResponse || output.received != installer_.size) {
-        const int status = httpStatus(reply);
-        if (status != 0 && status != 200 && status != 206)
+        // Use the bytes actually delivered before an incomplete range as a ceiling for this download.
+        if (status == 206 && validResponse && rangeBytes > 0)
+            output.rangeLimit = qMin(output.rangeLimit, qMax(MinimumRangeBytes, rangeBytes));
+        output.rangeSize = qBound(MinimumRangeBytes, output.rangeSize / 2, output.rangeLimit);
+        if (stalled)
+            retryDownload(tr("%1 秒未收到新的安装包数据。").arg(DownloadProgressTimeout.count()));
+        else if (status != 0 && status != 200 && status != 206)
             retryDownload(tr("镜像下载请求失败（HTTP %1）。").arg(status));
         else
             retryDownload(tr("安装包传输中断或镜像响应不完整。"));
@@ -419,6 +486,7 @@ void UpdateService::finishDownload(QNetworkReply* reply)
         fail(tr("无法保存已下载的安装包。"));
         return;
     }
+    downloadDeadline_->stop();
     download_.reset();
     percent_ = 100;
     installer_.path = path;
@@ -432,6 +500,7 @@ void UpdateService::retryDownload(const QString& reason)
         fail(tr("%1 可以重新检查更新或重试下载。").arg(reason));
         return;
     }
+    download_->retrying = true;
     retryTimer_->start(1000 * download_->attempts);
     setState(State::Downloading, tr("%1 正在重试下载（%2/%3）…")
         .arg(reason).arg(download_->attempts + 1).arg(MaxDownloadAttempts));

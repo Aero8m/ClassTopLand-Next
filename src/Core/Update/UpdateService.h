@@ -1,11 +1,13 @@
 #pragma once
 
 #include <QByteArray>
+#include <QByteArrayView>
 #include <QObject>
 #include <QString>
 #include <functional>
 #include <memory>
 
+class CurlTransfer;
 class QNetworkAccessManager;
 class QNetworkReply;
 class QTemporaryDir;
@@ -57,9 +59,10 @@ private:
     void getSmall(const QUrl& url, const QByteArray& body, JsonHandler handler);
     void requestDownload();
     void download(const QUrl& url);
-    bool readDownload(QNetworkReply* reply);
-    bool beginDownloadResponse(QNetworkReply* reply);
-    void finishDownload(QNetworkReply* reply);
+    bool readDownload(int status, const QByteArray& contentRange, QByteArrayView bytes);
+    bool beginDownloadResponse(int status, const QByteArray& contentRange);
+    void finishDownload(const QUrl& url, int status, const QUrl& redirect, bool stalled);
+    void scheduleDownloadProgress();
     void retryDownload(const QString& reason);
     void discardDownload();
     void fail(const QString& message);
@@ -73,9 +76,11 @@ private:
     QNetworkAccessManager* network_;
     QTimer* automaticTimer_;
     QTimer* retryTimer_;
+    QTimer* downloadDeadline_;
     QNetworkReply* reply_ = nullptr;
     std::unique_ptr<QTemporaryDir> stage_;
     std::unique_ptr<Download> download_;
+    std::unique_ptr<CurlTransfer> transfer_;
     UpdateInstaller installer_;
     QString filename_;
     QString notes_;
@@ -83,6 +88,7 @@ private:
     State state_ = State::Idle;
     int build_ = 0;
     int percent_ = 0;
+    bool progressPending_ = false;
     bool automaticUpdates_ = false;
     bool automaticRequest_ = false;
 };

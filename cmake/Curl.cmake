@@ -1,0 +1,43 @@
+if (WIN32)
+    include(FetchContent)
+
+    function(classtopland_add_curl)
+        set(CMAKE_AUTOMOC OFF)
+        set(CMAKE_AUTORCC OFF)
+        set(CMAKE_AUTOUIC OFF)
+        set(BUILD_SHARED_LIBS OFF)
+        set(BUILD_STATIC_LIBS ON)
+        set(BUILD_CURL_EXE OFF)
+        set(BUILD_TESTING OFF)
+        set(BUILD_EXAMPLES OFF)
+        set(BUILD_LIBCURL_DOCS OFF)
+        set(BUILD_MISC_DOCS OFF)
+        set(ENABLE_CURL_MANUAL OFF)
+        set(CURL_DISABLE_INSTALL ON)
+        set(CURL_USE_SCHANNEL ON)
+        set(CURL_USE_OPENSSL OFF)
+        set(ENABLE_THREADED_RESOLVER ON)
+        set(CURL_USE_LIBPSL OFF)
+        set(CURL_USE_LIBSSH2 OFF)
+        set(USE_LIBIDN2 OFF)
+        set(USE_NGHTTP2 OFF)
+        set(CURL_ZLIB OFF)
+        set(CURL_BROTLI OFF)
+        set(CURL_ZSTD OFF)
+        foreach (protocol DICT FILE FTP GOPHER IMAP IPFS LDAP LDAPS MQTT POP3 RTSP SMB SMTP TELNET TFTP WEBSOCKETS)
+            set(CURL_DISABLE_${protocol} ON)
+        endforeach ()
+
+        FetchContent_Declare(curl
+            URL https://curl.se/download/curl-8.23.0.tar.xz
+            URL_HASH SHA256=8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5
+            TLS_VERIFY ON
+            EXCLUDE_FROM_ALL)
+        FetchContent_MakeAvailable(curl)
+        set(CTX_CURL_LICENSE "${curl_SOURCE_DIR}/COPYING" PARENT_SCOPE)
+    endfunction()
+
+    classtopland_add_curl()
+else ()
+    find_package(CURL 7.85 REQUIRED)
+endif ()

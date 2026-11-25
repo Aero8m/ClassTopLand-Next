@@ -94,7 +94,7 @@ jobs:
       - name: Stage application and Qt dependencies
         run: |
           New-Item -ItemType Directory -Path out/setupBuild -Force | Out-Null
-          Copy-Item build/ClassTopLand-Next.exe, build/ClassTopLand-Next-Update.exe, build/ElaWidgetTools.dll out/setupBuild/
+          Copy-Item build/ClassTopLand-Next.exe, build/ClassTopLand-Next-Update.exe, build/ElaWidgetTools.dll, build/LICENSE.libcurl.txt out/setupBuild/
           & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --release --force --no-quick-import --no-translations --no-compiler-runtime out/setupBuild/ClassTopLand-Next.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           foreach ($file in @('ClassTopLand-Next.exe', 'ClassTopLand-Next-Update.exe', 'ElaWidgetTools.dll', 'Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'Qt6Qml.dll', 'Qt6Network.dll', 'platforms/qwindows.dll', 'tls/qschannelbackend.dll')) {

@@ -45,6 +45,8 @@ add_subdirectory(third_party/yaml-cpp)
 
 add_subdirectory(third_party/ElaWidgetTools-Plus/ElaWidgetTools)
 
+include(cmake/Curl.cmake)
+
 add_executable(ClassTopLand-Next
         main.cpp
         src/AgentWindow/AgentWindow.cpp
@@ -213,6 +215,8 @@ add_executable(ClassTopLand-Next
         src/SettingsWindow/SettingsWindow.h
         src/SettingsWindow/tabs/AgentSettingsTab.cpp
         src/SettingsWindow/tabs/AgentSettingsTab.h
+        src/Core/Update/CurlTransfer.cpp
+        src/Core/Update/CurlTransfer.h
         src/Core/Update/UpdateService.cpp
         src/Core/Update/UpdateService.h
         src/SettingsWindow/tabs/UpdateSettingsTab.cpp
@@ -297,10 +301,18 @@ target_link_libraries(ClassTopLand-Next
         Qt::Widgets
         Qt::Qml
         Qt::Network
+        CURL::libcurl
         Qt::UiTools
         Ela::WidgetTools
         yaml-cpp::yaml-cpp
 )
+
+if (CTX_CURL_LICENSE)
+    add_custom_command(TARGET ClassTopLand-Next POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CTX_CURL_LICENSE}" "$<TARGET_FILE_DIR:ClassTopLand-Next>/LICENSE.libcurl.txt"
+        VERBATIM)
+endif ()
 
 if (WIN32 AND NOT ELAWIDGETTOOLS_BUILD_STATIC_LIB)
     add_custom_command(TARGET ClassTopLand-Next POST_BUILD
