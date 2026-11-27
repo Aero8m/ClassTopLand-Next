@@ -30,6 +30,7 @@
 #include <QPainter>
 #include <QScopedValueRollback>
 #include <QScrollBar>
+#include <QStyleOptionToolButton>
 #include <QTextCursor>
 #include <QTextBlock>
 #include <QTextDocument>
@@ -43,6 +44,7 @@ namespace
 using namespace Qt::StringLiterals;
 using Permission = AgentService::Permission;
 constexpr int controlHeight = ElaWidgetToolsSize::DefaultControlHeight;
+constexpr int conversationWidth = 780;
 constexpr qsizetype inlineMarkdownLimit = 24 * 1024;
 
 QString pageKey(const QWidget *page) { return page->property("ElaPageKey").toString(); }
@@ -55,6 +57,11 @@ QString workspaceName(const QString &path)
 QColor chatBackground(ElaThemeType::ThemeMode mode)
 {
     return mode == ElaThemeType::Dark ? QColor(25, 25, 25) : QColor(250, 250, 250);
+}
+
+QColor warningColor(ElaThemeType::ThemeMode mode)
+{
+    return mode == ElaThemeType::Dark ? QColor(237, 148, 85) : QColor(166, 77, 19);
 }
 
 QString reasoningPreview(const QString &text)
@@ -154,7 +161,7 @@ public:
     {
         setFixedHeight(controlHeight);
         setCursor(Qt::PointingHandCursor);
-        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
         connect(eTheme, &ElaTheme::themeModeChanged, this, [this] { update(); });
     }
 protected:
@@ -162,8 +169,10 @@ protected:
     {
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing);
-        auto color = ElaThemeColor(eTheme->getThemeMode(), BasicText);
-        color.setAlpha(underMouse() ? 230 : 155);
+        const auto mode = eTheme->getThemeMode();
+        const bool warning = property("activityWarning").toBool();
+        auto color = warning ? warningColor(mode) : ElaThemeColor(mode, BasicText);
+        if (!warning) color.setAlpha(underMouse() ? 230 : 155);
         painter.setPen(color);
         painter.setFont(font());
         const auto suffix = isCheckable() ? (isChecked() ? u" ⌄"_s : u" ›"_s) : QString();
@@ -399,17 +408,15 @@ protected:
         ink.setAlpha(underMouse() || hasFocus() ? 255 : 180);
         painter.setPen(QPen(ink, 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         painter.setBrush(Qt::NoBrush);
-        painter.drawEllipse(QRectF(rect()).adjusted(1.5, 1.5, -1.5, -1.5));
-        painter.drawLine(QPointF(15, 9), QPointF(15, 21));
-        painter.drawLine(QPointF(10, 16), QPointF(15, 21));
-        painter.drawLine(QPointF(15, 21), QPointF(20, 16));
+        const QRectF bounds(rect());
+        const auto center = bounds.center();
+        const auto tip = center + QPointF(0, 6);
+        painter.drawEllipse(bounds.adjusted(1.5, 1.5, -1.5, -1.5));
+        painter.drawLine(center - QPointF(0, 6), tip);
+        painter.drawLine(tip, center + QPointF(-5, 1));
+        painter.drawLine(tip, center + QPointF(5, 1));
     }
 };
-
-QColor warningColor(ElaThemeType::ThemeMode mode)
-{
-    return mode == ElaThemeType::Dark ? QColor(237, 148, 85) : QColor(166, 77, 19);
-}
 
 class AccessButton final : public ElaToolButton
 {
@@ -439,51 +446,82 @@ protected:
         painter.drawText(rect().adjusted(32, 0, -4, 0), Qt::AlignLeft | Qt::AlignVCenter, text());
     }
 };
+}
 
-class ApprovalCard final : public QWidget
+class ApprovalCard final : public ElaScrollPageArea
 {
 public:
-    ApprovalCard(const QString &summary, const QString &payload, QWidget *parent) : QWidget(parent)
+    explicit ApprovalCard(QWidget *parent) : ElaScrollPageArea(parent)
     {
+        setObjectName(u"agentApprovalCard"_s);
+        setFocusPolicy(Qt::ClickFocus);
+        setMinimumHeight(0);
+        setMaximumHeight(QWIDGETSIZE_MAX);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         auto *layout = new QVBoxLayout(this);
         layout->setContentsMargins(16, 12, 16, 12);
-        layout->setSpacing(10);
-        status_ = new QLabel(u"● 等待审批"_s, this);
-        status_->setFixedHeight(status_->fontMetrics().height() + 4);
+        layout->setSpacing(6);
+        status_ = AppUi::text(u"等待审批"_s, this, 12);
         status_->setTextFormat(Qt::PlainText);
         layout->addWidget(status_);
-        description_ = new QPlainTextEdit(this);
+        summary_ = AppUi::text({}, this, 15);
+        summary_->setTextFormat(Qt::PlainText);
+        summary_->setWordWrap(true);
+        summary_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        layout->addWidget(summary_);
+        description_ = new ElaPlainTextEdit(this);
         description_->setObjectName(u"agentApprovalDetails"_s);
+        description_->setAccessibleName(u"待审批操作详情"_s);
         description_->setReadOnly(true);
-        description_->setLineWrapMode(QPlainTextEdit::NoWrap);
+        description_->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
         description_->setFrameShape(QFrame::NoFrame);
+        description_->document()->setDocumentMargin(4);
         auto mono = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-        mono.setPixelSize(12);
+        mono.setPixelSize(13);
         description_->setFont(mono);
         layout->addWidget(description_);
         auto *actions = new QHBoxLayout;
         actions->setSpacing(8);
+        stop_ = AppUi::button(u"停止"_s, this);
+        stop_->setObjectName(u"agentApprovalStop"_s);
+        actions->addWidget(stop_);
         actions->addStretch();
-        auto *deny = AppUi::button(u"拒绝"_s, this);
-        auto *allow = AppUi::button(u"允许"_s, this, true);
-        actions->addWidget(deny);
-        actions->addWidget(allow);
+        deny_ = AppUi::button(u"拒绝"_s, this);
+        deny_->setObjectName(u"agentApprovalDeny"_s);
+        allow_ = AppUi::button(u"允许"_s, this, true);
+        allow_->setObjectName(u"agentApprovalAllow"_s);
+        actions->addWidget(deny_);
+        actions->addWidget(allow_);
         layout->addLayout(actions);
-        connect(deny, &ElaPushButton::clicked, this, [this] { if (onDeny) onDeny(); });
-        connect(allow, &ElaPushButton::clicked, this, [this] { if (onAllow) onAllow(); });
-        setContent(summary, payload);
+        for (auto *button : {stop_, deny_, allow_}) button->setAutoDefault(false);
         applyTheme();
         connect(eTheme, &ElaTheme::themeModeChanged, this, [this] { applyTheme(); update(); });
     }
 
-    std::function<void()> onAllow, onDeny;
+    ElaPushButton *allowButton() const { return allow_; }
+    ElaPushButton *denyButton() const { return deny_; }
+    ElaPushButton *stopButton() const { return stop_; }
 
-    void setContent(const QString &summary, const QString &payload)
+    void setActionsEnabled(bool enabled)
     {
-        description_->setPlainText(summary + (payload.isEmpty() ? QString() : u"\n\n"_s + payload));
-        description_->setFixedHeight(qBound(64, description_->document()->blockCount() * description_->fontMetrics().lineSpacing() + 28, 180));
-        updateGeometry();
+        allow_->setEnabled(enabled);
+        deny_->setEnabled(enabled);
+        stop_->setEnabled(enabled);
+    }
+
+    void focusDetails()
+    {
+        if (description_->isHidden()) setFocus();
+        else description_->setFocus();
+    }
+
+    void setContent(const QString &summary, const QString &payload, bool newRequest)
+    {
+        summary_->setText(summary);
+        description_->setVisible(!payload.isEmpty());
+        if (!newRequest && description_->toPlainText() == payload) return;
+        description_->setPlainText(payload);
+        description_->setFixedHeight(qBound(46, description_->document()->blockCount() * description_->fontMetrics().lineSpacing() + 20, 128));
     }
 
 protected:
@@ -504,13 +542,16 @@ private:
     {
         const auto mode = eTheme->getThemeMode();
         status_->setStyleSheet(u"color:%1;background:transparent;"_s.arg(warningColor(mode).name()));
-        description_->setStyleSheet(u"QPlainTextEdit { color:%1;background-color:%2;border:0; }"_s.arg(
+        description_->setStyleSheet(u"#agentApprovalDetails { color:%1;background-color:%2;border:0; }"_s.arg(
             ElaThemeColor(mode, BasicText).name(), mode == ElaThemeType::Dark ? u"#1f1f1f"_s : u"#fffaf3"_s));
     }
-    QLabel *status_;
-    QPlainTextEdit *description_;
+    ElaText *status_, *summary_;
+    ElaPlainTextEdit *description_;
+    ElaPushButton *allow_, *deny_, *stop_;
 };
 
+namespace
+{
 QString toolLabel(const QString &name)
 {
     if (name == "list_directory"_L1) return u"列出目录"_s;
@@ -615,7 +656,177 @@ ElaText *messageLabel(QWidget *parent, int size = 14)
     label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     return label;
 }
+
+QHBoxLayout *centeredColumn(QWidget *column)
+{
+    column->setMaximumWidth(conversationWidth);
+    auto *layout = new QHBoxLayout;
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+    layout->addStretch();
+    layout->addWidget(column, 1);
+    layout->addStretch();
+    return layout;
 }
+
+class PreviewImage final : public ElaText
+{
+public:
+    explicit PreviewImage(QPixmap image, QWidget *parent) : ElaText(parent), image_(std::move(image))
+    {
+        setObjectName(u"pluginPreviewScreenshot"_s);
+        setAccessibleName(u"插件预览截图"_s);
+        if (image_.isNull()) {
+            setText(u"预览截图已不可用"_s);
+            return;
+        }
+        setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        auto policy = sizePolicy();
+        policy.setHeightForWidth(true);
+        setSizePolicy(policy);
+        setToolTip(accessibleName());
+    }
+
+    int heightForWidth(int width) const override
+    {
+        if (image_.isNull()) return ElaText::heightForWidth(width);
+        return qRound(imageSize(width).height());
+    }
+
+    QSize sizeHint() const override
+    {
+        return image_.isNull() ? ElaText::sizeHint() : imageSize(640).toSize();
+    }
+
+protected:
+    void paintEvent(QPaintEvent *event) override
+    {
+        if (image_.isNull()) {
+            ElaText::paintEvent(event);
+            return;
+        }
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+        painter.drawPixmap(QRectF(QPointF(), imageSize(width())), image_, image_.rect());
+    }
+
+private:
+    QSizeF imageSize(int width) const
+    {
+        const auto original = image_.deviceIndependentSize();
+        return original * (qMin(qreal(qBound(0, width, 640)), original.width()) / original.width());
+    }
+
+    QPixmap image_;
+};
+}
+
+class ModelButton final : public ElaToolButton
+{
+public:
+    explicit ModelButton(QWidget *parent) : ElaToolButton(parent)
+    {
+        setToolButtonStyle(Qt::ToolButtonTextOnly);
+        setIsTransparent(true);
+        setBorderRadius(12);
+        setFixedHeight(controlHeight);
+        setCursor(Qt::PointingHandCursor);
+        setMaximumWidth(360);
+    }
+
+    void setSelection(const QString &label, const QString &effort)
+    {
+        label_ = label;
+        effortSuffix_ = effort.isEmpty() ? QString() : u" · "_s + effort;
+        setText(label_ + effortSuffix_);
+    }
+
+    QSize sizeHint() const override
+    {
+        return {qMin(maximumWidth(), fontMetrics().horizontalAdvance(text()) + horizontalPadding), controlHeight};
+    }
+
+    QSize minimumSizeHint() const override
+    {
+        return {qMin(96, sizeHint().width()), controlHeight};
+    }
+
+protected:
+    void initStyleOption(QStyleOptionToolButton *option) const override
+    {
+        ElaToolButton::initStyleOption(option);
+        const int textWidth = qMax(0, option->rect.width() - horizontalPadding);
+        const auto &metrics = option->fontMetrics;
+        const auto suffix = textWidth < metrics.horizontalAdvance(u"模型…"_s + effortSuffix_) ? QString() : effortSuffix_;
+        option->text = metrics.elidedText(label_, Qt::ElideRight, textWidth - metrics.horizontalAdvance(suffix)) + suffix;
+    }
+
+private:
+    static constexpr int horizontalPadding = 16;
+    QString label_, effortSuffix_;
+};
+
+class ActivityGroup final : public QWidget
+{
+public:
+    explicit ActivityGroup(QWidget *parent) : QWidget(parent)
+    {
+        setObjectName(u"agentActivities"_s);
+        auto *layout = new QVBoxLayout(this);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(2);
+        header_ = new ActivityButton(this);
+        header_->setObjectName(u"agentActivitySummary"_s);
+        header_->setElaIcon(ElaIconType::Code);
+        header_->setCheckable(true);
+        layout->addWidget(header_);
+        auto *items = new QWidget(this);
+        items_ = new QVBoxLayout(items);
+        items_->setContentsMargins(13, 0, 0, 3);
+        items_->setSpacing(2);
+        layout->addWidget(items);
+        items->hide();
+        connect(header_, &ElaToolButton::toggled, items, &QWidget::setVisible);
+    }
+
+    void add(QWidget *item)
+    {
+        items_->addWidget(item);
+        refreshSummary();
+    }
+
+    void refreshSummary()
+    {
+        bool waiting = false, running = false, thinking = false;
+        int failed = 0, denied = 0, interrupted = 0;
+        for (int i = 0; i < items_->count(); ++i) {
+            const auto state = items_->itemAt(i)->widget()->property("activityState").toString();
+            waiting |= state == u"待审批"_s;
+            running |= state == u"正在执行"_s;
+            thinking |= state == u"正在思考…"_s;
+            failed += state == u"失败"_s;
+            denied += state == u"已拒绝"_s;
+            interrupted += state == u"已中断"_s || state == u"思考中断"_s;
+        }
+        QStringList parts{u"活动记录 · %1 项"_s.arg(items_->count())};
+        if (failed) parts.append(u"%1 项失败"_s.arg(failed));
+        if (denied) parts.append(u"%1 项拒绝"_s.arg(denied));
+        if (interrupted) parts.append(u"%1 项中断"_s.arg(interrupted));
+        if (waiting) parts.append(u"等待审批"_s);
+        else if (running) parts.append(u"正在执行"_s);
+        else if (thinking) parts.append(u"正在思考"_s);
+        const auto text = parts.join(u" · "_s);
+        header_->setText(text);
+        header_->setToolTip(text);
+        header_->setAccessibleName(text);
+        header_->setProperty("activityWarning", failed || denied || interrupted || waiting);
+        header_->update();
+    }
+
+private:
+    ActivityButton *header_;
+    QVBoxLayout *items_;
+};
 
 class AgentScrollArea : public ElaScrollArea
 {
@@ -764,7 +975,6 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
 
     chat_ = new QWidget(newPage_);
     chat_->setObjectName(u"agentChat"_s);
-    chat_->installEventFilter(this);
     const auto applyChatTheme = [this] {
         chat_->setStyleSheet(u"#agentChat { background: %1; border-radius: 12px; }"_s.arg(
             chatBackground(eTheme->getThemeMode()).name()));
@@ -790,8 +1000,12 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
     scroll_->setObjectName(u"agentConversationScroll"_s);
     scroll_->setStyleSheet(u"#agentConversationScroll { background: transparent; border: none; }"_s);
     auto *conversation = new QWidget(scroll_);
-    messages_ = new QVBoxLayout(conversation);
-    messages_->setContentsMargins(4, 12, 8, 16);
+    auto *transcript = new QWidget(conversation);
+    auto *conversationLayout = new QVBoxLayout(conversation);
+    conversationLayout->setContentsMargins(0, 0, 0, 0);
+    conversationLayout->addLayout(centeredColumn(transcript), 1);
+    messages_ = new QVBoxLayout(transcript);
+    messages_->setContentsMargins(0, 12, 0, 16);
     messages_->setSpacing(18);
     messages_->addStretch();
     scroll_->setWidget(conversation);
@@ -807,18 +1021,22 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
     connect(latest_, &ElaToolButton::clicked, scroll_, &AgentScrollArea::scrollToEnd);
     const auto updateLatest = [this, scrollBar] {
         positionLatest();
-        latest_->setVisible(scrollBar->maximum() - scrollBar->value() > 120);
+        latest_->setVisible(scrollBar->maximum() - scrollBar->value() > 1);
         if (latest_->isVisible()) latest_->raise();
     };
     connect(scrollBar, &QScrollBar::valueChanged, this, updateLatest);
     connect(scrollBar, &QScrollBar::rangeChanged, this, updateLatest);
 
-    auto *composer = new ComposerArea(chat_);
-    composer->setObjectName(u"agentComposer"_s);
-    auto *composerLayout = new QVBoxLayout(composer);
+    auto *inputDock = new QWidget(chat_);
+    auto *dockLayout = new QVBoxLayout(inputDock);
+    dockLayout->setContentsMargins(0, 0, 0, 0);
+    dockLayout->setSpacing(0);
+    composer_ = new ComposerArea(inputDock);
+    composer_->setObjectName(u"agentComposer"_s);
+    auto *composerLayout = new QVBoxLayout(composer_);
     composerLayout->setContentsMargins(12, 12, 10, 10);
     composerLayout->setSpacing(8);
-    input_ = new ElaPlainTextEdit(composer);
+    input_ = new ElaPlainTextEdit(composer_);
     input_->setObjectName(u"agentInput"_s);
     input_->setAccessibleName(u"消息输入"_s);
     input_->setPlaceholderText(u"向 Agent 发送消息"_s);
@@ -833,32 +1051,36 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
         const auto height = qRound(input_->document()->size().height() * input_->fontMetrics().lineSpacing()) + 4;
         input_->setFixedHeight(qBound(40, height, 112));
     });
+    connect(input_, &ElaPlainTextEdit::textChanged, this, &AgentWindow::refreshSendAvailability);
     input_->installEventFilter(this);
     composerLayout->addWidget(input_);
     auto *options = new QHBoxLayout;
     options->setSpacing(4);
-    context_ = composerButton(composer, true);
+    context_ = composerButton(composer_, true);
     context_->setObjectName(u"agentContext"_s);
     context_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     context_->setElaIcon(ElaIconType::Folder);
     context_->setMaximumWidth(200);
     options->addWidget(context_);
     connect(context_, &ElaToolButton::clicked, this, &AgentWindow::contextMenu);
-    model_ = composerButton(composer);
+    model_ = new ModelButton(composer_);
     model_->setObjectName(u"agentModel"_s);
-    model_->setMaximumWidth(240);
-    permission_ = composerButton(composer, true);
+    permission_ = composerButton(composer_, true);
     permission_->setObjectName(u"agentPermission"_s);
     permission_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     permission_->setElaIcon(ElaIconType::Shield);
-    send_ = new SendButton(composer);
+    send_ = new SendButton(composer_);
     send_->setObjectName(u"agentSend"_s);
     options->addWidget(permission_);
     options->addStretch();
     options->addWidget(model_);
     options->addWidget(send_, 0, Qt::AlignVCenter);
     composerLayout->addLayout(options);
-    layout->addWidget(composer);
+    dockLayout->addWidget(composer_);
+    approvalCard_ = new ApprovalCard(inputDock);
+    approvalCard_->hide();
+    dockLayout->addWidget(approvalCard_);
+    layout->addWidget(inputDock);
     pageLayout->addWidget(chat_);
 
     connect(this, &ElaWindow::navigationNodeClicked, this, [this](auto, const QString &key) {
@@ -880,6 +1102,21 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
     connect(send_, &ElaToolButton::clicked, this, [this] {
         if (service_->busy() && service_->activeSession() == session_) service_->stop();
         else send();
+    });
+    const auto decide = [this](bool allow) {
+        if (approvalTool_.isEmpty() || service_->activeSession() != session_) return;
+        approvalCard_->focusDetails();
+        approvalCard_->setActionsEnabled(false);
+        const auto tool = approvalTool_;
+        service_->decide(tool, allow);
+    };
+    connect(approvalCard_->allowButton(), &ElaPushButton::clicked, this, [decide] { decide(true); });
+    connect(approvalCard_->denyButton(), &ElaPushButton::clicked, this, [decide] { decide(false); });
+    connect(approvalCard_->stopButton(), &ElaPushButton::clicked, this, [this] {
+        if (approvalTool_.isEmpty() || service_->activeSession() != session_) return;
+        approvalCard_->focusDetails();
+        approvalCard_->setActionsEnabled(false);
+        service_->stop();
     });
     streamTimer_.setSingleShot(true);
     streamTimer_.setInterval(80);
@@ -907,7 +1144,9 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
         if (!streamTimer_.isActive()) streamTimer_.start();
     });
     connect(service_, &AgentService::toolUpdated, this, [this](const QString &id, const QJsonObject &event) {
-        if (id == session_) updateTool(event);
+        if (id != session_) return;
+        updateTool(event);
+        refreshApproval();
     });
     connect(service_, &AgentService::busyChanged, this, [this](bool busy) {
         const auto *current = service_->session(session_);
@@ -917,6 +1156,8 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
                 render(false);
             toolCards_.clear();
         }
+        refreshApproval();
+        refreshResume();
         refreshControls();
     });
     syncNavigation();
@@ -990,7 +1231,8 @@ void AgentWindow::select(const QString &id)
     imeComposing_ = false;
     render();
     refreshControls();
-    input_->setFocus();
+    if (approvalTool_.isEmpty()) input_->setFocus();
+    else approvalCard_->focusDetails();
 }
 
 void AgentWindow::refreshControls()
@@ -1009,21 +1251,27 @@ void AgentWindow::refreshControls()
     const auto heading = item ? item->title : u"新对话"_s;
     title_->setText(heading.left(58));
     title_->setToolTip(heading);
-    const auto location = item && !item->plugin.isEmpty() ? item->plugin : workspaceName(item ? item->workspace : pendingWorkspace_);
-    context_->setText(fontMetrics().elidedText(location, Qt::ElideRight, 130) + u" ⌄"_s);
-    context_->setToolTip(u"切换工作区；插件由 AI 根据任务选择\n"_s + (item ? item->workspace : pendingWorkspace_) +
+    const auto workspace = item ? item->workspace : pendingWorkspace_;
+    const auto location = item && !item->plugin.isEmpty() ? item->plugin : workspaceName(workspace);
+    context_->setText(context_->fontMetrics().elidedText(location, Qt::ElideRight, 130) + u" ⌄"_s);
+    context_->setAccessibleName(u"工作区：%1"_s.arg(workspaceName(workspace)));
+    context_->setToolTip(context_->accessibleName() + (workspace.isEmpty() ? QString() : u"\n"_s + QDir::toNativeSeparators(workspace)) +
                          (item && !item->plugin.isEmpty() ? u"\n当前插件："_s + item->plugin : QString()));
     context_->setEnabled(!busy);
     more_->setVisible(item != nullptr);
     more_->setEnabled(!active);
     const auto effort = connection.effectiveReasoningEffort();
-    model_->setText(connection.id.isEmpty() ? (item && !item->connection.isEmpty() ? u"需重新选择模型"_s : u"选择模型 ⌄"_s)
-        : fontMetrics().elidedText(modelName, Qt::ElideRight, 150) +
-          (effort.isEmpty() ? QString() : u" · "_s + effortLabel(effort)) + u" ⌄"_s);
-    model_->setToolTip(connection.id.isEmpty() ? u"在设置中管理模型供应商"_s
-                       : u"%1 · %2\n%3\n思考强度：%4"_s.arg(connection.name, connection.model,
+    modelAvailable_ = !connection.id.isEmpty();
+    const auto effortName = effort.isEmpty() ? QString() : effortLabel(effort);
+    const auto selectionLabel = item && !item->connection.isEmpty() ? u"需重新选择模型"_s : u"选择模型"_s;
+    model_->setSelection(modelAvailable_ ? modelName : selectionLabel, modelAvailable_ ? effortName : QString());
+    model_->setAccessibleName(!modelAvailable_ ? selectionLabel : effortName.isEmpty() ? modelName
+                              : u"%1，思考强度：%2"_s.arg(modelName, effortName));
+    model_->setToolTip(!modelAvailable_ ? u"在设置中管理模型供应商"_s
+                       : u"%1 · %2\n%3\n思考强度：%4"_s.arg(connection.name, modelName,
                            connection.endpoint().toDisplayString(), effortLabel(effort)));
     permission_->setText(access == Permission::Yolo ? u"完全访问"_s : permissionLabel(access));
+    permission_->setAccessibleName(u"工具权限：%1"_s.arg(permission_->text()));
     permission_->setProperty("fullAccess", access == Permission::Yolo);
     permission_->update();
     auto permissionTip = access == Permission::Yolo ? u"完全访问仍需确认插件编辑授权、首次启用和新增权限"_s
@@ -1034,12 +1282,80 @@ void AgentWindow::refreshControls()
     model_->setEnabled(!busy);
     permission_->setEnabled(!busy);
     input_->setReadOnly(active);
+    refreshSendAvailability();
+}
+
+void AgentWindow::refreshSendAvailability()
+{
+    const bool busy = service_->busy();
+    const bool active = busy && service_->activeSession() == session_;
     send_->setElaIcon(active ? ElaIconType::Stop : ElaIconType::ArrowUp);
     send_->setProperty("stopping", active);
     send_->update();
     send_->setAccessibleName(active ? u"停止"_s : u"发送"_s);
     send_->setToolTip(send_->accessibleName());
-    send_->setEnabled(active || (!busy && !connection.id.isEmpty()));
+    send_->setEnabled(active || (!busy && modelAvailable_ && !input_->toPlainText().trimmed().isEmpty()));
+}
+
+void AgentWindow::refreshApproval()
+{
+    const auto &tools = service_->liveTools();
+    const auto current = service_->activeSession() == session_ && !tools.isEmpty() ? tools.constLast() : QJsonObject();
+    const auto tool = current.value(u"state"_s).toString() == u"待审批"_s ? current.value(u"id"_s).toString() : QString();
+    const auto *focus = QApplication::focusWidget();
+    if (tool.isEmpty()) {
+        if (approvalTool_.isEmpty()) return;
+        const bool restoreFocus = focus && (focus == approvalCard_ || approvalCard_->isAncestorOf(focus));
+        approvalTool_.clear();
+        approvalCard_->hide();
+        composer_->show();
+        if (restoreFocus) input_->setFocus();
+        return;
+    }
+
+    auto detail = current.value(u"detail"_s).toString();
+    detail.replace(u"\r\n"_s, u"\n"_s);
+    const auto split = detail.indexOf(u'\n');
+    const auto headline = split < 0 ? detail : detail.left(split);
+    const auto payload = split < 0 ? QString() : detail.mid(split + 1);
+    const bool newRequest = approvalTool_ != tool;
+    approvalCard_->setContent(headline.isEmpty() ? toolLabel(current.value(u"name"_s).toString()) : headline, payload, newRequest);
+    if (newRequest) {
+        const bool moveFocus = focus && composer_->isAncestorOf(focus);
+        approvalTool_ = tool;
+        approvalCard_->setActionsEnabled(true);
+        composer_->hide();
+        approvalCard_->show();
+        if (moveFocus) approvalCard_->focusDetails();
+    }
+}
+
+void AgentWindow::refreshResume()
+{
+    const auto *item = service_->session(session_);
+    if (service_->busy() || !item || !item->resumable) {
+        if (resumeRow_) {
+            messages_->removeWidget(resumeRow_);
+            resumeRow_->hide();
+            resumeRow_->deleteLater();
+            resumeRow_ = nullptr;
+        }
+        return;
+    }
+    if (resumeRow_) return;
+
+    auto *card = new QWidget(scroll_->widget());
+    auto *layout = new QHBoxLayout(card);
+    layout->setContentsMargins(0, 0, 0, 0);
+    auto *resume = AppUi::button(u"继续执行"_s, card);
+    layout->addWidget(resume);
+    layout->addStretch();
+    connect(resume, &ElaPushButton::clicked, this, [this] {
+        QString error;
+        if (!service_->continueSession(session_, &error)) notify(error);
+    });
+    addRow(card);
+    resumeRow_ = card->parentWidget();
 }
 
 void AgentWindow::render(bool resetScroll)
@@ -1047,15 +1363,10 @@ void AgentWindow::render(bool resetScroll)
     const int scrollPosition = scroll_->verticalScrollBar()->value();
     streamTimer_.stop();
     streamLabel_ = nullptr;
-    if (approvalLayer_) {
-        approvalLayer_->hide();
-        approvalLayer_->deleteLater();
-        approvalLayer_ = nullptr;
-        approvalCard_ = nullptr;
-    }
     reasoningScroll_ = nullptr;
     reasoningHeader_ = nullptr;
-    resetActivities();
+    reasoningGroup_ = activities_ = nullptr;
+    resumeRow_ = nullptr;
     reasoning_.clear();
     toolCards_.clear();
     while (messages_->count() > 1) {
@@ -1103,6 +1414,8 @@ void AgentWindow::render(bool resetScroll)
             : u"可以直接提问，也可以在对话中使用系统工具和开发应用插件。"_s);
     if (!service_->draftName(session_).isEmpty() && item && item->events.isEmpty())
         addMessage(u"draft"_s, u"当前会话已有插件草稿"_s);
+    refreshApproval();
+    refreshResume();
     if (resetScroll) scroll_->scrollToEnd();
     else scroll_->restorePosition(scrollPosition);
 }
@@ -1110,31 +1423,16 @@ void AgentWindow::render(bool resetScroll)
 void AgentWindow::addEvent(const QJsonObject &event)
 {
     const auto kind = event.value(u"kind"_s).toString();
-    auto text = event.value(u"text"_s).toString();
-    if (kind == "user"_L1) resetActivities();
+    const auto text = event.value(u"text"_s).toString();
     if (kind == "turn"_L1) {
-        resetActivities();
         auto *elapsed = AppUi::text(text, scroll_->widget(), 12);
         elapsed->setObjectName(u"agentTurnDuration"_s);
         addRow(elapsed);
-        if (const auto *item = service_->session(session_); item && item->resumable) {
-            auto *resume = AppUi::button(u"继续执行"_s, chat_);
-            connect(resume, &ElaPushButton::clicked, this, [this] {
-                QString error;
-                if (!service_->continueSession(session_, &error)) notify(error);
-            });
-            addRow(resume);
-        }
         return;
     }
     if (kind == "preview"_L1) {
-        auto *card=new QWidget(chat_);auto *layout=new QVBoxLayout(card);
-        const QPixmap image(text);
-        auto *label=new QLabel(card);label->setObjectName(u"pluginPreviewScreenshot"_s);
-        if(image.isNull()) label->setText(u"预览截图已不可用"_s);
-        else {label->setPixmap(image.scaledToWidth(qMin(640,image.width()),Qt::SmoothTransformation));label->setToolTip(u"插件预览截图；供用户检查界面"_s);}
-        layout->addWidget(label);
-        addRow(card);return;
+        addRow(new PreviewImage(QPixmap(text), scroll_->widget()));
+        return;
     }
     if (kind == "plugin"_L1) {
         auto *card = new QWidget(chat_);
@@ -1173,14 +1471,18 @@ void AgentWindow::addEvent(const QJsonObject &event)
         if (reasoningHeader_) {
             const auto preview = reasoningPreview(process);
             reasoningHeader_->setText(text);
+            reasoningHeader_->setProperty("activityWarning", text == u"思考中断"_s);
             reasoningHeader_->setProperty("processText", preview);
             if (reasoningHeader_->isChecked()) reasoningScroll_->setProcessText(preview);
+            reasoningHeader_->parentWidget()->setProperty("activityState", text);
+            reasoningGroup_->refreshSummary();
         } else {
             addReasoning(process, text);
         }
         reasoning_.clear();
         reasoningHeader_ = nullptr;
         reasoningScroll_ = nullptr;
+        reasoningGroup_ = nullptr;
         return;
     }
     if (kind == "assistant"_L1) {
@@ -1191,7 +1493,6 @@ void AgentWindow::addEvent(const QJsonObject &event)
             setMarkdown(streamLabel_, text);
             if (event.value(u"final"_s).toBool()) addFinalCopy(streamLabel_);
             streamLabel_ = nullptr;
-            resetActivities();
             return;
         }
     }
@@ -1213,67 +1514,30 @@ void AgentWindow::addToolEvent(const QJsonObject &event)
 
 void AgentWindow::addRow(QWidget *card, bool right)
 {
-    auto *row = new QWidget(scroll_->widget());
+    activities_ = nullptr;
+    auto *row = new QWidget(messages_->parentWidget());
     auto *layout = new QHBoxLayout(row);
     layout->setContentsMargins(right ? 62 : 0, 0, 0, 0);
-    if (!right) card->setMaximumWidth(780);
     if (right) layout->addStretch();
     layout->addWidget(card, right ? 0 : 1);
     messages_->insertWidget(messages_->count() - 1, row);
 }
 
-void AgentWindow::resetActivities()
+ActivityGroup *AgentWindow::addActivity(QWidget *widget)
 {
-    activities_ = activityItems_ = nullptr;
-    activityHeader_ = nullptr;
-    activityLayout_ = nullptr;
-}
-
-void AgentWindow::ensureActivities()
-{
-    if (activities_) return;
-    activities_ = new QWidget(scroll_->widget());
-    activities_->setObjectName(u"agentActivities"_s);
-    auto *layout = new QVBoxLayout(activities_);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(3);
-    activityHeader_ = new ActivityButton(activities_);
-    activityHeader_->setObjectName(u"agentActivitySummary"_s);
-    activityHeader_->setText(u"活动记录"_s);
-    activityHeader_->setElaIcon(ElaIconType::Code);
-    layout->addWidget(activityHeader_);
-    activityItems_ = new QWidget(activities_);
-    activityLayout_ = new QVBoxLayout(activityItems_);
-    activityLayout_->setContentsMargins(0, 0, 0, 0);
-    activityLayout_->setSpacing(2);
-    layout->addWidget(activityItems_);
-    activityItems_->hide();
-    connect(activityHeader_, &ElaToolButton::toggled, activityItems_, &QWidget::setVisible);
-    addRow(activities_);
-    activities_->hide();
-}
-
-void AgentWindow::addActivity(QWidget *widget)
-{
-    ensureActivities();
-    activityLayout_->addWidget(widget);
-    activityHeader_->setCheckable(true);
-    QStringList summaries;
-    for (int i = 0; i < activityLayout_->count(); ++i) {
-        const auto summary = activityLayout_->itemAt(i)->widget()->property("activitySummary").toString();
-        if (!summary.isEmpty() && !summaries.contains(summary)) summaries.append(summary);
+    if (!activities_) {
+        auto *group = new ActivityGroup(scroll_->widget());
+        addRow(group);
+        activities_ = group;
     }
-    activityHeader_->setText(summaries.isEmpty() ? u"思考与操作"_s : summaries.join(u" · "_s));
-    activityHeader_->setToolTip(activityHeader_->text());
-    activities_->show();
+    activities_->add(widget);
+    return activities_;
 }
 
 void AgentWindow::addMessage(const QString &kind, const QString &text, bool final)
 {
-    if (kind == u"assistant"_s) resetActivities();
     if (kind == "plan"_L1) {
         auto *card = new QWidget(scroll_->widget());
-        card->setProperty("activitySummary", u"更新任务步骤"_s);
         auto *layout = new QVBoxLayout(card);
         layout->setContentsMargins(0, 0, 0, 0);
         layout->setSpacing(4);
@@ -1290,16 +1554,6 @@ void AgentWindow::addMessage(const QString &kind, const QString &text, bool fina
         steps->hide();
         connect(header, &ElaToolButton::toggled, steps, &QWidget::setVisible);
         addActivity(card);
-        return;
-    }
-    if (kind == "tool"_L1) {
-        auto *row = new ActivityButton(scroll_->widget());
-        row->setProperty("activitySummary", text.contains(u"失败"_s) || text.contains(u"已拒绝"_s)
-            ? text.simplified() : text.section(u" · "_s, 0, 0).simplified());
-        row->setText(text.simplified());
-        row->setToolTip(text);
-        row->setElaIcon(ElaIconType::Code);
-        addActivity(row);
         return;
     }
     const bool user = kind == "user"_L1;
@@ -1384,8 +1638,10 @@ void AgentWindow::addFinalCopy(ElaText *content)
 
 void AgentWindow::positionLatest()
 {
-    const auto area = scroll_->viewport()->rect();
-    latest_->move(qMax(0, (area.width() - latest_->width()) / 2), qMax(0, area.height() - latest_->height() - 12));
+    const auto *viewport = scroll_->viewport();
+    const int centeredX = (scroll_->width() - latest_->width()) / 2 - viewport->x();
+    latest_->move(qBound(0, centeredX, qMax(0, viewport->width() - latest_->width())),
+                  qMax(0, viewport->height() - latest_->height() - 12));
 }
 
 void AgentWindow::updateTool(const QJsonObject &event)
@@ -1393,11 +1649,12 @@ void AgentWindow::updateTool(const QJsonObject &event)
     const auto id = event.value(u"id"_s).toString();
     if (!toolCards_.contains(id)) {
         auto *card = new QWidget(scroll_->widget());
-        card->setProperty("activitySummary", toolLabel(event.value(u"name"_s).toString()));
+        card->setProperty("activityState", event.value(u"state"_s).toString());
         auto *layout = new QVBoxLayout(card);
         layout->setContentsMargins(0, 0, 0, 0);
         layout->setSpacing(4);
         auto *header = new ActivityButton(card);
+        header->setObjectName(u"agentToolSummary"_s);
         header->setCheckable(true);
         header->setElaIcon(ElaIconType::Code);
         layout->addWidget(header);
@@ -1413,50 +1670,25 @@ void AgentWindow::updateTool(const QJsonObject &event)
         review->hide();
         connect(header, &ElaToolButton::toggled, details, &QWidget::setVisible);
         connect(review, &ElaPushButton::clicked, this, [this, session = session_] { emit settingsRequested(session); });
-        addActivity(card);
-        toolCards_.insert(id, {header, details, contents, review, activityHeader_});
+        auto *group = addActivity(card);
+        toolCards_.insert(id, {header, contents, review, group});
     }
     const auto card = toolCards_.value(id);
     const auto state = event.value(u"state"_s).toString();
     const auto name = event.value(u"name"_s).toString();
-    const auto detail = event.value(u"detail"_s).toString();
     card.header->setText(u"%1 · %2"_s.arg(toolLabel(name), state));
     card.header->setToolTip(card.header->text());
+    card.header->setAccessibleName(card.header->text());
+    card.header->setProperty("activityWarning", state == u"待审批"_s || state == u"失败"_s ||
+                             state == u"已拒绝"_s || state == u"已中断"_s);
+    card.header->update();
     static_cast<ToolDetails *>(card.contents)->setEvent(event);
-    card.header->setEnabled(true);
     card.review->setVisible(name == "write_plugin_draft"_L1 && state != u"正在执行"_s &&
                             !service_->draftName(session_).isEmpty());
-    if (state == u"待审批"_s) {
-        card.header->setChecked(true);
-        card.group->setChecked(true);
-        const auto split = detail.indexOf(u"\n\n"_s);
-        const auto summary = split < 0 ? detail : detail.left(split);
-        const auto payload = split < 0 ? QString() : detail.mid(split + 2);
-        if (auto *existing = static_cast<ApprovalCard *>(approvalCard_)) {
-            existing->setContent(summary, payload);
-        } else {
-            approvalLayer_ = new QWidget(chat_);
-            approvalLayer_->setObjectName(u"agentApprovalLayer"_s);
-            approvalLayer_->setAttribute(Qt::WA_NoSystemBackground, true);
-            approvalLayer_->setAutoFillBackground(false);
-            auto *layerLayout = new QVBoxLayout(approvalLayer_);
-            layerLayout->setContentsMargins(16, 0, 16, 14);
-            layerLayout->setSpacing(0);
-            layerLayout->addStretch();
-            auto *approval = new ApprovalCard(summary, payload, approvalLayer_);
-            approval->onAllow = [this, id] { service_->decide(id, true); };
-            approval->onDeny = [this, id] { service_->decide(id, false); };
-            layerLayout->addWidget(approval);
-            approvalCard_ = approval;
-            approvalLayer_->setGeometry(chat_->rect());
-            approvalLayer_->show();
-        }
-        approvalLayer_->raise();
-    } else if (approvalLayer_) {
-        approvalLayer_->hide();
-        approvalLayer_->deleteLater();
-        approvalLayer_ = nullptr;
-        approvalCard_ = nullptr;
+    auto *item = card.header->parentWidget();
+    if (item->property("activityState").toString() != state) {
+        item->setProperty("activityState", state);
+        card.group->refreshSummary();
     }
 }
 
@@ -1470,12 +1702,13 @@ void AgentWindow::flushStream()
 void AgentWindow::addReasoning(const QString &text, const QString &status)
 {
     auto *card = new QWidget(scroll_->widget());
-    card->setProperty("activitySummary", u"思考"_s);
+    card->setProperty("activityState", status);
     auto *layout = new QVBoxLayout(card);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(4);
     reasoningHeader_ = new ActivityButton(card);
     reasoningHeader_->setText(status);
+    reasoningHeader_->setProperty("activityWarning", status == u"思考中断"_s);
     reasoningHeader_->setObjectName(u"agentReasoning"_s);
     reasoningHeader_->setCheckable(true);
     reasoningHeader_->setElaIcon(ElaIconType::Clock);
@@ -1495,7 +1728,7 @@ void AgentWindow::addReasoning(const QString &text, const QString &status)
         if (expanded) view->refreshTheme(header->property("processText").toString());
         view->setVisible(expanded);
     });
-    addActivity(card);
+    reasoningGroup_ = addActivity(card);
 }
 
 void AgentWindow::flushReasoning()
@@ -1611,19 +1844,23 @@ void AgentWindow::contextMenu()
     menu->setAttribute(Qt::WA_DeleteOnClose);
     auto *workspaces = new ElaMenu(menu); workspaces->setTitle(u"工作区"_s); menu->addMenu(workspaces);
     auto paths = service_->workspaces(); paths.prepend(QString());
-    for (const auto &path : paths) workspaces->addAction(path.isEmpty() ? u"无工作区"_s : QDir::toNativeSeparators(path), this, [this, path] {
-        if (session_.isEmpty()) pendingWorkspace_ = path;
-        else service_->setWorkspace(session_, path);
-        refreshControls();
-    });
+    const auto *item = service_->session(session_);
+    const auto current = item ? item->workspace : pendingWorkspace_;
+    for (const auto &path : paths) {
+        auto *choice = workspaces->addAction(path.isEmpty() ? u"无工作区"_s : QDir::toNativeSeparators(path), this, [this, path] {
+            if (session_.isEmpty()) pendingWorkspace_ = path;
+            else service_->setWorkspace(session_, path);
+            refreshControls();
+        });
+        choice->setCheckable(true);
+        choice->setChecked(current == path);
+    }
     menu->popup(context_->mapToGlobal(QPoint(0, context_->height())));
 }
 
 bool AgentWindow::eventFilter(QObject *object, QEvent *event)
 {
     if (scroll_ && latest_ && object == scroll_->viewport() && event->type() == QEvent::Resize) positionLatest();
-    if (object == chat_ && event->type() == QEvent::Resize && approvalLayer_)
-        approvalLayer_->setGeometry(chat_->rect());
     if (object == input_ && event->type() == QEvent::InputMethod)
         imeComposing_ = !static_cast<QInputMethodEvent *>(event)->preeditString().isEmpty();
     if (object == input_ && event->type() == QEvent::KeyPress) {
@@ -1645,9 +1882,8 @@ bool AgentWindow::eventFilter(QObject *object, QEvent *event)
 void AgentWindow::send()
 {
     const auto prompt = input_->toPlainText();
-    if (service_->busy() || prompt.trimmed().isEmpty()) return;
+    if (service_->busy() || !modelAvailable_ || prompt.trimmed().isEmpty()) return;
     if (session_.isEmpty()) {
-        if (pendingModel_.id.isEmpty()) { emit settingsRequested({}); return; }
         const auto id = service_->createSession(pendingModel_.id, pendingModel_.model, pendingWorkspace_, pendingPermission_);
         service_->setReasoningEffort(id, pendingEffort_);
         navigation(pageKey(nodes_.value(id).page));

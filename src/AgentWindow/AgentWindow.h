@@ -9,7 +9,10 @@ class ElaPushButton;
 class ElaText;
 class ElaToolButton;
 class QVBoxLayout;
+class ActivityGroup;
+class ApprovalCard;
 class AgentScrollArea;
+class ModelButton;
 class ReasoningScrollArea;
 
 class AgentWindow final : public ElaWindow
@@ -29,14 +32,16 @@ private:
     struct Node { QWidget *page; QString workspace; };
     struct ToolCard {
         ElaToolButton *header;
-        QWidget *details;
         QWidget *contents;
         ElaPushButton *review;
-        ElaToolButton *group;
+        ActivityGroup *group;
     };
     void syncNavigation();
     void select(const QString &id);
     void refreshControls();
+    void refreshSendAvailability();
+    void refreshApproval();
+    void refreshResume();
     void render(bool resetScroll = true);
     void addEvent(const QJsonObject &event);
     void updateTool(const QJsonObject &event);
@@ -47,9 +52,7 @@ private:
     void flushStream();
     void flushReasoning();
     void addReasoning(const QString &text, const QString &status);
-    void addActivity(QWidget *widget);
-    void ensureActivities();
-    void resetActivities();
+    ActivityGroup *addActivity(QWidget *widget);
     void addRow(QWidget *card, bool right = false);
     void send();
     void modelMenu();
@@ -62,16 +65,17 @@ private:
     QWidget *newPage_, *chat_;
     AgentScrollArea *scroll_ = nullptr;
     QVBoxLayout *messages_;
+    QWidget *resumeRow_ = nullptr;
     ElaText *title_, *notice_, *streamLabel_ = nullptr;
     ReasoningScrollArea *reasoningScroll_ = nullptr;
-    ElaToolButton *reasoningHeader_ = nullptr, *activityHeader_ = nullptr;
-    QWidget *activities_ = nullptr, *activityItems_ = nullptr;
-    QVBoxLayout *activityLayout_ = nullptr;
+    ElaToolButton *reasoningHeader_ = nullptr;
+    ActivityGroup *activities_ = nullptr, *reasoningGroup_ = nullptr;
+    QWidget *composer_ = nullptr;
     ElaPlainTextEdit *input_ = nullptr;
-    ElaToolButton *model_, *permission_, *context_;
+    ModelButton *model_;
+    ElaToolButton *permission_, *context_;
     ElaToolButton *more_, *send_, *latest_ = nullptr;
-    QWidget *approvalLayer_ = nullptr;
-    QWidget *approvalCard_ = nullptr;
+    ApprovalCard *approvalCard_ = nullptr;
     QHash<QString, Node> nodes_;
     QHash<QString, QString> groups_, unsent_;
     QHash<QString, ToolCard> toolCards_;
@@ -79,8 +83,10 @@ private:
     AgentConnection pendingModel_;
     AgentService::Permission pendingPermission_ = AgentService::Permission::Ask;
     QString stream_, reasoning_, pendingEffort_;
+    QString approvalTool_;
     QTimer streamTimer_;
     bool navigating_ = false, imeComposing_ = false;
     bool pendingModelOverridden_ = false;
+    bool modelAvailable_ = false;
 };
 
