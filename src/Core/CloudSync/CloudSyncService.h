@@ -7,6 +7,7 @@
 #include <QHash>
 #include <QJsonArray>
 #include <QObject>
+#include <QPointer>
 #include <QSet>
 #include <QString>
 
@@ -16,6 +17,7 @@
 
 class QTimer;
 class CloudScreen;
+class UpdateService;
 
 // Device side of the CTX centralized control protocol.
 //
@@ -36,6 +38,8 @@ public:
     void setPluginTelemetry(std::function<QJsonArray()> read) { pluginTelemetry_ = std::move(read); }
     void setManagedRestart(std::function<QString(const QString&)> restart) { managedRestart_ = std::move(restart); }
     void setPowerOperationGuard(std::function<QString()> guard) { powerOperationGuard_ = std::move(guard); }
+    void setUpdateService(UpdateService* updater, std::function<QString()> guard);
+    bool recordUpdateHandoff(const QString& installerPath, QString* error);
 
     // Loads the private state, takes the single-instance lock and schedules the
     // first sync. Configuration errors never abort application startup.
@@ -83,6 +87,13 @@ private:
     void executeOperation(quint64 token, const QJsonObject& task);
     void sendOperationResult(quint64 token, const QString& id, const QString& status,
                              const QString& reason, const QString& bootId = {});
+    bool updateSupported() const;
+    void executeUpdate(quint64 token, const QString& id);
+    void updateChanged();
+    bool recoverUpdate();
+    bool saveUpdateJournal(const QJsonObject& journal, QString* error = nullptr);
+    bool finishUpdate(const QString& status, const QString& reason = {}, int targetBuild = 0);
+    bool flushUpdateReceipt(quint64 token);
     void processNextChannel(quint64 token, int index,
                             const std::array<Cloud::Target, 2>& targets, Step done);
     void processChannel(quint64 token, const Cloud::Target& target, Step done);
@@ -120,6 +131,9 @@ private:
     std::function<QJsonArray()> pluginTelemetry_;
     std::function<QString(const QString&)> managedRestart_;
     std::function<QString()> powerOperationGuard_;
+    QPointer<UpdateService> updater_;
+    std::function<QString()> updateGuard_;
+    const QString updateInstanceId_;
     bool started_ = false;
     bool inFlight_ = false;
     bool pairing_ = false;
@@ -128,6 +142,7 @@ private:
     bool managedRestartAccepted_ = false;
     bool qtPowerEnabled_ = false;
     bool qtScreenSnapshotsEnabled_ = false;
+    bool qtUpdateEnabled_ = false;
     bool bootProbeStarted_ = false;
     QString powerBootId_;
     quint64 cycleToken_ = 0;

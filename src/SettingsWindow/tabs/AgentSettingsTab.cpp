@@ -305,11 +305,14 @@ AgentProvider AgentSettingsTab::editedProvider() const
             address_->text().trimmed(), editableModels_};
 }
 
+bool AgentSettingsTab::hasUnsavedInput() const
+{
+    return editedProvider().toJson() != selectedProvider_.toJson() || !key_->text().isEmpty();
+}
+
 bool AgentSettingsTab::canLeaveProvider()
 {
-    const auto current = editedProvider();
-    return (current.toJson() == selectedProvider_.toJson() && key_->text().isEmpty()) ||
-        AppUi::confirm(this, u"放弃未保存的供应商配置？"_s, u"当前修改尚未保存。"_s);
+    return !hasUnsavedInput() || AppUi::confirm(this, u"放弃未保存的供应商配置？"_s, u"当前修改尚未保存。"_s);
 }
 
 void AgentSettingsTab::reloadProviders(const QString &selected)

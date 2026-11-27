@@ -18,6 +18,7 @@ class ReminderSettingsTab final : public ElaScrollPage
     Q_OBJECT
 public:
     explicit ReminderSettingsTab(QWidget* parent = nullptr);
+    bool hasUnsavedInput() const;
 signals:
     void previewRequested(const QString& text);
 private:

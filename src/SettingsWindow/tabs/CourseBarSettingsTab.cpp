@@ -22,7 +22,6 @@
 #include <QListWidget>
 #include <QMimeData>
 #include <QPainter>
-#include <QShowEvent>
 #include <QSignalBlocker>
 #include <QTimer>
 #include <QUuid>
@@ -329,7 +328,7 @@ CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent, CourseBarComponentRe
             // has been accepted; a canceled exit must preserve all settings.
             return;
         }
-        save(CourseBarConfig{}, 0, true, true);
+        save(CourseBarConfig{}, 0, true);
     });
     connect(preview_, &QListWidget::currentItemChanged, this, [this](QListWidgetItem* item) {
         if (item) selectComponent(item->data(Qt::UserRole).toInt());
@@ -340,29 +339,14 @@ CourseBarSettingsTab::CourseBarSettingsTab(QWidget* parent, CourseBarComponentRe
     preview_->moved = components_->moved = [this](int from, int to) { moveComponent(from, to); };
     connect(eTheme, &ElaTheme::themeModeChanged, this, [this] { refreshTheme(); });
     connect(&ThemeManager::instance(), &ThemeManager::themeColorChanged, this, &CourseBarSettingsTab::refreshTheme);
+    connect(&ConfigManager::instance(), &ConfigManager::courseBarChanged, this, &CourseBarSettingsTab::scheduleRefresh);
     refresh();
 }
 
-void CourseBarSettingsTab::showEvent(QShowEvent* event)
+void CourseBarSettingsTab::refreshControls()
 {
-    ElaScrollPage::showEvent(event);
-    // Skip only animation restoration; ordinary activation still reloads config.
-    if (property("ElaPageTransitionRestore").toBool()) return;
-    refresh();
-}
-
-void CourseBarSettingsTab::reloadFromConfig()
-{
-    refresh();
-}
-
-void CourseBarSettingsTab::refresh()
-{
-    using namespace AppUi;
-    config_ = ConfigManager::instance().config().courseBarConfig;
     const QSignalBlocker enableBlock(enableSwitch_), heightBlock(heightSpin_);
     const QSignalBlocker componentSpacingBlock(componentSpacingSpin_);
-    const QSignalBlocker previewBlock(preview_), listBlock(components_);
     enableSwitch_->setIsToggled(config_.enable);
     const QSignalBlocker uiAccessBlock(uiAccessSwitch_);
     uiAccessSwitch_->setIsToggled(config_.uiAccessEnabled);
@@ -372,6 +356,26 @@ void CourseBarSettingsTab::refresh()
     uiAccessStatus_->setVisible(!UiAccess::supported() || uiAccessSwitching_);
     heightSpin_->setValue(config_.height);
     componentSpacingSpin_->setValue(config_.componentSpacing);
+}
+
+int CourseBarSettingsTab::componentIndex(const QString& id) const
+{
+    for (int i = 0; i < config_.components.size(); ++i)
+        if (config_.components.at(i).instanceId == id) return i;
+    return -1;
+}
+
+void CourseBarSettingsTab::refresh()
+{
+    using namespace AppUi;
+    config_ = ConfigManager::instance().config().courseBarConfig;
+    refreshControls();
+    for (auto it = pendingTexts_.begin(); it != pendingTexts_.end();) {
+        const int index = componentIndex(it.key());
+        if (index < 0 || config_.components.at(index).text == it.value()) it = pendingTexts_.erase(it);
+        else ++it;
+    }
+    const QSignalBlocker previewBlock(preview_), listBlock(components_);
     preview_->clear();
     components_->clear();
     for (int i = 0; i < config_.components.size(); ++i) {
@@ -400,14 +404,21 @@ void CourseBarSettingsTab::refresh()
             edit->setObjectName(QStringLiteral("courseBarComponentText_%1").arg(i));
             edit->setAccessibleName(tr("第 %1 个文本提示的内容").arg(i + 1));
             edit->setPlaceholderText(tr("显示文本"));
-            edit->setText(component.text);
+            const auto id = component.instanceId;
+            edit->setText(pendingTexts_.value(id, component.text));
             edit->setMinimumWidth(120);
             bodyLayout->addWidget(edit);
-            connect(edit, &ElaLineEdit::editingFinished, this, [this, i, edit] {
-                if (edit->text() == config_.components.at(i).text) return;
+            connect(edit, &ElaLineEdit::textEdited, this, [this, id](const QString& value) {
+                const int index = componentIndex(id);
+                if (index >= 0 && config_.components.at(index).text != value) pendingTexts_.insert(id, value);
+                else pendingTexts_.remove(id);
+            });
+            connect(edit, &ElaLineEdit::editingFinished, this, [this, id] {
+                const int index = componentIndex(id);
+                if (index < 0 || !pendingTexts_.contains(id)) return;
                 auto candidate = config_;
-                candidate.components[i].text = edit->text();
-                save(candidate, i);
+                candidate.components[index].text = pendingTexts_.value(id);
+                if (save(candidate, index)) pendingTexts_.remove(id);
             });
         }
         if (component.type == CourseBarComponentType::CourseView || component.type == CourseBarComponentType::Plugin) {
@@ -433,8 +444,15 @@ void CourseBarSettingsTab::refresh()
         // The selected item has a two-pixel border on every side.
         item->setSizeHint(QSize(0, qMax(54, bodyLayout->sizeHint().height() + 4)));
         components_->setItemWidget(item, row);
-        connect(toggle, &ElaToggleSwitch::toggled, this, [this, i](bool enabled) {
-            auto candidate = config_; candidate.components[i].enabled = enabled; save(candidate, i);
+        connect(toggle, &ElaToggleSwitch::toggled, this, [this, toggle, id = component.instanceId](bool enabled) {
+            const int index = componentIndex(id);
+            if (index < 0) return;
+            auto candidate = config_;
+            candidate.components[index].enabled = enabled;
+            if (!save(candidate, index)) {
+                const QSignalBlocker blocker(toggle);
+                toggle->setIsToggled(config_.components.at(index).enabled);
+            }
         });
         connect(left, &ElaPushButton::clicked, this, [this, i] { moveComponent(i, i - 1); });
         connect(right, &ElaPushButton::clicked, this, [this, i] { moveComponent(i, i + 1); });
@@ -486,7 +504,7 @@ void CourseBarSettingsTab::setUiAccessSwitching(bool switching)
 {
     uiAccessSwitching_ = switching;
     if (!switching) resetPending_ = false;
-    refresh();
+    refreshControls();
 }
 
 void CourseBarSettingsTab::refreshTheme()
@@ -573,12 +591,17 @@ void CourseBarSettingsTab::showComponentSettings(int index)
     layout->addLayout(footer);
     connect(close, &ElaPushButton::clicked, dialog, &QDialog::accept);
     connect(dialog, &ElaDialog::closeButtonClicked, dialog, &QDialog::reject);
-    connect(dialog, &QDialog::finished, this, [this] { scheduleRefresh(); });
-    connect(spacing, &ElaSpinBox::valueChanged, this, [this, index, spacing, actualSpacing](int value) {
+    const auto id = config_.components.at(index).instanceId;
+    connect(spacing, &ElaSpinBox::valueChanged, this, [this, id, dialog, spacing, actualSpacing](int value) {
+        const int index = componentIndex(id);
+        if (index < 0) {
+            dialog->close();
+            return;
+        }
         if (value == config_.components.at(index).courseSpacing) return;
         auto candidate = config_;
         candidate.components[index].courseSpacing = value;
-        if (!save(candidate, index, false)) {
+        if (!save(candidate, index)) {
             const QSignalBlocker blocker(spacing);
             spacing->setValue(config_.components.at(index).courseSpacing);
         }
@@ -591,7 +614,7 @@ void CourseBarSettingsTab::showComponentSettings(int index)
     spacing->setFocus();
 }
 
-bool CourseBarSettingsTab::save(const CourseBarConfig& candidate, int selection, bool refreshComponents, bool resetAll, bool prepared)
+bool CourseBarSettingsTab::save(const CourseBarConfig& candidate, int selection, bool resetAll, bool prepared)
 {
     if (registry_ && !prepared) {
         QStringList removed;
@@ -602,9 +625,13 @@ bool CourseBarSettingsTab::save(const CourseBarConfig& candidate, int selection,
             if (!retained) removed.append(previous.instanceId);
         }
         if (!removed.isEmpty()) {
+            if (preparingRemoval_) return false;
+            preparingRemoval_ = true;
             const QPointer<CourseBarSettingsTab> self(this);
-            registry_->prepareRemoval(removed, [self,candidate,selection,refreshComponents,resetAll](bool allowed) {
-                if(self && allowed) self->save(candidate,selection,refreshComponents,resetAll,true);
+            registry_->prepareRemoval(removed, [self, candidate, selection, resetAll](bool allowed) {
+                if (!self) return;
+                self->preparingRemoval_ = false;
+                if (allowed) self->save(candidate, selection, resetAll, true);
             });
             return false;
         }
@@ -635,10 +662,9 @@ bool CourseBarSettingsTab::save(const CourseBarConfig& candidate, int selection,
         emit configChanged();
     } else {
         QWidget* errorParent = componentSettingsDialog_ ? static_cast<QWidget*>(componentSettingsDialog_.data()) : this;
+        refreshControls();
         AppUi::error(errorParent, tr("课程条配置保存失败：%1").arg(error));
     }
-    // Reconstruct after the sender's button/drag handler returns.
-    if (refreshComponents || !saved) scheduleRefresh();
     return saved;
 }
 

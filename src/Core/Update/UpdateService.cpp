@@ -126,6 +126,16 @@ bool UpdateService::supported() const
 #endif
 }
 
+QString UpdateService::installationError(const QString& stageName)
+{
+#ifdef Q_OS_WIN
+    return UpdatePlatform::installationError(stageName);
+#else
+    Q_UNUSED(stageName);
+    return tr("当前平台不支持安装更新。");
+#endif
+}
+
 void UpdateService::setState(State state, const QString& message)
 {
     state_ = state;
@@ -164,6 +174,7 @@ void UpdateService::setAutomaticUpdates(bool enabled)
 
 QString UpdateService::readyMessage() const
 {
+    if (managedUpdate_) return tr("安装包已校验，正在等待远程更新确认。");
     return automaticUpdates_ ? tr("安装包已校验，将在退出时安装。")
                              : tr("安装包已校验，可以安装更新。");
 }
@@ -175,13 +186,44 @@ void UpdateService::installOnQuit()
 
 void UpdateService::check()
 {
+    if (!managedUpdate_) checkForUpdate(false);
+}
+
+bool UpdateService::checkManaged()
+{
+    if (!supported() || managedUpdate_ || state_ == State::Checking || state_ == State::Downloading
+        || state_ == State::Ready || state_ == State::Preparing) return false;
+    managedUpdate_ = true;
     checkForUpdate(false);
+    return true;
+}
+
+void UpdateService::downloadManaged()
+{
+    if (managedUpdate_ && state_ == State::Available) startDownload(false);
+}
+
+void UpdateService::installManaged()
+{
+    if (managedUpdate_ && state_ == State::Ready) requestInstall(true);
+}
+
+void UpdateService::finishManaged()
+{
+    if (!managedUpdate_) return;
+    managedUpdate_ = false;
+    if (state_ == State::Checking || state_ == State::Downloading || state_ == State::Ready || state_ == State::Preparing) {
+        stopRequest();
+        fail(tr("远程更新已停止。"));
+    } else {
+        emit changed();
+    }
 }
 
 void UpdateService::checkForUpdate(bool automatic)
 {
     if (!supported() || state_ == State::Checking || state_ == State::Preparing
-        || (automatic && (state_ == State::Downloading || state_ == State::Ready))) return;
+        || (automatic && (managedUpdate_ || state_ == State::Downloading || state_ == State::Ready))) return;
     stopRequest();
     discardDownload();
     automaticRequest_ = automatic;
@@ -270,11 +312,11 @@ void UpdateService::readManifest(const QByteArray& contents)
         fail(tr("更新清单格式无效或版本不受支持。"));
         return;
     }
+    build_ = build;
     if (build <= currentBuild()) {
         setState(State::Current, tr("当前已是最新版本。"));
         return;
     }
-    build_ = build;
     filename_ = filename;
     notes_ = notes.toString();
     installer_ = {{}, QByteArray::fromHex(digest.toLatin1()), size};
@@ -284,6 +326,7 @@ void UpdateService::readManifest(const QByteArray& contents)
 
 void UpdateService::downloadAndInstall()
 {
+    if (managedUpdate_) return;
     if (state_ == State::Ready) requestInstall(true);
     else if (state_ == State::Available) startDownload(false);
 }
@@ -490,7 +533,7 @@ void UpdateService::finishDownload(const QUrl& url, int status, const QUrl& redi
     download_.reset();
     percent_ = 100;
     installer_.path = path;
-    if (automaticRequest_) setState(State::Ready, readyMessage());
+    if (managedUpdate_ || automaticRequest_) setState(State::Ready, readyMessage());
     else requestInstall(true);
 }
 
@@ -514,8 +557,9 @@ void UpdateService::requestInstall(bool restartAfterInstall)
 
 void UpdateService::installationDeferred(const QString& message)
 {
-    if (state_ == State::Preparing)
-        setState(State::Ready, message);
+    if (state_ != State::Preparing) return;
+    if (managedUpdate_) fail(message);
+    else setState(State::Ready, message);
 }
 
 void UpdateService::transferInstaller()

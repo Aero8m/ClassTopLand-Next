@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ElaContentDialog.h>
+#include <QHash>
 #include "SettingsLayout.h"
 #include <QSize>
 #include <QTime>
@@ -13,12 +14,37 @@ class ElaScrollArea;
 class ElaScrollPage;
 class ElaTableView;
 class ElaText;
+class ElaWindow;
 class QAbstractScrollArea;
 class QStandardItemModel;
 class QVBoxLayout;
 
 namespace AppUi {
 inline constexpr QSize defaultWindowSize{850, 550};
+
+// Keeps stable page IDs for reopening while Ela owns the actual navigation.
+class LazyPages final : public QObject {
+public:
+    explicit LazyPages(ElaWindow* window);
+    void add(const QString& id, const QString& title, ElaIconType::IconName icon,
+             std::function<QWidget*(QWidget*)> create);
+    QWidget* showPage(const QString& id);
+    QString currentPage() const;
+
+protected:
+    bool eventFilter(QObject* object, QEvent* event) override;
+
+private:
+    struct Page {
+        QWidget* host;
+        std::function<QWidget*(QWidget*)> create;
+        QWidget* content = nullptr;
+    };
+    QWidget* ensure(Page& page);
+
+    ElaWindow* window_;
+    QHash<QString, Page> pages_;
+};
 
 // Touch gestures only; mouse selection, editing and drag/drop remain available.
 void enableTouchScrolling(QAbstractScrollArea* area, Qt::Orientations directions = Qt::Vertical);

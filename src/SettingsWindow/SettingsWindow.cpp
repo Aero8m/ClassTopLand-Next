@@ -1,32 +1,33 @@
 #include "SettingsWindow.h"
 #include "tabs/AgentSettingsTab.h"
-#include "../Ui/Plugins/PluginUiHost.h"
 #include "../Ui/UiWidgets.h"
 #include <QCloseEvent>
+#include <QDialog>
 #include "AboutDialog.h"
 #include "tabs/AppearanceSettingsTab.h"
 #include "tabs/CloudSettingsTab.h"
 #include "tabs/CourseBarSettingsTab.h"
 #include "tabs/DesktopCountdownSettingsTab.h"
 #include "tabs/ReminderSettingsTab.h"
+#include "tabs/ProfileSettingsTab.h"
 #include "tabs/UpdateSettingsTab.h"
 #include "tabs/WindowInterceptionSettingsTab.h"
 
 #include <QScreen>
+#include <algorithm>
+#include <utility>
 
-SettingsWindow::SettingsWindow(QWidget* parent, WindowInterceptionService* interception, PluginManager* plugins, PluginUiHost* pluginUi, CourseBarComponentRegistry* registry, CloudSyncService* cloud, AgentService* agent, UpdateService* update)
-    : ElaWindow(parent), plugins_(plugins), pluginUi_(pluginUi), registry_(registry),
-      cloud_(cloud), agent_(agent), update_(update), interception_(interception)
+SettingsWindow::SettingsWindow(WindowInterceptionService* interception, CourseBarComponentRegistry* registry,
+                               CloudSyncService* cloud, std::function<AgentService*()> agent, UpdateService* update)
+    : pages_(std::make_unique<AppUi::LazyPages>(this)), registry_(registry), cloud_(cloud),
+      agent_(std::move(agent)), update_(update), interception_(interception)
 {
     setIsDefaultClosed(false);
     connect(this, &ElaWindow::closeButtonClicked, this, [this] { close(); });
     initUI();
 }
 
-SettingsWindow::~SettingsWindow()
-{
-
-}
+SettingsWindow::~SettingsWindow() = default;
 
 void SettingsWindow::initUI()
 {
@@ -43,44 +44,56 @@ void SettingsWindow::initUI()
     setIsAllowPageOpenInNewWindow(false);
     resize(AppUi::defaultWindowSize);
     setMinimumSize(AppUi::defaultWindowSize);
-    profileTab_ = new ProfileSettingsTab(this);
-    addPageNode("档案管理", profileTab_, ElaIconType::FileLines);
-    connect(profileTab_, &ProfileSettingsTab::profileEditorRequested,
-            this, &SettingsWindow::profileEditorRequested);
-    connect(profileTab_, &ProfileSettingsTab::profileSwitchRequested,
-            this, &SettingsWindow::profileSwitchRequested);
-    appearanceTab_ = new AppearanceSettingsTab(this);
-    addPageNode(QStringLiteral("外观"), appearanceTab_, ElaIconType::Palette);
-    courseBarTab_ = new CourseBarSettingsTab(this, registry_);
-    addPageNode(QStringLiteral("课程条"), courseBarTab_, ElaIconType::List);
-    connect(courseBarTab_, &CourseBarSettingsTab::configChanged,
-            this, &SettingsWindow::courseBarConfigChanged);
-    connect(courseBarTab_, &CourseBarSettingsTab::uiAccessChangeRequested,
-            this, &SettingsWindow::uiAccessChangeRequested);
-
-    desktopCountdownTab_ = new DesktopCountdownSettingsTab(this);
-    auto* reminderTab = new ReminderSettingsTab(this);
-    addPageNode(QStringLiteral("提醒"), reminderTab, ElaIconType::Bell);
-    connect(reminderTab, &ReminderSettingsTab::previewRequested, this, &SettingsWindow::reminderPreviewRequested);
-    addPageNode(QStringLiteral("桌面倒计时"), desktopCountdownTab_, ElaIconType::Clock);
-    connect(desktopCountdownTab_, &DesktopCountdownSettingsTab::configChanged,
-            this, &SettingsWindow::desktopCountdownConfigChanged);
-
+    pages_->add(QStringLiteral("profiles"), tr("档案管理"), ElaIconType::FileLines, [this](QWidget* host) {
+        profileTab_ = new ProfileSettingsTab(host);
+        connect(profileTab_, &ProfileSettingsTab::profileEditorRequested, this, &SettingsWindow::profileEditorRequested);
+        connect(profileTab_, &ProfileSettingsTab::profileSwitchRequested, this, &SettingsWindow::profileSwitchRequested);
+        if (!pendingProfileError_.isEmpty())
+            profileTab_->showError(std::exchange(pendingProfileError_, {}));
+        return profileTab_;
+    });
+    pages_->add(QStringLiteral("appearance"), tr("外观"), ElaIconType::Palette, [this](QWidget* host) {
+        return appearanceTab_ = new AppearanceSettingsTab(host);
+    });
+    pages_->add(QStringLiteral("courseBar"), tr("课程条"), ElaIconType::List, [this](QWidget* host) {
+        courseBarTab_ = new CourseBarSettingsTab(host, registry_);
+        connect(courseBarTab_, &CourseBarSettingsTab::configChanged, this, &SettingsWindow::courseBarConfigChanged);
+        connect(courseBarTab_, &CourseBarSettingsTab::uiAccessChangeRequested, this, &SettingsWindow::uiAccessChangeRequested);
+        return courseBarTab_;
+    });
+    pages_->add(QStringLiteral("reminders"), tr("提醒"), ElaIconType::Bell, [this](QWidget* host) {
+        reminderTab_ = new ReminderSettingsTab(host);
+        connect(reminderTab_, &ReminderSettingsTab::previewRequested, this, &SettingsWindow::reminderPreviewRequested);
+        return reminderTab_;
+    });
+    pages_->add(QStringLiteral("countdown"), tr("桌面倒计时"), ElaIconType::Clock, [this](QWidget* host) {
+        desktopCountdownTab_ = new DesktopCountdownSettingsTab(host);
+        connect(desktopCountdownTab_, &DesktopCountdownSettingsTab::configChanged,
+                this, &SettingsWindow::desktopCountdownConfigChanged);
+        return desktopCountdownTab_;
+    });
     if (cloud_) {
-        cloudTab_ = new CloudSettingsTab(cloud_, this);
-        addPageNode(QStringLiteral("集控"), cloudTab_, ElaIconType::Cloud);
-        connect(cloudTab_, &CloudSettingsTab::profileSwitchRequested,
-                this, &SettingsWindow::profileSwitchRequested);
+        pages_->add(QStringLiteral("cloud"), tr("集控"), ElaIconType::Cloud, [this](QWidget* host) {
+            cloudTab_ = new CloudSettingsTab(cloud_, host);
+            connect(cloudTab_, &CloudSettingsTab::profileSwitchRequested, this, &SettingsWindow::profileSwitchRequested);
+            return cloudTab_;
+        });
     }
-
-    if (interception_)
-        addPageNode(QStringLiteral("窗口拦截"), new WindowInterceptionSettingsTab(interception_, this), ElaIconType::Shield);
+    if (interception_) {
+        pages_->add(QStringLiteral("interception"), tr("窗口拦截"), ElaIconType::Shield, [this](QWidget* host) {
+            return interceptionTab_ = new WindowInterceptionSettingsTab(interception_, host);
+        });
+    }
     if (agent_) {
-        agentTab_ = new AgentSettingsTab(agent_, this);
-        addPageNode(QStringLiteral("AI Agent"), agentTab_, ElaIconType::Robot);
+        pages_->add(QStringLiteral("agent"), tr("AI Agent"), ElaIconType::Robot, [this](QWidget* host) {
+            return agentTab_ = new AgentSettingsTab(agent_(), host);
+        });
     }
-    if (update_)
-        addPageNode(QStringLiteral("更新"), new UpdateSettingsTab(update_, this), ElaIconType::ArrowRotateRight);
+    if (update_) {
+        pages_->add(QStringLiteral("update"), tr("更新"), ElaIconType::ArrowRotateRight, [this](QWidget* host) {
+            return new UpdateSettingsTab(update_, host);
+        });
+    }
     addFooterNode(QStringLiteral("关于"), aboutNodeKey_, 0, ElaIconType::CircleInfo);
     connect(this, &ElaWindow::navigationNodeClicked, this,
             [this](ElaNavigationType::NavigationNodeType, const QString& nodeKey) {
@@ -90,8 +103,7 @@ void SettingsWindow::initUI()
 
 void SettingsWindow::openAgentPage(const QString &draftSession)
 {
-    if (!agentTab_) return;
-    navigation(agentTab_->property("ElaPageKey").toString());
+    if (!pages_->showPage(QStringLiteral("agent"))) return;
     if (!draftSession.isEmpty()) agentTab_->openDraft(draftSession);
     else agentTab_->openProviders();
 }
@@ -116,22 +128,23 @@ void SettingsWindow::showAboutDialog()
 
 void SettingsWindow::refreshProfiles()
 {
-    profileTab_->refreshProfiles();
+    if (profileTab_ && profileTab_->isVisible()) profileTab_->scheduleRefresh();
 }
 
 void SettingsWindow::showProfileError(const QString& message)
 {
-    profileTab_->showError(message);
+    if (profileTab_) profileTab_->showError(message);
+    else pendingProfileError_ = message;
 }
 
 void SettingsWindow::setUiAccessSwitching(bool switching)
 {
-    courseBarTab_->setUiAccessSwitching(switching);
+    if (courseBarTab_) courseBarTab_->setUiAccessSwitching(switching);
 }
 
 bool SettingsWindow::courseBarDefaultsResetPending() const
 {
-    return courseBarTab_->defaultsResetPending();
+    return courseBarTab_ && courseBarTab_->defaultsResetPending();
 }
 
 void SettingsWindow::refreshCloudConfig()
@@ -139,11 +152,44 @@ void SettingsWindow::refreshCloudConfig()
     // The cloud may replace these sections while a page is open; reload from the
     // committed config so a later edit cannot write back stale values.
     if (appearanceTab_) appearanceTab_->reloadFromConfig();
-    if (courseBarTab_) courseBarTab_->reloadFromConfig();
     if (desktopCountdownTab_) desktopCountdownTab_->reloadFromConfig();
+}
+
+QString SettingsWindow::currentPage() const
+{
+    return pages_->currentPage();
+}
+
+void SettingsWindow::restorePage(const QString& id)
+{
+    if (!id.isEmpty()) pages_->showPage(id);
+}
+
+bool SettingsWindow::hasUnsavedInput() const
+{
+    return (courseBarTab_ && courseBarTab_->hasUnsavedInput()) ||
+           (reminderTab_ && reminderTab_->hasUnsavedInput()) ||
+           (desktopCountdownTab_ && desktopCountdownTab_->hasUnsavedInput()) ||
+           (cloudTab_ && cloudTab_->hasUnsavedInput()) ||
+           (interceptionTab_ && interceptionTab_->hasUnsavedInput()) ||
+           (agentTab_ && agentTab_->hasUnsavedInput());
+}
+
+bool SettingsWindow::hasPendingOperations() const
+{
+    if ((profileTab_ && profileTab_->busy()) ||
+        (courseBarTab_ && courseBarTab_->hasPendingOperations()) ||
+        (cloudTab_ && cloudTab_->hasPendingOperations()) ||
+        (agentTab_ && agentTab_->hasPendingOperations()))
+        return true;
+    const auto dialogs = findChildren<QDialog*>();
+    return std::any_of(dialogs.cbegin(), dialogs.cend(), [](const QDialog* dialog) {
+        return !dialog->isHidden();
+    });
 }
 
 void SettingsWindow::closeEvent(QCloseEvent* event)
 {
     ElaWindow::closeEvent(event);
+    if (event->isAccepted()) emit closed();
 }

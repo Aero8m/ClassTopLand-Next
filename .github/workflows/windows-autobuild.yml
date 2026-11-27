@@ -27,6 +27,11 @@ jobs:
     defaults:
       run:
         shell: pwsh
+    env:
+      SCCACHE_DIR: ${{ github.workspace }}/build/sccache
+      SCCACHE_CACHE_SIZE: 512M
+      # Recheck preprocessed sources when reusing cached objects across commits.
+      SCCACHE_DIRECT: 'false'
     outputs:
       build_number: ${{ steps.version.outputs.build_number }}
       update_sequence: ${{ steps.version.outputs.update_sequence }}
@@ -66,6 +71,19 @@ jobs:
           arch: x64
           vsversion: '2022'
 
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.20.1
+
+      - name: Cache MSVC compilation results
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.SCCACHE_DIR }}
+          key: windows-2022-msvc2022-x64-release-sccache-v1-${{ github.sha }}
+          restore-keys: |
+            windows-2022-msvc2022-x64-release-sccache-v1-
+
       - name: Set build number
         id: version
         run: |
@@ -85,6 +103,9 @@ jobs:
           [System.IO.File]::WriteAllText($versionFile, $version.Replace('|BUILD_VERSION|', $buildNumber), [System.Text.UTF8Encoding]::new($false))
 
       - name: Configure and build Release
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: sccache
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCTX_BUILD_TESTS=ON "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DCTX_UPDATE_BUILD_NUMBER=${{ steps.version.outputs.update_sequence }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

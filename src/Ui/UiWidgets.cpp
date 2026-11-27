@@ -12,6 +12,7 @@
 #include <ElaText.h>
 #include <ElaTheme.h>
 #include <ElaWidgetToolsDef.h>
+#include <ElaWindow.h>
 #include <QHeaderView>
 #include <QApplication>
 #include <QAbstractScrollArea>
@@ -28,8 +29,72 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <memory>
+#include <utility>
 
 namespace AppUi {
+LazyPages::LazyPages(ElaWindow* window) : QObject(window), window_(window)
+{
+    connect(window_, &ElaWindow::navigationNodeClicked, this,
+            [this](ElaNavigationType::NavigationNodeType, const QString& key) {
+        for (auto& page : pages_) {
+            if (page.host->property("ElaPageKey").toString() != key) continue;
+            // The incoming page must have its children before Ela captures it for the transition.
+            ensure(page);
+            break;
+        }
+    });
+}
+
+void LazyPages::add(const QString& id, const QString& title, ElaIconType::IconName icon,
+                    std::function<QWidget*(QWidget*)> create)
+{
+    auto* host = new QWidget(window_);
+    auto* layout = new QVBoxLayout(host);
+    layout->setContentsMargins(0, 0, 0, 0);
+    pages_.insert(id, {host, std::move(create)});
+    host->installEventFilter(this);
+    window_->addPageNode(title, host, icon);
+}
+
+QWidget* LazyPages::ensure(Page& page)
+{
+    if (page.create) {
+        auto create = std::exchange(page.create, {});
+        page.content = create(page.host);
+        page.host->layout()->addWidget(page.content);
+    }
+    return page.content;
+}
+
+QWidget* LazyPages::showPage(const QString& id)
+{
+    auto it = pages_.find(id);
+    if (it == pages_.end()) return nullptr;
+    auto* content = ensure(*it);
+    window_->navigation(it->host->property("ElaPageKey").toString());
+    return content;
+}
+
+QString LazyPages::currentPage() const
+{
+    const auto key = window_->getCurrentNavigationPageKey();
+    for (auto it = pages_.cbegin(); it != pages_.cend(); ++it)
+        if (it->host->property("ElaPageKey").toString() == key) return it.key();
+    return {};
+}
+
+bool LazyPages::eventFilter(QObject* object, QEvent* event)
+{
+    if (event->type() == QEvent::Show) {
+        for (auto& page : pages_) {
+            if (page.host != object) continue;
+            ensure(page);
+            break;
+        }
+    }
+    return false;
+}
+
 namespace {
 constexpr auto touchDirections = "appUiTouchScrollDirections";
 constexpr auto touchExcluded = "appUiTouchScrollExcluded";

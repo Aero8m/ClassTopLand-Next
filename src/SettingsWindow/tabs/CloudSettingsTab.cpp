@@ -156,6 +156,16 @@ QString CloudSettingsTab::statusText(int status) const
     return tr("未知状态");
 }
 
+bool CloudSettingsTab::hasUnsavedInput() const
+{
+    return originEdited_ || !code_->text().isEmpty();
+}
+
+bool CloudSettingsTab::hasPendingOperations() const
+{
+    return cloud_ && cloud_->busy();
+}
+
 void CloudSettingsTab::refresh()
 {
     if (!cloud_) {

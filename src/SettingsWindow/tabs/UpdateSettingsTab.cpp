@@ -136,11 +136,11 @@ UpdateSettingsTab::UpdateSettingsTab(UpdateService* update, QWidget* parent) : E
         progress->setValue(update->percent());
         progress->setVisible(downloading);
         cancel->setVisible(downloading);
-        install->setVisible(state == State::Available || state == State::Ready);
+        install->setVisible(!update->managedUpdate() && (state == State::Available || state == State::Ready));
         install->setText(state == State::Ready ? tr("立即安装") : tr("下载并安装"));
         check->setText(downloading ? tr("重新检查") : tr("检查更新"));
         check->setToolTip(downloading ? tr("停止当前下载并重新检查更新") : QString());
-        check->setEnabled(state != State::Checking && state != State::Preparing);
+        check->setEnabled(!update->managedUpdate() && state != State::Checking && state != State::Preparing);
         automatic->setEnabled(state != State::Preparing);
         const QSignalBlocker blocker(automatic);
         automatic->setIsToggled(update->automaticUpdates());

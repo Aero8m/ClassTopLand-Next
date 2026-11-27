@@ -1,4 +1,5 @@
 #include "CloudDisplayConfig.h"
+#include "CloudTypes.h"
 #include "../Plugins/PluginManifest.h"
 
 #include <QJsonArray>
@@ -214,12 +215,13 @@ bool CloudDisplay::buildConfig(const QJsonObject& payload, const Config& current
     if (error) error->clear();
     const QJsonValue version = payload.value(QStringLiteral("schema_version"));
     if (!version.isUndefined() && (!version.isDouble() ||
-        (version.toDouble() != 1 && version.toDouble() != 2)))
-        return fail(error, QStringLiteral("仅支持展示配置 schema_version 1 或 2"));
+        (version.toDouble() != 1 && version.toDouble() != Cloud::kDisplayFormatVersion
+         && version.toDouble() != Cloud::kDisplayUpdateFormatVersion)))
+        return fail(error, QStringLiteral("仅支持展示配置 schema_version 1、2 或 4"));
     const int schemaVersion = version.toInt(1);
     if (schemaVersion == 1 && (payload.contains(QStringLiteral("windowInterceptionConfig")) ||
                                payload.contains(QStringLiteral("pluginConfig"))))
-        return fail(error, QStringLiteral("窗口拦截与插件偏好需要 schema_version 2"));
+        return fail(error, QStringLiteral("窗口拦截与插件偏好需要 schema_version 2 或 4"));
     const QJsonValue courseBarValue = payload.value(QStringLiteral("courseBarConfig"));
     if (!courseBarValue.isObject())
         return fail(error, QStringLiteral("展示配置缺少 courseBarConfig"));
@@ -249,6 +251,13 @@ bool CloudDisplay::buildConfig(const QJsonObject& payload, const Config& current
         return false;
 
     Config candidate = current;
+    const QString automaticUpdates = QStringLiteral("automaticUpdates");
+    if (payload.contains(automaticUpdates)) {
+        if (schemaVersion != Cloud::kDisplayUpdateFormatVersion)
+            return fail(error, QStringLiteral("自动更新需要展示配置 schema_version 4"));
+        if (!readBool(payload, automaticUpdates, candidate.automaticUpdates, candidate.automaticUpdates,
+                      error, automaticUpdates)) return false;
+    }
     if (payload.contains(QStringLiteral("windowInterceptionConfig"))) {
         const auto section = payload.value(QStringLiteral("windowInterceptionConfig"));
         if (!section.isObject() || section.toObject().keys() != QStringList{QStringLiteral("rules")} ||

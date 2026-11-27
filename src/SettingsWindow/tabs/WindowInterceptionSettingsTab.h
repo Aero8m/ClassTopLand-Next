@@ -14,6 +14,8 @@ class WindowInterceptionSettingsTab final : public ElaScrollPage
     Q_OBJECT
 public:
     explicit WindowInterceptionSettingsTab(WindowInterceptionService* service, QWidget* parent = nullptr);
+    bool hasUnsavedInput() const;
+
 protected:
     void showEvent(QShowEvent* event) override;
 private:

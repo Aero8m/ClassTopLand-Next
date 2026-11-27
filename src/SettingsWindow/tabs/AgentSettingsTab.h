@@ -22,6 +22,8 @@ public:
     explicit AgentSettingsTab(AgentService *service, QWidget *parent = nullptr);
     void openDraft(const QString &session);
     void openProviders();
+    bool hasUnsavedInput() const;
+    bool hasPendingOperations() const { return fetching_ || testing_ || publishing_; }
 
 protected:
     void hideEvent(QHideEvent *event) override;

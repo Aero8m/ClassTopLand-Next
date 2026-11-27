@@ -1,11 +1,12 @@
 #ifndef CLASSTOPLAND_NEXT_SETTINGSWINDOW_H
 #define CLASSTOPLAND_NEXT_SETTINGSWINDOW_H
 #include"ElaWindow.h"
-#include"ElaApplication.h"
-#include"tabs/ProfileSettingsTab.h"
+#include <functional>
+#include <memory>
 
-class PluginManager;
-class PluginUiHost;
+class ProfileSettingsTab;
+class ReminderSettingsTab;
+namespace AppUi { class LazyPages; }
 class CourseBarComponentRegistry;
 class AboutDialog;
 class UpdateService;
@@ -15,6 +16,7 @@ class CloudSyncService;
 class AppearanceSettingsTab;
 class DesktopCountdownSettingsTab;
 class WindowInterceptionService;
+class WindowInterceptionSettingsTab;
 class AgentService;
 class AgentSettingsTab;
 
@@ -22,8 +24,9 @@ class SettingsWindow : public ElaWindow
 {
     Q_OBJECT
 public:
-    SettingsWindow(QWidget *parent = nullptr, WindowInterceptionService* interception = nullptr, PluginManager* plugins = nullptr, PluginUiHost* pluginUi = nullptr, CourseBarComponentRegistry* registry = nullptr, CloudSyncService* cloud = nullptr, AgentService* agent = nullptr, UpdateService* update = nullptr);
-    ~SettingsWindow();
+    SettingsWindow(WindowInterceptionService* interception, CourseBarComponentRegistry* registry,
+                   CloudSyncService* cloud, std::function<AgentService*()> agent, UpdateService* update);
+    ~SettingsWindow() override;
     void refreshProfiles();
     void openAgentPage(const QString &draftSession);
     void showProfileError(const QString& message);
@@ -31,7 +34,12 @@ public:
     // Refresh pages whose configuration may have been replaced by the cloud.
     void refreshCloudConfig();
     bool courseBarDefaultsResetPending() const;
+    bool hasUnsavedInput() const;
+    bool hasPendingOperations() const;
+    QString currentPage() const;
+    void restorePage(const QString& id);
 signals:
+    void closed();
     void profileEditorRequested();
     void profileSwitchRequested(const QString& id);
     void courseBarConfigChanged();
@@ -41,22 +49,24 @@ signals:
 protected:
     void closeEvent(QCloseEvent* event) override;
 private:
-    PluginManager* plugins_ = nullptr;
-    PluginUiHost* pluginUi_ = nullptr;
+    std::unique_ptr<AppUi::LazyPages> pages_;
     CourseBarComponentRegistry* registry_ = nullptr;
     CloudSyncService* cloud_ = nullptr;
-    AgentService* agent_ = nullptr;
+    std::function<AgentService*()> agent_;
     UpdateService* update_ = nullptr;
     void initUI();
     WindowInterceptionService* interception_ = nullptr;
     void showAboutDialog();
     QString aboutNodeKey_;
     AboutDialog* aboutDialog_ = nullptr;
-    ProfileSettingsTab* profileTab_;
+    QString pendingProfileError_;
+    ProfileSettingsTab* profileTab_ = nullptr;
+    ReminderSettingsTab* reminderTab_ = nullptr;
     CourseBarSettingsTab* courseBarTab_ = nullptr;
     AppearanceSettingsTab* appearanceTab_ = nullptr;
     DesktopCountdownSettingsTab* desktopCountdownTab_ = nullptr;
     CloudSettingsTab* cloudTab_ = nullptr;
+    WindowInterceptionSettingsTab* interceptionTab_ = nullptr;
     AgentSettingsTab* agentTab_ = nullptr;
 };
 

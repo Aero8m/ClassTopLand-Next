@@ -1,6 +1,5 @@
 #include "TaskbarTrayMenu.h"
 
-#include "../Core/Logger/Logger.h"
 
 #include <ElaApplication.h>
 #include <ElaIconButton.h>
@@ -28,7 +27,6 @@
 #include <QResizeEvent>
 #include <QScreen>
 #include <QShortcut>
-#include <QSystemTrayIcon>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -212,26 +210,6 @@ TaskbarTrayMenu::TaskbarTrayMenu(QWidget* parent)
     connect(qApp, &QGuiApplication::focusWindowChanged, this, [this] { scheduleDismissal(); });
     auto* escape = new QShortcut(QKeySequence(Qt::Key_Escape), this);
     connect(escape, &QShortcut::activated, this, &TaskbarTrayMenu::hideMenu);
-
-    trayIcon_ = new QSystemTrayIcon(windowIcon(), this);
-    trayIcon_->setToolTip(QStringLiteral("ClassTopLand Next"));
-    connect(trayIcon_, &QSystemTrayIcon::activated, this,
-            [this](QSystemTrayIcon::ActivationReason reason) {
-        if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::Context) {
-            // Let the shell finish handling the tray click before taking focus.
-            QTimer::singleShot(0, this, &TaskbarTrayMenu::showMenu);
-        }
-    });
-    if (!QSystemTrayIcon::isSystemTrayAvailable()) {
-        Logger::instance().log(Logger::Level::Warning, "System tray is not available");
-        Logger::instance().flush();
-    }
-    trayIcon_->show();
-}
-
-TaskbarTrayMenu::~TaskbarTrayMenu()
-{
-    trayIcon_->hide();
 }
 
 void TaskbarTrayMenu::initUI()
@@ -392,24 +370,20 @@ void TaskbarTrayMenu::initUI()
     footerLayout->addWidget(restart);
     footerLayout->addWidget(quitButton_);
     mainLayout->addWidget(footer_);
-    connect(restart, &ElaIconButton::clicked, this, [this] {
-        requestExit(RestartExitCode);
-    });
+    connect(restart, &ElaIconButton::clicked, this, &TaskbarTrayMenu::restartRequested);
     connect(quitButton_, &ElaIconButton::clicked, this, &TaskbarTrayMenu::quitRequested);
     setFixedWidth(PanelWidth);
     adjustSize();
 }
 
-void TaskbarTrayMenu::showMenu()
+void TaskbarTrayMenu::showMenu(const QRect& trayGeometry)
 {
-    emit scheduleListRefreshRequested();
     ++presentationRevision_;
     if (isVisible() && !hiding_) {
         raise();
         activateWindow();
         return;
     }
-    const QRect trayGeometry = trayIcon_->geometry();
     const QPoint anchor = trayGeometry.isValid() ? trayGeometry.center() : QCursor::pos();
     QScreen* screen = QGuiApplication::screenAt(anchor);
     if (!screen) screen = QGuiApplication::primaryScreen();
@@ -584,39 +558,11 @@ void TaskbarTrayMenu::hideMenu()
     startTransition(position, 0.0, CloseDuration);
 }
 
-void TaskbarTrayMenu::showManagedNotification(const QString& message)
-{
-    if (trayIcon_) trayIcon_->showMessage(tr("教室通知"), message, QSystemTrayIcon::Information);
-}
-
 void TaskbarTrayMenu::setUpdateOnQuit(bool ready)
 {
     const QString action = ready ? tr("退出并安装更新") : tr("退出应用");
     quitButton_->setToolTip(action);
     quitButton_->setAccessibleName(action);
-}
-
-void TaskbarTrayMenu::requestExit(int exitCode)
-{
-    // A double click, a duplicated signal, or a queued repeat must not exit twice.
-    if (exitRequested_ || checkingExit_) return;
-    checkingExit_ = true;
-    const bool allowed = !exitGuard_ || exitGuard_(exitCode);
-    checkingExit_ = false;
-    if (!allowed) return;
-    exitRequested_ = true;
-    emit exitAccepted(exitCode);
-    // Written before the loop ends, so a failure later is distinguishable from
-    // the click never reaching the button at all.
-    Logger::instance().log(Logger::Level::Info,
-                           QStringLiteral("Exit requested: code=%1").arg(exitCode));
-    Logger::instance().flush();
-    // Let the click event and any queued dismissal or deactivation finish first:
-    // those paths must be unable to interrupt the exit instruction. `this` is the
-    // context object, so a destroyed panel cancels the pending exit.
-    QTimer::singleShot(0, this, [exitCode] {
-        QCoreApplication::exit(exitCode);
-    });
 }
 
 void TaskbarTrayMenu::startTransition(const QPoint& position, qreal opacity, int duration)

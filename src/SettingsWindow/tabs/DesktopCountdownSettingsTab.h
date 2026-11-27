@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ElaScrollPage.h>
+#include <optional>
 #include "../../Core/Model/DesktopCountdownConfig.h"
 
 class ElaToggleSwitch;
@@ -17,6 +18,7 @@ public:
     explicit DesktopCountdownSettingsTab(QWidget* parent = nullptr);
     // Reload widgets after the configuration was replaced outside this page.
     void reloadFromConfig();
+    bool hasUnsavedInput() const { return pendingLabel_.has_value() || pendingEnglish_.has_value(); }
 signals:
     void configChanged();
 protected:
@@ -26,6 +28,8 @@ private:
     void refreshScreens();
     void save();
     bool refreshing_ = false;
+    std::optional<QString> pendingLabel_;
+    std::optional<QString> pendingEnglish_;
     ElaToggleSwitch* enable_;
     ElaLineEdit* label_;
     ElaLineEdit* english_;

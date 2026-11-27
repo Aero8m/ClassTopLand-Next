@@ -2,8 +2,6 @@
 #define CLASSTOPLAND_NEXT_TASKBARTRAYMENU_H
 
 #include <ElaWidget.h>
-#include <functional>
-#include <utility>
 
 class QAbstractButton;
 class ElaIconButton;
@@ -14,7 +12,6 @@ class QHideEvent;
 class QParallelAnimationGroup;
 class QPropertyAnimation;
 class QResizeEvent;
-class QSystemTrayIcon;
 class ElaText;
 
 class TaskbarTrayMenu : public ElaWidget
@@ -30,14 +27,8 @@ public:
         return code == UpdateExitCode || code == UpdateOnQuitExitCode;
     }
     void setUpdateOnQuit(bool ready);
-    void showManagedNotification(const QString& message);
 
     explicit TaskbarTrayMenu(QWidget* parent = nullptr);
-    ~TaskbarTrayMenu() override;
-    void setExitGuard(std::function<bool()> guard) {
-        exitGuard_ = [guard = std::move(guard)](int) { return !guard || guard(); };
-    }
-    void setExitGuard(std::function<bool(int)> guard) { exitGuard_ = std::move(guard); }
     struct ScheduleChoice {
         QString id;
         QString name;
@@ -48,17 +39,11 @@ public:
     void showScheduleError(const QString& message);
     QSize sizeHint() const override;
 
-public slots:
-    void showMenu();
+    void showMenu(const QRect& trayGeometry);
     void hideMenu();
 
-    // The only way this window may end the application. Restart and quit both
-    // go through it, so both use the same already-proven exit mechanism, and a
-    // repeated signal can never exit twice. Hiding the panel is not an exit.
-    void requestExit(int exitCode);
-
 Q_SIGNALS:
-    void exitAccepted(int exitCode);
+    void restartRequested();
     void quitRequested();
     // The user asked for one of the AppComposer-owned windows. The panel never creates
     // or owns them, so it stays a pure presentation layer.
@@ -67,7 +52,6 @@ Q_SIGNALS:
     void pluginsRequested();
     void profileEditorRequested();
     void weekScheduleRequested(const QString& id);
-    void scheduleListRefreshRequested();
     void swapWindowRequested();
     void rescheduleWindowRequested();
 
@@ -85,7 +69,6 @@ private:
     void updateAutomaticCard();
     void requestWeekSchedule(const QString& id);
     void startTransition(const QPoint& position, qreal opacity, int duration);
-    QSystemTrayIcon* trayIcon_ = nullptr;
     ElaText* applicationIcon_ = nullptr;
     QWidget* footer_ = nullptr;
     QWidget* bodyContent_ = nullptr;
@@ -107,9 +90,6 @@ private:
     QPropertyAnimation* opacityAnimation_ = nullptr;
     QPoint animationOffset_{0, 12};
     bool hiding_ = false;
-    bool exitRequested_ = false;
-    bool checkingExit_ = false;
-    std::function<bool(int)> exitGuard_;
     quint64 presentationRevision_ = 0;
 };
 

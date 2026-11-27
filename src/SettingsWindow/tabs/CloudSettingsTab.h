@@ -15,6 +15,8 @@ class CloudSettingsTab final : public ElaScrollPage
     Q_OBJECT
 public:
     explicit CloudSettingsTab(CloudSyncService* cloud, QWidget* parent = nullptr);
+    bool hasUnsavedInput() const;
+    bool hasPendingOperations() const;
 
 signals:
     // Routed to AppComposer so the existing profile switch/restart flow is used.

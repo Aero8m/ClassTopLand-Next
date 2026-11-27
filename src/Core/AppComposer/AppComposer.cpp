@@ -21,13 +21,19 @@
 
 #include <ElaMessageBar.h>
 #include <QApplication>
+#include <QCursor>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QScopedValueRollback>
+#include <QSystemTrayIcon>
 #include <QTimer>
+#include <utility>
 
 namespace {
+constexpr int WindowReclaimDelayMs = 30000;
+constexpr int ReclaimOperationCheckMs = 1000;
+
 bool reportStartupError(const QString& logMessage, const QString& message)
 {
     Logger::instance().log(Logger::Level::Error, logMessage);
@@ -44,6 +50,20 @@ AppComposer::AppComposer(QObject* parent) : AppComposer(DATA_PATH, parent)
 AppComposer::AppComposer(const QString& dataDirectory, QObject* parent)
     : QObject(parent), dataDirectory_(QDir(dataDirectory).absolutePath())
 {
+    settingsReclaim_.setObjectName(QStringLiteral("settingsReclaimTimer"));
+    settingsReclaim_.setSingleShot(true);
+    settingsReclaim_.setTimerType(Qt::PreciseTimer);
+    connect(&settingsReclaim_, &QTimer::timeout, this, &AppComposer::reclaimSettingsWindow);
+
+    profileEditorReclaim_.setObjectName(QStringLiteral("profileEditorReclaimTimer"));
+    profileEditorReclaim_.setSingleShot(true);
+    profileEditorReclaim_.setTimerType(Qt::PreciseTimer);
+    connect(&profileEditorReclaim_, &QTimer::timeout, this, [this] {
+        if (!initialized_ || exitAccepted_ || !profileEditorWindow_ || profileEditorWindow_->isVisible() ||
+            profileEditorWindow_->session()->isDirty()) return;
+        profileEditorWindowState_ = {profileEditorWindow_->saveGeometry(), profileEditorWindow_->currentPage()};
+        profileEditorWindow_.reset();
+    });
 }
 
 AppComposer::~AppComposer()
@@ -123,10 +143,10 @@ bool AppComposer::initInstances()
     connect(plugins_.get(), &PluginManager::notification, this, [this](const QString& title, const QString& message) {
         Logger::instance().log(Logger::Level::Warning, QStringLiteral("Plugin notification (%1): %2").arg(title, message));
         if (courseBar) courseBar->showNotification(title + QStringLiteral(": ") + message);
-        if (trayMenu_) trayMenu_->showScheduleError(title + QStringLiteral(": ") + message);
+        showScheduleError(title + QStringLiteral(": ") + message);
     });
     connect(plugins_.get(), &PluginManager::restartRequested, this, [this] {
-        if (trayMenu_) trayMenu_->requestExit(TaskbarTrayMenu::RestartExitCode);
+        requestExit(TaskbarTrayMenu::RestartExitCode);
         if (!exitAccepted_) {
             auto candidate = ConfigManager::instance().config(); candidate.pluginConfig.recoveryNextStart = false;
             QString error;
@@ -148,7 +168,10 @@ bool AppComposer::initInstances()
         });
     });
     connect(plugins_.get(), &PluginManager::profileWritten, this, [this](const QJsonArray& canceled) {
-        if (!canceled.isEmpty() && trayMenu_) { QStringList dates; for (const auto& date : canceled) dates.append(date.toString()); trayMenu_->showScheduleError(tr("来源课程变化，已取消特殊安排：%1").arg(dates.join(QStringLiteral("、")))); }
+        if (canceled.isEmpty()) return;
+        QStringList dates;
+        for (const auto& date : canceled) dates.append(date.toString());
+        showScheduleError(tr("来源课程变化，已取消特殊安排：%1").arg(dates.join(QStringLiteral("、"))));
     });
     desktopCountdown_ = std::make_unique<DesktopCountdown>();
     cloud_ = std::make_unique<CloudSyncService>(dataDirectory_);
@@ -176,60 +199,54 @@ bool AppComposer::initInstances()
     connect(cloud_.get(), &CloudSyncService::cloudProfileSwitchRequested, this,
             [this](const QString& id) { switchProfile(id); });
     connect(cloud_.get(), &CloudSyncService::managedNotification, this, [this](const QString& message) {
-        if (trayMenu_) trayMenu_->showManagedNotification(message);
+        if (trayIcon_) trayIcon_->showMessage(tr("教室通知"), message, QSystemTrayIcon::Information);
     });
     connect(cloud_.get(), &CloudSyncService::cloudProfileUpdated, this, [this] {
         if (settingsWindow_) settingsWindow_->refreshProfiles();
     });
-    trayMenu_ = std::make_unique<TaskbarTrayMenu>();
-    connect(trayMenu_.get(), &TaskbarTrayMenu::pluginsRequested, this, &AppComposer::showPluginCenter);
-    trayMenu_->setExitGuard([this](int exitCode) { return prepareToExit(exitCode); });
+    trayIcon_ = std::make_unique<QSystemTrayIcon>(QIcon(QStringLiteral(":/res/images/icon.png")));
+    trayIcon_->setToolTip(QStringLiteral("ClassTopLand Next"));
+    connect(trayIcon_.get(), &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
+        if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::Context)
+            QTimer::singleShot(0, this, &AppComposer::showTrayMenu);
+    });
+    if (!QSystemTrayIcon::isSystemTrayAvailable()) {
+        Logger::instance().log(Logger::Level::Warning, "System tray is not available");
+        Logger::instance().flush();
+    }
+    trayIcon_->show();
     update_ = std::make_unique<UpdateService>();
+    cloud_->setUpdateService(update_.get(), [this] { return managedExitBlockReason(); });
     const auto loadUpdatePreference = [this] {
         if (update_) update_->setAutomaticUpdates(ConfigManager::instance().config().automaticUpdates);
     };
     connect(&ConfigManager::instance(), &ConfigManager::committed, update_.get(), loadUpdatePreference);
-    connect(update_.get(), &UpdateService::changed, trayMenu_.get(), [this] {
-        trayMenu_->setUpdateOnQuit(update_->readyToInstallOnQuit());
+    connect(update_.get(), &UpdateService::changed, this, [this] {
+        if (trayMenu_) trayMenu_->setUpdateOnQuit(update_->readyToInstallOnQuit());
     });
     connect(update_.get(), &UpdateService::installRequested, this, [this](bool restartAfterInstall) {
-        if (!initialized_ || !trayMenu_ || exitAccepted_ || restartPreparing_ || restartAccepted_
+        if (update_->managedUpdate()) {
+            const QString blocked = managedExitBlockReason();
+            if (!blocked.isEmpty()) {
+                update_->installationDeferred(blocked);
+                return;
+            }
+            const QScopedValueRollback<bool> silent(silentManagedRestart_, true);
+            requestExit(TaskbarTrayMenu::UpdateExitCode);
+            if (!exitAccepted_ && update_->state() == UpdateService::State::Preparing)
+                update_->installationDeferred(tr("客户端未能准备退出并安装更新。"));
+            return;
+        }
+        if (!initialized_ || exitAccepted_ || checkingExit_ || restartPreparing_ || restartAccepted_
             || pluginExitGuardPending_ || pluginExitGuardReady_) {
             update_->installationDeferred(tr("客户端正在处理另一项退出操作，请稍后重试。"));
             return;
         }
-        trayMenu_->requestExit(restartAfterInstall ? TaskbarTrayMenu::UpdateExitCode : TaskbarTrayMenu::UpdateOnQuitExitCode);
-    });
-    connect(trayMenu_.get(), &TaskbarTrayMenu::quitRequested, this, [this] {
-        if (update_->readyToInstallOnQuit()) update_->installOnQuit();
-        else trayMenu_->requestExit(0);
+        requestExit(restartAfterInstall ? TaskbarTrayMenu::UpdateExitCode : TaskbarTrayMenu::UpdateOnQuitExitCode);
     });
     loadUpdatePreference();
-    connect(trayMenu_.get(), &TaskbarTrayMenu::exitAccepted, this, [this] {
-        exitAccepted_ = true;
-        // Do not allow queued settings actions to delete or change the selected
-        // target between acceptance and the deferred application exit.
-        if (settingsWindow_) settingsWindow_->setEnabled(false);
-        if (profileEditorWindow_) profileEditorWindow_->setEnabled(false);
-        if (swapWindow_) swapWindow_->setEnabled(false);
-        if (rescheduleWindow_) rescheduleWindow_->setEnabled(false);
-    });
-    connect(trayMenu_.get(), &TaskbarTrayMenu::settingsRequested,
-            this, &AppComposer::showSettingsWindow);
-    connect(trayMenu_.get(), &TaskbarTrayMenu::agentRequested,
-            this, &AppComposer::showAgentWindow);
-    connect(trayMenu_.get(), &TaskbarTrayMenu::profileEditorRequested,
-            this, &AppComposer::showProfileEditorWindow);
-    connect(trayMenu_.get(), &TaskbarTrayMenu::weekScheduleRequested,
-            this, &AppComposer::selectWeekSchedule);
-    connect(trayMenu_.get(), &TaskbarTrayMenu::scheduleListRefreshRequested,
-            this, &AppComposer::refreshScheduleMenu);
-    connect(trayMenu_.get(), &TaskbarTrayMenu::swapWindowRequested, this, &AppComposer::showSwapWindow);
-    connect(trayMenu_.get(), &TaskbarTrayMenu::rescheduleWindowRequested,
-            this, &AppComposer::showRescheduleWindow);
     connect(courseBar.get(), &CourseBar::scheduleStatusChanged,
             this, &AppComposer::refreshScheduleMenu);
-    refreshScheduleMenu();
     QApplication::setQuitOnLastWindowClosed(false);
 
     initialized_ = true;
@@ -261,6 +278,8 @@ void AppComposer::dropInstances()
     if (shutdown_) return;
     shutdown_ = true;
     if (dateCleanupTimer_) dateCleanupTimer_->stop();
+    settingsReclaim_.stop();
+    profileEditorReclaim_.stop();
     // Stop the cloud service before any manager persists state on exit.
     if (cloud_) {
         cloud_->stop();
@@ -281,6 +300,7 @@ void AppComposer::dropInstances()
     windowInterception_.reset();
     profileEditorWindow_.reset();
     trayMenu_.reset();
+    trayIcon_.reset();
     courseBar.reset();
     componentRegistry_.reset();
     pluginUi_.reset();
@@ -302,6 +322,59 @@ bool AppComposer::startApp()
     return initialized_;
 }
 
+void AppComposer::showTrayMenu()
+{
+    if (!initialized_ || exitAccepted_ || restartPreparing_ || restartAccepted_) return;
+    if (!trayMenu_) {
+        trayMenu_ = std::make_unique<TaskbarTrayMenu>();
+        connect(trayMenu_.get(), &TaskbarTrayMenu::pluginsRequested, this, &AppComposer::showPluginCenter);
+        connect(trayMenu_.get(), &TaskbarTrayMenu::settingsRequested, this, &AppComposer::showSettingsWindow);
+        connect(trayMenu_.get(), &TaskbarTrayMenu::agentRequested, this, &AppComposer::showAgentWindow);
+        connect(trayMenu_.get(), &TaskbarTrayMenu::profileEditorRequested, this, &AppComposer::showProfileEditorWindow);
+        connect(trayMenu_.get(), &TaskbarTrayMenu::weekScheduleRequested, this, &AppComposer::selectWeekSchedule);
+        connect(trayMenu_.get(), &TaskbarTrayMenu::swapWindowRequested, this, &AppComposer::showSwapWindow);
+        connect(trayMenu_.get(), &TaskbarTrayMenu::rescheduleWindowRequested, this, &AppComposer::showRescheduleWindow);
+        connect(trayMenu_.get(), &TaskbarTrayMenu::restartRequested, this, [this] {
+            requestExit(TaskbarTrayMenu::RestartExitCode);
+        });
+        connect(trayMenu_.get(), &TaskbarTrayMenu::quitRequested, this, [this] {
+            if (update_->readyToInstallOnQuit()) update_->installOnQuit();
+            else requestExit(0);
+        });
+        trayMenu_->setUpdateOnQuit(update_->readyToInstallOnQuit());
+    }
+    refreshScheduleMenu();
+    if (!pendingScheduleError_.isEmpty())
+        trayMenu_->showScheduleError(std::exchange(pendingScheduleError_, {}));
+    trayMenu_->showMenu(trayIcon_->geometry());
+}
+
+void AppComposer::showScheduleError(const QString& message)
+{
+    if (trayMenu_) trayMenu_->showScheduleError(message);
+    else pendingScheduleError_ = message;
+}
+
+void AppComposer::requestExit(int exitCode)
+{
+    if (!initialized_ || exitAccepted_ || checkingExit_ || pluginExitGuardPending_) return;
+    {
+        const QScopedValueRollback<bool> checking(checkingExit_, true);
+        if (!prepareToExit(exitCode)) return;
+    }
+    exitAccepted_ = true;
+    for (QWidget* window : {static_cast<QWidget*>(settingsWindow_.get()),
+                           static_cast<QWidget*>(profileEditorWindow_.get()),
+                           static_cast<QWidget*>(swapWindow_.get()),
+                           static_cast<QWidget*>(rescheduleWindow_.get())}) {
+        if (window) window->setEnabled(false);
+    }
+    if (trayMenu_) trayMenu_->setEnabled(false);
+    Logger::instance().log(Logger::Level::Info, QStringLiteral("Exit requested: code=%1").arg(exitCode));
+    Logger::instance().flush();
+    QTimer::singleShot(0, this, [exitCode] { QCoreApplication::exit(exitCode); });
+}
+
 void AppComposer::showPluginCenter()
 {
     if(!initialized_) return;
@@ -312,9 +385,8 @@ void AppComposer::showPluginCenter()
 void AppComposer::showAgentWindow()
 {
     if (!initialized_ || restartPreparing_ || restartAccepted_) return;
-    if (!agent_) agent_ = std::make_unique<AgentService>(dataDirectory_, plugins_.get());
     if (!agentWindow_) {
-        agentWindow_ = std::make_unique<AgentWindow>(agent_.get());
+        agentWindow_ = std::make_unique<AgentWindow>(agentService());
         connect(agentWindow_.get(), &AgentWindow::settingsRequested, this, &AppComposer::showAgentSettings);
         centerOnPanelScreen(agentWindow_.get());
         presentWindow(agentWindow_.get());
@@ -323,57 +395,93 @@ void AppComposer::showAgentWindow()
     presentWindow(agentWindow_.get());
 }
 
+AgentService* AppComposer::agentService()
+{
+    if (!agent_) agent_ = std::make_unique<AgentService>(dataDirectory_, plugins_.get());
+    return agent_.get();
+}
+
 void AppComposer::showAgentSettings(const QString &draftSession)
 {
-    if (!initialized_ || restartPreparing_ || restartAccepted_) return;
-    showSettingsWindow();
-    if (settingsWindow_) settingsWindow_->openAgentPage(draftSession);
+    if (!initialized_ || exitAccepted_ || restartPreparing_ || restartAccepted_) return;
+    settingsReclaim_.stop();
+    if (!settingsWindow_) createSettingsWindow();
+    settingsWindow_->openAgentPage(draftSession);
+    presentWindow(settingsWindow_.get());
 }
 
 void AppComposer::showSettingsWindow()
 {
-    // A click queued by a panel that is already being torn down must not revive the window.
-    if (!initialized_) return;
+    if (!initialized_ || exitAccepted_) return;
+    settingsReclaim_.stop();
     if (!settingsWindow_) {
-        if (!agent_) agent_ = std::make_unique<AgentService>(dataDirectory_, plugins_.get());
-        settingsWindow_ = std::make_unique<SettingsWindow>(nullptr, windowInterception_.get(), plugins_.get(), pluginUi_.get(), componentRegistry_.get(), cloud_.get(), agent_.get(), update_.get());
-        connect(settingsWindow_.get(), &SettingsWindow::profileEditorRequested,
-                this, &AppComposer::showProfileEditorWindow);
-        connect(settingsWindow_.get(), &SettingsWindow::profileSwitchRequested,
-                this, &AppComposer::switchProfile);
-
-        connect(settingsWindow_.get(), &SettingsWindow::desktopCountdownConfigChanged,
-                desktopCountdown_.get(), &DesktopCountdown::reloadConfig);
-        connect(settingsWindow_.get(), &SettingsWindow::reminderPreviewRequested,
-                courseBar.get(), qOverload<const QString&>(&CourseBar::showNotification));
-        connect(settingsWindow_.get(), &SettingsWindow::uiAccessChangeRequested,
-                this, &AppComposer::changeUiAccess);
-    }
-    settingsWindow_->refreshProfiles();
-    if (!settingsWindowPositioned_) {
-        centerOnPanelScreen(settingsWindow_.get());
-        settingsWindowPositioned_ = true;
+        createSettingsWindow();
+        settingsWindow_->restorePage(settingsWindowState_.page);
+    } else if (settingsWindow_->isVisible()) {
+        settingsWindow_->refreshProfiles();
     }
     presentWindow(settingsWindow_.get());
 }
 
+void AppComposer::createSettingsWindow()
+{
+    settingsWindow_ = std::make_unique<SettingsWindow>(
+        windowInterception_.get(), componentRegistry_.get(), cloud_.get(),
+        [this] { return agentService(); }, update_.get());
+    connect(settingsWindow_.get(), &SettingsWindow::profileEditorRequested, this, &AppComposer::showProfileEditorWindow);
+    connect(settingsWindow_.get(), &SettingsWindow::profileSwitchRequested, this, &AppComposer::switchProfile);
+    connect(settingsWindow_.get(), &SettingsWindow::desktopCountdownConfigChanged,
+            desktopCountdown_.get(), &DesktopCountdown::reloadConfig);
+    connect(settingsWindow_.get(), &SettingsWindow::reminderPreviewRequested,
+            courseBar.get(), qOverload<const QString&>(&CourseBar::showNotification));
+    connect(settingsWindow_.get(), &SettingsWindow::uiAccessChangeRequested, this, &AppComposer::changeUiAccess);
+    connect(settingsWindow_.get(), &SettingsWindow::closed, this, [this] {
+        settingsReclaimWaiting_ = settingsWindow_->hasPendingOperations() || pluginExitGuardPending_ ||
+                                  (pluginUi_ && pluginUi_->guarding());
+        settingsReclaim_.start(settingsReclaimWaiting_ ? ReclaimOperationCheckMs : WindowReclaimDelayMs);
+    });
+    if (settingsWindowState_.geometry.isEmpty() || !settingsWindow_->restoreGeometry(settingsWindowState_.geometry))
+        centerOnPanelScreen(settingsWindow_.get());
+}
+
+void AppComposer::reclaimSettingsWindow()
+{
+    if (!initialized_ || exitAccepted_ || !settingsWindow_ || settingsWindow_->isVisible()) return;
+    if (settingsWindow_->hasPendingOperations() || pluginExitGuardPending_ || pluginExitGuardReady_ ||
+        (pluginUi_ && pluginUi_->guarding())) {
+        settingsReclaimWaiting_ = true;
+        settingsReclaim_.start(ReclaimOperationCheckMs);
+        return;
+    }
+    if (std::exchange(settingsReclaimWaiting_, false)) {
+        settingsReclaim_.start(WindowReclaimDelayMs);
+        return;
+    }
+    if (settingsWindow_->hasUnsavedInput()) return;
+    settingsWindowState_ = {settingsWindow_->saveGeometry(), settingsWindow_->currentPage()};
+    settingsWindow_.reset();
+}
+
 void AppComposer::showProfileEditorWindow()
 {
-    if (!initialized_) return;
+    if (!initialized_ || exitAccepted_) return;
+    profileEditorReclaim_.stop();
     if (!profileEditorWindow_) {
         profileEditorWindow_ = std::make_unique<ProfileEditWindow>();
-        connect(profileEditorWindow_.get(), &ProfileEditWindow::profileSaved,
-                this, [this] {
+        connect(profileEditorWindow_.get(), &ProfileEditWindow::profileSaved, this, [this] {
             courseBar->reloadProfile();
             refreshScheduleMenu();
             if (swapWindow_) swapWindow_->refreshProfile(ProfileManager::instance().profile());
             if (rescheduleWindow_) rescheduleWindow_->refreshProfile(ProfileManager::instance().profile());
             if (settingsWindow_) settingsWindow_->refreshProfiles();
         });
-    }
-    if (!profileEditorWindowPositioned_) {
-        centerOnPanelScreen(profileEditorWindow_.get());
-        profileEditorWindowPositioned_ = true;
+        connect(profileEditorWindow_.get(), &ProfileEditWindow::closed, this, [this] {
+            profileEditorReclaim_.start(WindowReclaimDelayMs);
+        });
+        if (profileEditorWindowState_.geometry.isEmpty() ||
+            !profileEditorWindow_->restoreGeometry(profileEditorWindowState_.geometry))
+            centerOnPanelScreen(profileEditorWindow_.get());
+        profileEditorWindow_->restorePage(profileEditorWindowState_.page);
     }
     presentWindow(profileEditorWindow_.get());
 }
@@ -513,22 +621,22 @@ void AppComposer::cleanupDateOverrides()
     lastCleanupError_.clear();
     if (previousCount != manager.profile().dateOverrides.size() || lastCleanupDate_ != today) syncDateAdjustments();
     lastCleanupDate_ = today;
-    if (!canceled.isEmpty() && trayMenu_) {
+    if (!canceled.isEmpty()) {
         QStringList dates;
         for (const auto& date : canceled) dates.append(date.toString(Qt::ISODate));
-        trayMenu_->showScheduleError(tr("来源日课程已变化，已取消调休、换课和代课：%1").arg(dates.join(QStringLiteral("、"))));
+        showScheduleError(tr("来源日课程已变化，已取消调休、换课和代课：%1").arg(dates.join(QStringLiteral("、"))));
     }
 }
 
 void AppComposer::switchProfile(const QString& id)
 {
-    if (!initialized_ || !trayMenu_ || switchingProfile_ || pluginExitGuardPending_ || pluginExitGuardReady_ || restartPreparing_ || restartAccepted_ || id.isEmpty()) return;
+    if (!initialized_ || exitAccepted_ || switchingProfile_ || pluginExitGuardPending_ || pluginExitGuardReady_ || restartPreparing_ || restartAccepted_ || id.isEmpty()) return;
     if (id.compare(QFileInfo(ProfileManager::instance().filePath()).completeBaseName(), Qt::CaseInsensitive) == 0) return;
     QScopedValueRollback<bool> switching(switchingProfile_, true);
     QScopedValueRollback<QString> selection(pendingProfileId_, id);
     // The shared exit guard resolves unsaved changes before committing selection.
     // A rejected exit never publishes the requested profile in memory or on disk.
-    trayMenu_->requestExit(TaskbarTrayMenu::RestartExitCode);
+    requestExit(TaskbarTrayMenu::RestartExitCode);
 }
 
 void AppComposer::setRestartHandler(std::function<bool(const Config&, const QString&, QString*)> prepare,
@@ -540,13 +648,14 @@ void AppComposer::setRestartHandler(std::function<bool(const Config&, const QStr
 
 void AppComposer::changeUiAccess(bool enabled)
 {
-    if (!initialized_ || !trayMenu_ || pluginExitGuardPending_ || pluginExitGuardReady_ || restartPreparing_ || restartAccepted_) return;
-    if (!UiAccess::supported() || !prepareRestart_) {
+    if (!initialized_ || exitAccepted_) return;
+    if (checkingExit_ || pluginExitGuardPending_ || pluginExitGuardReady_ ||
+        restartPreparing_ || restartAccepted_ || !UiAccess::supported() || !prepareRestart_) {
         if (settingsWindow_) settingsWindow_->setUiAccessSwitching(false);
         return;
     }
     QScopedValueRollback<std::optional<bool>> request(pendingUiAccess_, enabled);
-    trayMenu_->requestExit(TaskbarTrayMenu::RestartExitCode);
+    requestExit(TaskbarTrayMenu::RestartExitCode);
     if (!pluginExitGuardPending_ && !pluginExitGuardReady_ && !restartAccepted_ && settingsWindow_) settingsWindow_->setUiAccessSwitching(false);
 }
 
@@ -561,8 +670,12 @@ bool AppComposer::prepareToExit(int exitCode)
     const bool updating = TaskbarTrayMenu::isUpdateExitCode(exitCode);
     const auto deferUpdate = [this, exitCode](const QString& message) {
         update_->installationDeferred(message);
-        if (exitCode == TaskbarTrayMenu::UpdateOnQuitExitCode)
-            ElaMessageBar::warning(ElaMessageBarType::TopRight, tr("更新暂缓"), message, 5000, trayMenu_.get());
+        if (exitCode == TaskbarTrayMenu::UpdateOnQuitExitCode) {
+            if (trayMenu_)
+                ElaMessageBar::warning(ElaMessageBarType::TopRight, tr("更新暂缓"), message, 5000, trayMenu_.get());
+            else if (trayIcon_)
+                trayIcon_->showMessage(tr("更新暂缓"), message, QSystemTrayIcon::Warning);
+        }
     };
     if (plugins_ && plugins_->publishing()) {
         if (updating) {
@@ -573,33 +686,33 @@ bool AppComposer::prepareToExit(int exitCode)
             QMessageBox::information(agentWindow_.get(), tr("正在发布插件"), tr("请等待插件发布完成后再退出或重启。"));
         return false;
     }
-    if(pluginUi_ && !pluginExitGuardReady_ && !silentManagedRestart_) {
-        if(pluginExitGuardPending_) return false;
-        pluginExitGuardPending_=true;
-        const auto profileRequest=pendingProfileId_;
-        const auto uiAccessRequest=pendingUiAccess_;
-        pluginUi_->prepareAll([this,exitCode,profileRequest,uiAccessRequest](bool allowed) {
-            pluginExitGuardPending_=false;
-            if(!allowed || !initialized_ || shutdown_) {
+    if (pluginUi_ && !pluginExitGuardReady_ && !silentManagedRestart_) {
+        pluginExitGuardPending_ = true;
+        const auto profileRequest = pendingProfileId_;
+        const auto uiAccessRequest = pendingUiAccess_;
+        pluginUi_->prepareAll([this, exitCode, profileRequest, uiAccessRequest](bool allowed) {
+            if (!allowed || !initialized_ || shutdown_) {
+                pluginExitGuardPending_ = false;
                 if (TaskbarTrayMenu::isUpdateExitCode(exitCode) && update_)
                     update_->installationDeferred(tr("已取消退出。安装包已准备好，可以重试。"));
-                if(uiAccessRequest && settingsWindow_)settingsWindow_->setUiAccessSwitching(false);
+                if (uiAccessRequest && settingsWindow_) settingsWindow_->setUiAccessSwitching(false);
                 return;
             }
-            if(plugins_) plugins_->setWritesBlocked(true);
-            pluginExitGuardReady_=true;
-            QTimer::singleShot(0,this,[this,exitCode,profileRequest,uiAccessRequest]{
-                // The initiating slots use scoped requests. Preserve their values
-                // across the asynchronous plugin guard and restore only after the retry.
-                QScopedValueRollback<QString> selection(pendingProfileId_,profileRequest);
-                QScopedValueRollback<std::optional<bool>> request(pendingUiAccess_,uiAccessRequest);
-                if(trayMenu_)trayMenu_->requestExit(exitCode);
-                if(uiAccessRequest && !restartAccepted_ && settingsWindow_)settingsWindow_->setUiAccessSwitching(false);
+            if (plugins_) plugins_->setWritesBlocked(true);
+            QTimer::singleShot(0, this, [this, exitCode, profileRequest, uiAccessRequest] {
+                if (!initialized_ || shutdown_ || exitAccepted_) return;
+                // Keep other exit requests blocked until the original request is restored.
+                pluginExitGuardPending_ = false;
+                pluginExitGuardReady_ = true;
+                QScopedValueRollback<QString> selection(pendingProfileId_, profileRequest);
+                QScopedValueRollback<std::optional<bool>> request(pendingUiAccess_, uiAccessRequest);
+                requestExit(exitCode);
+                if (uiAccessRequest && !restartAccepted_ && settingsWindow_) settingsWindow_->setUiAccessSwitching(false);
             });
         });
         return false;
     }
-    pluginExitGuardReady_=false;
+    pluginExitGuardReady_ = false;
     QScopedValueRollback<bool> preparing(restartPreparing_, true);
     bool exitAccepted = false;
     if (plugins_) plugins_->setWritesBlocked(true);
@@ -621,6 +734,10 @@ bool AppComposer::prepareToExit(int exitCode)
             deferUpdate(tr("无法保存当前数据：%1").arg(error));
             return false;
         }
+        if (update_->managedUpdate() && !cloud_->recordUpdateHandoff(update_->installer().path, &error)) {
+            deferUpdate(error);
+            return false;
+        }
         if (!prepareUpdate_ || !prepareUpdate_(update_->installer(), restartAfterInstall, &error)) {
             deferUpdate(error.isEmpty() ? tr("无法准备安装。") : error);
             return false;
@@ -637,7 +754,7 @@ bool AppComposer::prepareToExit(int exitCode)
         if (silentManagedRestart_) return;
         if (pendingUiAccess_) QMessageBox::warning(settingsWindow_.get(), tr("增强置顶切换失败"), message);
         else if (settingsWindow_) settingsWindow_->showProfileError(message);
-        else if (trayMenu_) trayMenu_->showScheduleError(message);
+        else showScheduleError(message);
     };
     Config candidate = ConfigManager::instance().config();
     if (!pendingProfileId_.isEmpty()) {
@@ -679,7 +796,7 @@ bool AppComposer::prepareToExit(int exitCode)
 
 QString AppComposer::managedExitBlockReason() const
 {
-    if (!initialized_ || !trayMenu_ || exitAccepted_ || restartPreparing_ || pluginExitGuardPending_)
+    if (!initialized_ || exitAccepted_ || checkingExit_ || restartPreparing_ || pluginExitGuardPending_ || pluginExitGuardReady_)
         return tr("客户端正在处理另一项操作");
     if ((profileEditorWindow_ && profileEditorWindow_->session()->isDirty()) ||
         (plugins_ && plugins_->publishing()))
@@ -699,7 +816,7 @@ QString AppComposer::managedRestart(const QString& profileId)
     if (!reason.isEmpty()) return reason;
     const QScopedValueRollback<bool> silent(silentManagedRestart_, true);
     const QScopedValueRollback<QString> target(pendingProfileId_, profileId);
-    trayMenu_->requestExit(TaskbarTrayMenu::RestartExitCode);
+    requestExit(TaskbarTrayMenu::RestartExitCode);
     return exitAccepted_ ? QString() : tr("客户端未能准备重启，详见设备日志");
 }
 
@@ -723,6 +840,10 @@ void AppComposer::centerOnPanelScreen(QWidget* window)
     // does not open the window on the primary one. The window has no handle yet,
     // which is why ElaWindow::moveToCenter() (primary screen at that point) is not used.
     QScreen* screen = trayMenu_ ? trayMenu_->screen() : nullptr;
+    if (!screen && trayIcon_) {
+        const QRect anchor = trayIcon_->geometry();
+        screen = QGuiApplication::screenAt(anchor.isValid() ? anchor.center() : QCursor::pos());
+    }
     if (!screen) screen = QGuiApplication::primaryScreen();
     if (!screen) return;
     const QRect available = screen->availableGeometry();

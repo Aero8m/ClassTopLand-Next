@@ -79,6 +79,7 @@ QJsonObject toJson(const Cloud::State& state)
             {QStringLiteral("pending_receipts"), receipts},
             {QStringLiteral("journal"), journal},
             {QStringLiteral("operation_journal"), state.operationJournal},
+            {QStringLiteral("update_journal"), state.updateJournal},
             {QStringLiteral("last_sync_at"), state.lastSyncAt.isValid()
                                                  ? state.lastSyncAt.toString(Qt::ISODate)
                                                  : QString()},
@@ -150,6 +151,10 @@ bool fromJson(const QJsonObject& root, Cloud::State& state, QString* error)
     if (!operation.isUndefined() && !operation.isObject())
         return fail(error, QStringLiteral("cloud state: operation journal must be an object"));
     loaded.operationJournal = operation.toObject();
+    const auto update = root.value(QStringLiteral("update_journal"));
+    if (!update.isUndefined() && !update.isObject())
+        return fail(error, QStringLiteral("cloud state: update journal must be an object"));
+    loaded.updateJournal = update.toObject();
     if (!readString(root, QStringLiteral("origin"), loaded.origin, error)) return false;
     if (!readString(root, QStringLiteral("device_secret"), loaded.deviceSecret, error)) return false;
     if (!readString(root, QStringLiteral("pending_pair_secret"), loaded.pendingPairSecret, error)) return false;

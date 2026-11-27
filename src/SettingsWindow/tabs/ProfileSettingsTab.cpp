@@ -12,6 +12,7 @@
 #include <ElaText.h>
 #include <QFileInfo>
 #include <QFileDialog>
+#include <QTimer>
 #include <QDir>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -95,7 +96,7 @@ ProfileSettingsTab::ProfileSettingsTab(QWidget* parent) : ElaScrollPage(parent)
     connect(delete_, &ElaPushButton::clicked, this, &ProfileSettingsTab::deleteProfile);
     connect(import_, &ElaPushButton::clicked, this, &ProfileSettingsTab::importProfile);
     connect(export_, &ElaPushButton::clicked, this, &ProfileSettingsTab::exportProfile);
-    refreshProfiles();
+    updateActions();
 }
 
 int ProfileSettingsTab::selectedIndex() const
@@ -104,8 +105,19 @@ int ProfileSettingsTab::selectedIndex() const
     return index >= 0 && index < entries_.size() ? index : -1;
 }
 
+void ProfileSettingsTab::scheduleRefresh()
+{
+    if (refreshPending_) return;
+    refreshPending_ = true;
+    QTimer::singleShot(0, this, [this] {
+        if (refreshPending_ && isVisible()) refreshProfiles();
+        refreshPending_ = false;
+    });
+}
+
 void ProfileSettingsTab::refreshProfiles(const QString& selectedId)
 {
+    refreshPending_ = false;
     QString selection = selectedId;
     const int oldIndex = selectedIndex();
     if (selection.isEmpty() && oldIndex >= 0) selection = entries_[oldIndex].id;
@@ -134,8 +146,10 @@ void ProfileSettingsTab::refreshProfiles(const QString& selectedId)
 void ProfileSettingsTab::showEvent(QShowEvent* event)
 {
     ElaScrollPage::showEvent(event);
-    // Ela's Popup animation restores the same page after displaying its snapshot.
-    if (property("ElaPageTransitionRestore").toBool()) return;
+    // Ela marks the navigation host while restoring the real page after its snapshot.
+    constexpr auto transitionRestore = "ElaPageTransitionRestore";
+    const auto* host = parentWidget();
+    if (property(transitionRestore).toBool() || (host && host->property(transitionRestore).toBool())) return;
     refreshProfiles();
 }
 

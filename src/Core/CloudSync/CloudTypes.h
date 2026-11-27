@@ -13,6 +13,7 @@ namespace Cloud {
 constexpr char kDefaultOrigin[] = "https://ctx.aero8m.cn";
 constexpr int kProfileFormatVersion = 2;
 constexpr int kDisplayFormatVersion = 2;
+constexpr int kDisplayUpdateFormatVersion = 4;
 
 // Channel identifiers exactly as used by the HTTP contract.
 inline const QString& profileKey()
@@ -80,6 +81,7 @@ struct State
     QList<QJsonObject> pendingReceipts;
     QHash<QString, Journal> journal;
     QJsonObject operationJournal;
+    QJsonObject updateJournal;
     QDateTime lastSyncAt;
     QString lastError;
 

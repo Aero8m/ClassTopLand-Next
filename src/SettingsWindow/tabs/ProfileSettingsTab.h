@@ -16,6 +16,9 @@ public:
     explicit ProfileSettingsTab(QWidget* parent = nullptr);
     void refreshProfiles(const QString& selectedId = {});
     void showError(const QString& message);
+    bool busy() const { return busy_; }
+    void scheduleRefresh();
+
 signals:
     void profileEditorRequested();
     void profileSwitchRequested(const QString& id);
@@ -40,6 +43,7 @@ private:
     ElaPushButton* import_;
     ElaPushButton* export_;
     bool busy_ = false;
+    bool refreshPending_ = false;
 };
 
 

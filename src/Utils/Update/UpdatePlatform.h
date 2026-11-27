@@ -8,6 +8,7 @@ struct UpdateInstaller;
 namespace UpdatePlatform {
 bool installed();
 bool installationBusy();
+QString installationError(const QString& stageName);
 void cleanCompleted();
 
 class Handoff final {

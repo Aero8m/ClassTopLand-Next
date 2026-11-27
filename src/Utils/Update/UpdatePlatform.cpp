@@ -2,9 +2,11 @@
 #include "UpdateWindows.h"
 #include "../../Core/Update/UpdateService.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <vector>
 
 namespace {
@@ -47,6 +49,28 @@ bool UpdatePlatform::installationBusy()
 
     Handle gate(OpenEventW(SYNCHRONIZE, FALSE, GateName));
     return gate || GetLastError() == ERROR_ACCESS_DENIED;
+}
+
+QString UpdatePlatform::installationError(const QString& stageName)
+{
+    const auto unknown = QCoreApplication::translate("UpdatePlatform", "客户端重新启动后未达到目标 Build。");
+    static const QRegularExpression stagePattern(QStringLiteral("\\AClassTopLand-Next-update-[A-Za-z0-9]{6}\\z"));
+    if (!stagePattern.match(stageName).hasMatch()) return unknown;
+    const QFileInfo stage(QDir::temp().filePath(stageName));
+    if (!stage.isDir() || stage.isSymLink() || stage.isJunction()) return unknown;
+    const QFileInfo marker(QDir(stage.filePath()).filePath(QString::fromWCharArray(UpdateWindows::Completed)));
+    if (!marker.isFile() || marker.isSymLink() || marker.size() != sizeof(DWORD)) return unknown;
+    QFile file(marker.filePath());
+    DWORD result = 0;
+    if (!file.open(QIODevice::ReadOnly)
+        || file.read(reinterpret_cast<char*>(&result), sizeof(result)) != sizeof(result)) return unknown;
+    if (result == ERROR_CANCELLED)
+        return QCoreApplication::translate("UpdatePlatform", "Windows 安装授权已取消。");
+    if (result == ERROR_SUCCESS_REBOOT_REQUIRED || result == 8)
+        return QCoreApplication::translate("UpdatePlatform", "安装需要重新启动 Windows。");
+    if (result != ERROR_SUCCESS)
+        return QCoreApplication::translate("UpdatePlatform", "安装程序失败（Windows %1）。").arg(result);
+    return unknown;
 }
 
 void UpdatePlatform::cleanCompleted()

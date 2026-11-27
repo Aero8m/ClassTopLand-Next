@@ -29,6 +29,7 @@ public:
 
     static int currentBuild();
     static QUrl mirrorPage();
+    static QString installationError(const QString& stageName);
     bool supported() const;
     State state() const { return state_; }
     int availableBuild() const { return build_; }
@@ -38,7 +39,7 @@ public:
     const UpdateInstaller& installer() const { return installer_; }
 
     bool automaticUpdates() const { return automaticUpdates_; }
-    bool readyToInstallOnQuit() const { return automaticUpdates_ && state_ == State::Ready; }
+    bool readyToInstallOnQuit() const { return !managedUpdate_ && automaticUpdates_ && state_ == State::Ready; }
     void setAutomaticUpdates(bool enabled);
     void installOnQuit();
     void check();
@@ -46,6 +47,11 @@ public:
     void cancelDownload();
     void installationDeferred(const QString& message);
     void transferInstaller();
+    bool managedUpdate() const { return managedUpdate_; }
+    bool checkManaged();
+    void downloadManaged();
+    void installManaged();
+    void finishManaged();
 
 signals:
     void changed();
@@ -91,4 +97,5 @@ private:
     bool progressPending_ = false;
     bool automaticUpdates_ = false;
     bool automaticRequest_ = false;
+    bool managedUpdate_ = false;
 };

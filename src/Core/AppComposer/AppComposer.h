@@ -7,6 +7,7 @@
 #include"../../CourseBar/CourseBar.h"
 #include<QDir>
 #include<QMessageBox>
+#include <QTimer>
 #include <memory>
 #include <functional>
 #include <optional>
@@ -19,7 +20,7 @@ class AgentService;
 class ProfileEditWindow;
 class SwapClassesWindow;
 class RescheduleWindow;
-class QTimer;
+class QSystemTrayIcon;
 class WindowInterceptionService;
 class DesktopCountdown;
 class ReminderService;
@@ -57,7 +58,8 @@ public:
     void setUpdateHandler(std::function<bool(const UpdateInstaller&, bool, QString*)> prepare);
 
 private slots:
-    // Create each window on demand and always reuse that one instance.
+    void showTrayMenu();
+    void requestExit(int exitCode);
     void showSettingsWindow();
     void showAgentWindow();
     void showPluginCenter();
@@ -75,6 +77,10 @@ private:
     bool initInstances();
     void dropInstances();
     void printLogo();
+    void showScheduleError(const QString& message);
+    AgentService* agentService();
+    void createSettingsWindow();
+    void reclaimSettingsWindow();
     // Places a window on the screen holding the panel, the first time it opens.
     void centerOnPanelScreen(QWidget* window);
     // Hides the panel and brings an already created window to the front.
@@ -98,6 +104,7 @@ private:
     bool shutdown_ = false;
     bool pluginsDisabled_ = false;
     bool exitAccepted_ = false;
+    bool checkingExit_ = false;
     bool pluginExitGuardReady_ = false;
     bool pluginExitGuardPending_ = false;
     std::unique_ptr<PluginManager> plugins_;
@@ -108,7 +115,9 @@ private:
     std::unique_ptr<CloudSyncService> cloud_;
     std::unique_ptr<ReminderService> reminders_;
     std::unique_ptr<WindowInterceptionService> windowInterception_;
+    std::unique_ptr<QSystemTrayIcon> trayIcon_;
     std::unique_ptr<TaskbarTrayMenu> trayMenu_;
+    QString pendingScheduleError_;
     std::unique_ptr<UpdateService> update_;
     std::unique_ptr<SettingsWindow> settingsWindow_;
     std::unique_ptr<AgentService> agent_;
@@ -122,9 +131,15 @@ private:
     QDate lastCleanupDate_;
     bool swapWindowPositioned_ = false;
     bool rescheduleWindowPositioned_ = false;
-    // Only the first opening is positioned; later openings keep the user's placement.
-    bool settingsWindowPositioned_ = false;
-    bool profileEditorWindowPositioned_ = false;
+    struct WindowState {
+        QByteArray geometry;
+        QString page;
+    };
+    WindowState settingsWindowState_;
+    WindowState profileEditorWindowState_;
+    QTimer settingsReclaim_;
+    QTimer profileEditorReclaim_;
+    bool settingsReclaimWaiting_ = false;
 };
 
 

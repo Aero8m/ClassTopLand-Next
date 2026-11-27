@@ -10,9 +10,11 @@
 #include "../Logger/Logger.h"
 #include "../ProfileManager/ProfileExchange.h"
 #include "../ProfileManager/ProfileManager.h"
+#include "../Update/UpdateService.h"
 
 #include <QCryptographicHash>
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -98,10 +100,17 @@ QString replyDiagnostic(const CloudApi::Reply& reply)
     const QString status = QStringLiteral("HTTP %1").arg(reply.status);
     return reply.message.isEmpty() ? status : status + QStringLiteral(": ") + reply.message;
 }
+
+bool validTaskId(const QString& id)
+{
+    static const QRegularExpression pattern(QStringLiteral("\\A[a-f0-9]{32}\\z"));
+    return pattern.match(id).hasMatch();
+}
 } // namespace
 
 CloudSyncService::CloudSyncService(const QString& dataDirectory, QObject* parent)
-    : QObject(parent), store_(dataDirectory), api_(new CloudApi(this)), screen_(std::make_unique<CloudScreen>())
+    : QObject(parent), store_(dataDirectory), api_(new CloudApi(this)), screen_(std::make_unique<CloudScreen>()),
+      updateInstanceId_(newClaimId())
 {
     state_.ensureChannels();
     timer_ = new QTimer(this);
@@ -142,6 +151,8 @@ bool CloudSyncService::start(QString* error)
     }
     lockHeld_ = true;
     if (state_.bound()) {
+        // Read the previous installer's outcome before staging directories are cleaned.
+        recoverUpdate();
         if (!state_.enabled) {
             setStatus(Cloud::Status::Paused);
         } else {
@@ -163,6 +174,8 @@ void CloudSyncService::stop()
     ++cycleToken_;
     inFlight_ = false;
     pairing_ = false;
+    if (updater_ && state_.updateJournal.value(QStringLiteral("status")).toString() != QStringLiteral("installing"))
+        updater_->finishManaged();
     if (lockHeld_) {
         store_.releaseLock();
         lockHeld_ = false;
@@ -252,6 +265,7 @@ QJsonObject CloudSyncService::syncBody() const
     QJsonArray displayFormats;
     displayFormats.append(1);
     displayFormats.append(Cloud::kDisplayFormatVersion);
+    if (updateSupported()) displayFormats.append(Cloud::kDisplayUpdateFormatVersion);
     return {{QStringLiteral("client_version"), clientVersion()},
             {QStringLiteral("supported_formats"),
              QJsonObject{{Cloud::profileKey(), profileFormats},
@@ -413,6 +427,10 @@ void CloudSyncService::beginCycle(bool manual)
         if (!ensureCloudProfile(&profileError))
             report(QStringLiteral("Could not create the cloud profile"), profileError);
     }
+    if (!recoverUpdate()) {
+        finishCycle(token, tr("无法保存远程更新恢复状态"), backoffMs_);
+        return;
+    }
     QString recoveryError;
     if (!recoverOperation(&recoveryError)) {
         finishCycle(token, recoveryError, backoffMs_,
@@ -452,6 +470,7 @@ void CloudSyncService::finishCycle(quint64 token, const QString& error, int next
 
 void CloudSyncService::handleUnauthorized()
 {
+    if (updater_) updater_->finishManaged();
     screen_->stop();
     if (api_) api_->abortAll();
     ++cycleToken_;
@@ -498,6 +517,8 @@ void CloudSyncService::pair(const QString& code)
     if (api_) api_->abortAll();
     ++cycleToken_;
     const bool wasRevoked = status_ == Cloud::Status::Revoked;
+    if (updater_ && updater_->managedUpdate())
+        finishUpdate(QStringLiteral("failed"), tr("设备开始重新配对，远程更新已停止。"));
     pairing_ = true;
     setStatus(Cloud::Status::Pairing);
     const QString hash = sha256Hex(normalized.toUtf8());
@@ -550,6 +571,8 @@ void CloudSyncService::pair(const QString& code)
                                next.operationJournal = {};
                                next.lastSyncAt = {};
                            }
+                           if (!sameDevice || next.deviceSecret != next.pendingPairSecret)
+                               next.updateJournal = {};
                            next.deviceSecret = next.pendingPairSecret;
                            next.pendingPairSecret.clear();
                            next.claimId.clear();
@@ -644,6 +667,8 @@ void CloudSyncService::setEnabled(bool enabled)
         return;
     }
     if (!enabled) {
+        if (updater_ && updater_->managedUpdate())
+            finishUpdate(QStringLiteral("failed"), tr("集控同步已暂停，远程更新已停止。"));
         screen_->stop();
         if (timer_) timer_->stop();
         if (!inFlight_) setStatus(state_.bound() ? Cloud::Status::Paused : Cloud::Status::Unbound);
@@ -658,6 +683,7 @@ void CloudSyncService::unbind()
 {
     screen_->stop();
     if (!started_) return;
+    if (updater_) updater_->finishManaged();
     if (timer_) timer_->stop();
     if (api_) api_->abortAll();
     ++cycleToken_;
@@ -676,6 +702,7 @@ void CloudSyncService::unbind()
     next.pendingReceipts.clear();
     next.journal.clear();
     next.operationJournal = {};
+    next.updateJournal = {};
     next.lastError.clear();
     store_.removePending(Cloud::profileKey());
     store_.removePending(Cloud::displayKey());
@@ -694,6 +721,7 @@ bool CloudSyncService::resetState(QString* error)
 {
     screen_->stop();
     if (error) error->clear();
+    if (updater_) updater_->finishManaged();
     if (timer_) timer_->stop();
     if (api_) api_->abortAll();
     ++cycleToken_;
@@ -832,6 +860,9 @@ void CloudSyncService::doSync(quint64 token)
                        }
                        qtPowerEnabled_ = data.value(QStringLiteral("qt_power")).toBool();
                        qtScreenSnapshotsEnabled_ = data.value(QStringLiteral("qt_screen_snapshots")).toBool();
+                       qtUpdateEnabled_ = data.value(QStringLiteral("qt_update")).toBool();
+                       if (!qtUpdateEnabled_ && updater_ && updater_->managedUpdate())
+                           finishUpdate(QStringLiteral("failed"), tr("服务器未声明支持远程更新。"));
                        if (qtPowerEnabled_ && CloudPower::supported() && !bootProbeStarted_) {
                            bootProbeStarted_ = true;
                            CloudPower::readBootId(this, [this](const QString& id) { powerBootId_ = id; });
@@ -924,6 +955,12 @@ void CloudSyncService::pollOperation(quint64 token)
         if (!powerBootId_.isEmpty()) telemetry.insert(QStringLiteral("boot_id"), powerBootId_);
     }
     if (pluginTelemetry_) telemetry.insert(QStringLiteral("plugins"), pluginTelemetry_());
+    if (qtUpdateEnabled_ && updateSupported()) {
+        telemetry.insert(QStringLiteral("software_update"), QJsonObject{
+            {QStringLiteral("build_number"), UpdateService::currentBuild()},
+            {QStringLiteral("automatic_updates"), updater_->automaticUpdates()},
+            {QStringLiteral("instance_id"), updateInstanceId_}});
+    }
     api_->postJson(Cloud::apiUrl(state_.origin, QStringLiteral("/device/operations/poll")), bearer(), telemetry,
                    [this, token](const CloudApi::Reply& reply) {
                        if (token != cycleToken_) return;
@@ -942,6 +979,7 @@ void CloudSyncService::pollOperation(quint64 token)
                            screen_->configure(state_.origin, bearer());
                        else
                            screen_->stop();
+                       if (qtUpdateEnabled_ && flushUpdateReceipt(token)) return;
                        const auto task = data.value(QStringLiteral("task")).toObject();
                        if (task.isEmpty()) {
                            finishCycle(token, {}, pendingSyncAfterMs_);
@@ -949,6 +987,169 @@ void CloudSyncService::pollOperation(quint64 token)
                        }
                        executeOperation(token, task);
                    });
+}
+
+void CloudSyncService::setUpdateService(UpdateService* updater, std::function<QString()> guard)
+{
+    updater_ = updater;
+    updateGuard_ = std::move(guard);
+    connect(updater, &UpdateService::changed, this, &CloudSyncService::updateChanged);
+}
+
+bool CloudSyncService::updateSupported() const
+{
+    return updater_ && updater_->supported();
+}
+
+bool CloudSyncService::saveUpdateJournal(const QJsonObject& journal, QString* error)
+{
+    auto next = state_;
+    next.updateJournal = journal;
+    QString saveError;
+    if (persist(next, &saveError)) return true;
+    report(QStringLiteral("Could not save remote update state"), saveError);
+    return fail(error, saveError);
+}
+
+bool CloudSyncService::finishUpdate(const QString& status, const QString& reason, int targetBuild)
+{
+    QJsonObject journal{{QStringLiteral("id"), state_.updateJournal.value(QStringLiteral("id"))},
+                        {QStringLiteral("status"), status},
+                        {QStringLiteral("reason"), reason.left(1000)}};
+    if (targetBuild > 0) journal.insert(QStringLiteral("target_build"), targetBuild);
+    const bool saved = saveUpdateJournal(journal);
+    if (updater_) updater_->finishManaged();
+    if (!reason.isEmpty()) report(QStringLiteral("Remote update: %1").arg(status), reason);
+    if (!inFlight_) scheduleNext(0);
+    return saved;
+}
+
+bool CloudSyncService::recoverUpdate()
+{
+    const auto& journal = state_.updateJournal;
+    if (journal.isEmpty()) return true;
+    const QString phase = journal.value(QStringLiteral("status")).toString();
+    if (!validTaskId(journal.value(QStringLiteral("id")).toString())) return saveUpdateJournal({});
+    if (phase == QStringLiteral("failed") || phase == QStringLiteral("up_to_date") ||
+        phase == QStringLiteral("applied")) return true;
+    if (journal.value(QStringLiteral("instance_id")).toString() == updateInstanceId_
+        && updater_ && updater_->managedUpdate()) return true;
+    if (phase == QStringLiteral("installing")) {
+        const int target = journal.value(QStringLiteral("target_build")).toInt();
+        if (updateSupported() && target > 0 && UpdateService::currentBuild() >= target)
+            return finishUpdate(QStringLiteral("applied"));
+        return finishUpdate(QStringLiteral("failed"),
+                            UpdateService::installationError(journal.value(QStringLiteral("stage")).toString()));
+    }
+    return finishUpdate(QStringLiteral("failed"), tr("客户端在更新完成前退出，远程更新已停止。"));
+}
+
+void CloudSyncService::executeUpdate(quint64 token, const QString& id)
+{
+    if (!qtUpdateEnabled_ || !state_.updateJournal.isEmpty()) {
+        finishCycle(token, {}, pendingSyncAfterMs_);
+        return;
+    }
+    QJsonObject journal{{QStringLiteral("id"), id},
+                        {QStringLiteral("status"), QStringLiteral("checking")},
+                        {QStringLiteral("instance_id"), updateInstanceId_}};
+    QString error;
+    if (!saveUpdateJournal(journal, &error)) {
+        finishCycle(token, error, backoffMs_);
+        return;
+    }
+    if (!state_.enabled)
+        finishUpdate(QStringLiteral("failed"), tr("集控同步已暂停。"));
+    else if (!updateSupported())
+        finishUpdate(QStringLiteral("failed"), tr("当前客户端不支持远程更新。"));
+    else if (const QString blocked = updateGuard_ ? updateGuard_() : tr("更新退出检查不可用。"); !blocked.isEmpty())
+        finishUpdate(QStringLiteral("failed"), blocked);
+    else if (!updater_->checkManaged())
+        finishUpdate(QStringLiteral("failed"), tr("客户端已有更新操作正在进行或等待安装。"));
+    finishCycle(token, {}, kMinSyncDelayMs);
+}
+
+void CloudSyncService::updateChanged()
+{
+    if (!updater_ || !updater_->managedUpdate()) return;
+    using State = UpdateService::State;
+    const auto state = updater_->state();
+    auto journal = state_.updateJournal;
+    const QString phase = journal.value(QStringLiteral("status")).toString();
+    if (phase == QStringLiteral("checking") && state == State::Current) {
+        finishUpdate(QStringLiteral("up_to_date"), {}, updater_->availableBuild());
+    } else if (phase == QStringLiteral("checking") && state == State::Available) {
+        journal.insert(QStringLiteral("status"), QStringLiteral("updating"));
+        journal.insert(QStringLiteral("target_build"), updater_->availableBuild());
+        if (!saveUpdateJournal(journal)) updater_->finishManaged();
+        if (!inFlight_) scheduleNext(0);
+    } else if (state == State::Failed || (phase == QStringLiteral("downloading") && state == State::Available)) {
+        finishUpdate(QStringLiteral("failed"), updater_->message());
+    } else if (phase == QStringLiteral("downloading") && state == State::Ready && !inFlight_) {
+        scheduleNext(0);
+    }
+}
+
+bool CloudSyncService::flushUpdateReceipt(quint64 token)
+{
+    const auto journal = state_.updateJournal;
+    const auto phase = journal.value(QStringLiteral("status")).toString();
+    const bool ready = phase == QStringLiteral("downloading") && updater_ && updater_->state() == UpdateService::State::Ready;
+    const bool starting = phase == QStringLiteral("updating");
+    if (!starting && !ready && phase != QStringLiteral("failed") && phase != QStringLiteral("up_to_date")
+        && phase != QStringLiteral("applied")) return false;
+    const auto id = journal.value(QStringLiteral("id")).toString();
+    const auto status = ready ? QStringLiteral("updating") : phase;
+    QJsonObject receipt{{QStringLiteral("status"), status},
+                        {QStringLiteral("reason"), journal.value(QStringLiteral("reason")).toString()}};
+    if (status == QStringLiteral("updating") || status == QStringLiteral("up_to_date"))
+        receipt.insert(QStringLiteral("target_build"), journal.value(QStringLiteral("target_build")));
+    const auto path = QStringLiteral("/device/operations/%1/result").arg(id);
+    api_->postJson(Cloud::apiUrl(state_.origin, path), bearer(), receipt,
+                   [this, token, journal, starting, ready](const CloudApi::Reply& reply) {
+        if (token != cycleToken_) return;
+        if (reply.status == 401) {
+            handleUnauthorized();
+            return;
+        }
+        if (journal != state_.updateJournal) {
+            finishCycle(token, {}, kMinSyncDelayMs);
+            return;
+        }
+        if (!reply.ok() && reply.status != 404 && reply.status != 409 && reply.status != 422) {
+            finishCycle(token, replyError(reply), pendingSyncAfterMs_, replyDiagnostic(reply));
+            return;
+        }
+        const bool approved = reply.ok() &&
+            dataObject(reply.body).value(QStringLiteral("status")).toString() == QStringLiteral("updating");
+        QString error;
+        if ((starting || ready) && approved && state_.enabled && updater_ && updater_->managedUpdate()) {
+            if (starting) {
+                auto next = journal;
+                next.insert(QStringLiteral("status"), QStringLiteral("downloading"));
+                if (saveUpdateJournal(next, &error)) updater_->downloadManaged();
+            } else {
+                updater_->installManaged();
+            }
+        } else {
+            if (!reply.ok()) report(QStringLiteral("Remote update receipt was rejected"), replyDiagnostic(reply));
+            saveUpdateJournal({}, &error);
+            if (updater_) updater_->finishManaged();
+        }
+        finishCycle(token, error, kMinSyncDelayMs);
+    });
+    return true;
+}
+
+bool CloudSyncService::recordUpdateHandoff(const QString& installerPath, QString* error)
+{
+    if (!state_.enabled || !updater_ || !updater_->managedUpdate()
+        || state_.updateJournal.value(QStringLiteral("status")).toString() != QStringLiteral("downloading"))
+        return fail(error, tr("远程更新任务已失效。"));
+    auto journal = state_.updateJournal;
+    journal.insert(QStringLiteral("status"), QStringLiteral("installing"));
+    journal.insert(QStringLiteral("stage"), QFileInfo(installerPath).dir().dirName());
+    return saveUpdateJournal(journal, error);
 }
 
 bool CloudSyncService::recoverOperation(QString* error)
@@ -979,8 +1180,7 @@ bool CloudSyncService::recoverOperation(QString* error)
 void CloudSyncService::executeOperation(quint64 token, const QJsonObject& task)
 {
     const QString id = task.value(QStringLiteral("id")).toString();
-    static const QRegularExpression taskId(QStringLiteral("^[a-f0-9]{32}$"));
-    if (!taskId.match(id).hasMatch()) {
+    if (!validTaskId(id)) {
         finishCycle(token, tr("设备任务 ID 无效"), pendingSyncAfterMs_, QStringLiteral("Invalid device operation ID"));
         return;
     }
@@ -989,6 +1189,10 @@ void CloudSyncService::executeOperation(quint64 token, const QJsonObject& task)
     };
     const auto operation = task.value(QStringLiteral("operation")).toObject();
     const QString action = operation.value(QStringLiteral("action")).toString();
+    if (action == QStringLiteral("update_app")) {
+        executeUpdate(token, id);
+        return;
+    }
     const auto changes = task.value(QStringLiteral("changes")).toArray();
     const bool recovering = state_.operationJournal.value(QStringLiteral("id")).toString() == id;
     auto& profiles = ProfileManager::instance();
@@ -1110,7 +1314,8 @@ void CloudSyncService::processChannel(quint64 token, const Cloud::Target& target
     const QString kind = target.kind;
     const bool supportedFormat = kind == Cloud::profileKey()
         ? (target.formatVersion >= 1 && target.formatVersion <= Cloud::kProfileFormatVersion)
-        : (target.formatVersion == 1 || target.formatVersion == Cloud::kDisplayFormatVersion);
+        : (target.formatVersion == 1 || target.formatVersion == Cloud::kDisplayFormatVersion
+           || (target.formatVersion == Cloud::kDisplayUpdateFormatVersion && updateSupported()));
     if (!target.present || !target.compatible || !supportedFormat) {
         blockSignature_.remove(kind);
         done();
@@ -1320,6 +1525,11 @@ void CloudSyncService::applyContent(quint64 token, const Cloud::Target& target, 
     if (document.object().value(QStringLiteral("schema_version")).toInt(1) != target.formatVersion) {
         failChannel(token, target, attempt, QStringLiteral("validation_failed"),
                     tr("配置内容与发布格式版本不一致"), done);
+        return;
+    }
+    if (target.formatVersion == Cloud::kDisplayUpdateFormatVersion && !updateSupported()) {
+        failChannel(token, target, attempt, QStringLiteral("unsupported_format"),
+                    tr("当前客户端不支持展示配置 v4"), done);
         return;
     }
     if (!CloudDisplay::buildConfig(document.object(), ConfigManager::instance().config(),

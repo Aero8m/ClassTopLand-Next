@@ -275,6 +275,11 @@ ReminderSettingsTab::ReminderSettingsTab(QWidget* parent) : ElaScrollPage(parent
     refreshConfig(); refreshRules();
 }
 
+bool ReminderSettingsTab::hasUnsavedInput() const
+{
+    return std::any_of(pending_.cbegin(), pending_.cend(), [](bool pending) { return pending; });
+}
+
 void ReminderSettingsTab::refreshConfig()
 {
     QScopedValueRollback<bool> guard(refreshing_, true);

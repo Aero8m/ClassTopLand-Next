@@ -121,7 +121,13 @@ WindowInterceptionSettingsTab::WindowInterceptionSettingsTab(WindowInterceptionS
         if (const auto window = selectedWindow()) act([&](QString* error) { return service_->hideOnce(*window, error); });
     });
     connect(hideSave_, &ElaPushButton::clicked, this, [this] {
-        if (const auto window = selectedWindow()) act([&](QString* error) { return service_->hideAndSave(*window, title_->text(), error); });
+        if (const auto window = selectedWindow()) {
+            act([&](QString* error) {
+                if (!service_->hideAndSave(*window, title_->text(), error)) return false;
+                title_->setModified(false);
+                return true;
+            });
+        }
     });
     connect(restore_, &ElaPushButton::clicked, this, [this] {
         if (const auto window = selectedWindow()) act([&](QString* error) { return service_->restore(*window, error); });
@@ -138,7 +144,12 @@ WindowInterceptionSettingsTab::WindowInterceptionSettingsTab(WindowInterceptionS
         const int index = selected(saved_);
         act([&](QString* error) { return service_->deleteRule(index, error); });
     });
-    refresh();
+    updateActions();
+}
+
+bool WindowInterceptionSettingsTab::hasUnsavedInput() const
+{
+    return title_->isModified();
 }
 
 std::optional<InterceptedWindow> WindowInterceptionSettingsTab::selectedWindow() const
@@ -172,14 +183,18 @@ void WindowInterceptionSettingsTab::act(const std::function<bool(QString*)>& act
 
 void WindowInterceptionSettingsTab::scheduleRefresh()
 {
-    if (refreshPending_) return;
+    if (refreshPending_ || !isVisible()) return;
     refreshPending_ = true;
-    QTimer::singleShot(0, this, [this] { refreshPending_ = false; refresh(); });
+    QTimer::singleShot(0, this, [this] {
+        if (refreshPending_ && isVisible()) refresh();
+        refreshPending_ = false;
+    });
 }
 
 void WindowInterceptionSettingsTab::refresh()
 {
     using namespace AppUi;
+    refreshPending_ = false;
     if (!current_) return;
     const auto selection = selectedWindow();
     const int oldRuleIndex = selected(saved_);

@@ -71,6 +71,8 @@ DesktopCountdownSettingsTab::DesktopCountdownSettingsTab(QWidget* parent) : ElaS
     layout->addStretch();
     refresh();
     connect(enable_, &ElaToggleSwitch::toggled, this, &DesktopCountdownSettingsTab::save);
+    connect(label_, &ElaLineEdit::textEdited, this, [this](const QString& value) { pendingLabel_ = value; });
+    connect(english_, &ElaLineEdit::textEdited, this, [this](const QString& value) { pendingEnglish_ = value; });
     connect(label_, &ElaLineEdit::editingFinished, this, &DesktopCountdownSettingsTab::save);
     connect(english_, &ElaLineEdit::editingFinished, this, &DesktopCountdownSettingsTab::save);
     connect(date_, &ElaCalendarPicker::selectedDateChanged, this, &DesktopCountdownSettingsTab::save);
@@ -111,8 +113,8 @@ void DesktopCountdownSettingsTab::refresh()
     const QSignalBlocker b1(enable_), b2(label_), b3(english_), b4(date_), b5(time_),
         b6(precision_), b7(right_), b8(bottom_), b9(scale_), b10(placement_);
     enable_->setIsToggled(config.enable);
-    label_->setText(config.labelTag);
-    english_->setText(config.englishTag);
+    label_->setText(pendingLabel_.value_or(config.labelTag));
+    english_->setText(pendingEnglish_.value_or(config.englishTag));
     const QDateTime target = config.targetDateTime.isValid() ? config.targetDateTime.toLocalTime()
         : QDateTime(QDate::currentDate().addDays(1), QTime(0, 0));
     date_->setSelectedDate(target.date());
@@ -148,6 +150,8 @@ void DesktopCountdownSettingsTab::save()
         AppUi::error(this, tr("桌面倒计时配置保存失败：%1").arg(error));
         return;
     }
+    pendingLabel_.reset();
+    pendingEnglish_.reset();
     right_->setEnabled(!config.useLegacyPlacement);
     bottom_->setEnabled(!config.useLegacyPlacement);
     emit configChanged();

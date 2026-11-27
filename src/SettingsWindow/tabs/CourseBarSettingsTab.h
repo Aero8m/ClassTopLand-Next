@@ -2,6 +2,7 @@
 #define CLASSTOPLAND_NEXT_COURSEBARSETTINGSTAB_H
 
 #include <ElaScrollPage.h>
+#include <QHash>
 #include <QPointer>
 #include "../../Core/Model/CourseBarConfig.h"
 
@@ -19,29 +20,31 @@ class CourseBarSettingsTab final : public ElaScrollPage
 public:
     explicit CourseBarSettingsTab(QWidget* parent = nullptr, CourseBarComponentRegistry* registry = nullptr);
     void setUiAccessSwitching(bool switching);
-    // Reload widgets after the configuration was replaced outside this page.
-    void reloadFromConfig();
     bool defaultsResetPending() const { return resetPending_; }
+    bool hasUnsavedInput() const { return !pendingTexts_.isEmpty(); }
+    bool hasPendingOperations() const { return uiAccessSwitching_ || preparingRemoval_; }
 signals:
     void configChanged();
     void uiAccessChangeRequested(bool enabled);
-protected:
-    void showEvent(QShowEvent* event) override;
 private:
     void refresh();
+    void refreshControls();
+    int componentIndex(const QString& id) const;
     void refreshTheme();
     void selectComponent(int index);
     void moveComponent(int from, int to);
     void showComponentSettings(int index);
-    bool save(const CourseBarConfig& candidate, int selection, bool refreshComponents = true, bool resetAll = false, bool prepared = false);
+    bool save(const CourseBarConfig& candidate, int selection, bool resetAll = false, bool prepared = false);
     void scheduleRefresh();
     CourseBarComponentRegistry* registry_ = nullptr;
     CourseBarConfig config_;
+    QHash<QString, QString> pendingTexts_;
     QPointer<ElaDialog> componentSettingsDialog_;
     int selected_ = -1;
     bool refreshPending_ = false;
     bool uiAccessSwitching_ = false;
     bool resetPending_ = false;
+    bool preparingRemoval_ = false;
     ElaToggleSwitch* enableSwitch_;
     ElaToggleSwitch* uiAccessSwitch_;
     ElaText* uiAccessStatus_;

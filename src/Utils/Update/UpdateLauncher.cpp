@@ -147,6 +147,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     DeleteFileW(installer.c_str());
     Handle marker(CreateFileW((stage + L"\\" + Completed).c_str(), GENERIC_WRITE, 0, nullptr,
                               CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr));
+    DWORD written = 0;
+    if (marker && WriteFile(marker.get(), &result, sizeof(result), &written, nullptr))
+        FlushFileBuffers(marker.get());
     marker.reset();
 
     if (result == 3010 || result == 8) {

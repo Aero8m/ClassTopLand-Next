@@ -16,7 +16,8 @@
 #include <QShortcut>
 #include <QShowEvent>
 
-ProfileEditWindow::ProfileEditWindow(QWidget* parent) : ElaWindow(parent)
+ProfileEditWindow::ProfileEditWindow(QWidget* parent)
+    : ElaWindow(parent), pages_(std::make_unique<AppUi::LazyPages>(this))
 {
     session_ = new ProfileEditSession(this);
     session_->reset(ProfileManager::instance().profile());
@@ -39,14 +40,18 @@ void ProfileEditWindow::initUI()
     setWindowButtonFlag(ElaAppBarType::ThemeChangeButtonHint, false);
     setIsDefaultClosed(false);
     connect(this, &ElaWindow::closeButtonClicked, this, [this] { close(); });
-    info_ = new ProfileInfoTab(session_, this);
-    subjects_ = new SubjectsTab(session_, this);
-    timeLines_ = new TimeLinesTab(session_, this);
-    schedules_ = new SchedulesTab(session_, this);
-    addPageNode(tr("基本信息"), info_, ElaIconType::FileLines);
-    addPageNode(tr("科目管理"), subjects_, ElaIconType::BookOpen);
-    addPageNode(tr("时间线管理"), timeLines_, ElaIconType::Clock);
-    addPageNode(tr("课表管理"), schedules_, ElaIconType::CalendarDays);
+    pages_->add(QStringLiteral("info"), tr("基本信息"), ElaIconType::FileLines, [this](QWidget* host) {
+        return new ProfileInfoTab(session_, host);
+    });
+    pages_->add(QStringLiteral("subjects"), tr("科目管理"), ElaIconType::BookOpen, [this](QWidget* host) {
+        return new SubjectsTab(session_, host);
+    });
+    pages_->add(QStringLiteral("timelines"), tr("时间线管理"), ElaIconType::Clock, [this](QWidget* host) {
+        return new TimeLinesTab(session_, host);
+    });
+    pages_->add(QStringLiteral("schedules"), tr("课表管理"), ElaIconType::CalendarDays, [this](QWidget* host) {
+        return new SchedulesTab(session_, host);
+    });
     auto* footer = new ElaStatusBar(this);
     footer->setSizeGripEnabled(false);
     footer->setFixedHeight(64);
@@ -80,19 +85,19 @@ bool ProfileEditWindow::saveProfile()
 {
     const auto failure = session_->validateForSave();
     if (failure) {
-        QWidget* target = info_;
         switch (failure.page) {
-        case ProfileEditSession::Page::Info: target = info_; break;
-        case ProfileEditSession::Page::Subjects: target = subjects_; break;
-        case ProfileEditSession::Page::TimeLines: target = timeLines_; break;
-        case ProfileEditSession::Page::Schedules: target = schedules_; break;
-        }
-        navigation(target->property("ElaPageKey").toString());
-        switch (failure.page) {
-        case ProfileEditSession::Page::Info: info_->focusName(); break;
-        case ProfileEditSession::Page::Subjects: subjects_->focusItem(failure.item); break;
-        case ProfileEditSession::Page::TimeLines: timeLines_->focusItem(failure.item, failure.row); break;
-        case ProfileEditSession::Page::Schedules: schedules_->focusItem(failure.item, failure.weekday, failure.row); break;
+        case ProfileEditSession::Page::Info:
+            static_cast<ProfileInfoTab*>(pages_->showPage(QStringLiteral("info")))->focusName();
+            break;
+        case ProfileEditSession::Page::Subjects:
+            static_cast<SubjectsTab*>(pages_->showPage(QStringLiteral("subjects")))->focusItem(failure.item);
+            break;
+        case ProfileEditSession::Page::TimeLines:
+            static_cast<TimeLinesTab*>(pages_->showPage(QStringLiteral("timelines")))->focusItem(failure.item, failure.row);
+            break;
+        case ProfileEditSession::Page::Schedules:
+            static_cast<SchedulesTab*>(pages_->showPage(QStringLiteral("schedules")))->focusItem(failure.item, failure.weekday, failure.row);
+            break;
         }
         AppUi::error(this, failure.message);
         return false;
@@ -126,10 +131,24 @@ bool ProfileEditWindow::prepareToClose()
     }
     return false;
 }
+QString ProfileEditWindow::currentPage() const
+{
+    return pages_->currentPage();
+}
+
+void ProfileEditWindow::restorePage(const QString& id)
+{
+    if (!id.isEmpty()) pages_->showPage(id);
+}
+
 void ProfileEditWindow::closeEvent(QCloseEvent* event)
 {
-    if (prepareToClose()) ElaWindow::closeEvent(event);
-    else event->ignore();
+    if (!prepareToClose()) {
+        event->ignore();
+        return;
+    }
+    ElaWindow::closeEvent(event);
+    if (event->isAccepted()) emit closed();
 }
 
 void ProfileEditWindow::showEvent(QShowEvent* event)

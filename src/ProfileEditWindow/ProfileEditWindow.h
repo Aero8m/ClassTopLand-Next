@@ -1,8 +1,10 @@
 #ifndef CLASSTOPLAND_NEXT_PROFILEEDITWINDOW_H
 #define CLASSTOPLAND_NEXT_PROFILEEDITWINDOW_H
 #include "ElaWindow.h"
+#include <memory>
 
 class ProfileEditSession;
+namespace AppUi { class LazyPages; }
 class ProfileInfoTab;
 class SubjectsTab;
 class TimeLinesTab;
@@ -21,7 +23,10 @@ public:
     bool prepareToClose();
     ProfileEditSession* session() const { return session_; }
     bool saveProfile();
+    QString currentPage() const;
+    void restorePage(const QString& id);
 signals:
+    void closed();
     void profileSaved();
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -29,11 +34,8 @@ protected:
 private:
     void initUI();
     void updateState();
+    std::unique_ptr<AppUi::LazyPages> pages_;
     ProfileEditSession* session_;
-    ProfileInfoTab* info_;
-    SubjectsTab* subjects_;
-    TimeLinesTab* timeLines_;
-    SchedulesTab* schedules_;
     ElaText* state_;
     ElaPushButton* save_;
     ElaPushButton* discard_;
