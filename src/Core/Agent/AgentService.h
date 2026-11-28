@@ -7,7 +7,11 @@
 #include "../Plugins/PluginPreview.h"
 #include <QHash>
 #include <QElapsedTimer>
+#include <atomic>
 #include <functional>
+#include <memory>
+
+class QThread;
 
 class AgentService final : public QObject
 {
@@ -25,6 +29,7 @@ public:
         QString plugin;
         QJsonArray plan;
         bool resumable = false;
+        bool titleCustomized = false;
     };
     struct Review
     {
@@ -43,6 +48,8 @@ public:
                           Permission permission = Permission::Ask);
     void renameSession(const QString &id, const QString &title);
     void deleteSession(const QString &id);
+    void deleteSessions(const QStringList &ids);
+    bool regenerateTitle(const QString &id, QString *error = nullptr);
     void setModel(const QString &session, const QString &provider, const QString &model);
     void setWorkspace(const QString &session, const QString &workspace);
     void setPermission(const QString &session, Permission permission);
@@ -95,6 +102,7 @@ signals:
     void storageError(const QString &message);
     void testFinished(const QString &error);
     void draftChanged();
+    void titleGenerated(const QString &session, const QString &error);
 
 private:
     Session *findSession(const QString &id);
@@ -117,8 +125,14 @@ private:
     QString recoverySummary() const;
     void recordPluginChange(const QString &plugin, const QString &version, const QString &message);
     void modelCompleted(const QJsonObject &message, const QString &error);
+    void requestTitle(const QString &id, const QString &firstPrompt, const QString &fallback,
+                      const AgentConnection &connection, const QString &key, bool manual = false);
+    void cancelTitleRequest(const QString &id = {});
+    void titleCompleted(const QJsonObject &reply, const QString &error);
     void nextTool();
     void runTool(const QString &name, const QJsonObject &args);
+    void startSearch(const QJsonObject &args, bool contents);
+    void cancelSearch();
     bool toolAllowed(const QString &name) const;
     void updateTool(const QString &state, const QString &detail = {}, const QString &output = {});
     void ask(const QString &title, const QString &detail, std::function<void(bool)> action, bool required = false);
@@ -130,7 +144,7 @@ private:
     QString directory_;
     QString migrationError_;
     PluginManager *plugins_;
-    AgentModel model_, tester_;
+    AgentModel model_, tester_, titleModel_;
     AgentPlatform::Command command_;
     AgentFiles files_;
     PluginPreview preview_;
@@ -171,5 +185,14 @@ private:
         bool needsTool = false;
     };
     std::unique_ptr<Test> test_;
+    struct TitleTask
+    {
+        QString sessionId;
+        QString fallback;
+        bool manual = false;
+    };
+    std::unique_ptr<TitleTask> titleTask_;
+    std::shared_ptr<std::atomic_bool> searchCancel_;
+    QThread *searchThread_ = nullptr;
 };
 

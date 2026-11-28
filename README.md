@@ -85,6 +85,13 @@ cmake --build build --parallel
 - [yaml-cpp](https://github.com/jbeder/yaml-cpp)：CSES YAML 解析与生成。
 - [curl](https://github.com/curl/curl): 自动更新使用的下载库
 
+## 贡献者
+- GPT 6.1 Sol
+- GPT 6.2 Sol
+- DeepSeek V4.1 Flash
+- DeepSeek V4.1 Flash 1017
+- Gemini 4 Hydrogen
+
 ## 许可证
 
 本项目采用 [GNU General Public License v2](./LICENSE) 开源。复制、修改或分发本项目时，请遵守许可证中的相应条款。

@@ -3,6 +3,7 @@
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/third_party/ElaWidgetTools-Plus" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/third_party/curl" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/third_party/yaml-cpp" vcs="Git" />
   </component>
 </project>

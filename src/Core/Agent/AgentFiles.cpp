@@ -3,6 +3,7 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QDirIterator>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QJsonDocument>
 #include <QRegularExpression>
@@ -66,7 +67,8 @@ QJsonObject AgentFiles::read(const QString &root, const QJsonObject &args, QStri
             {QStringLiteral("total_lines"), lines.size()}, {QStringLiteral("next_line"), end < lines.size() ? end+1 : 0},
             {QStringLiteral("truncated"), end < lines.size()}};
 }
-QJsonObject AgentFiles::search(const QString &root, const QJsonObject &args, bool contents, QString *error)
+QJsonObject AgentFiles::search(const QString &root, const QJsonObject &args, bool contents,
+                               QString *error, const std::atomic_bool *cancel)
 {
     const auto relative = args.value(QStringLiteral("path")).toString(QStringLiteral("."));
     const auto path = AgentPlatform::safePath(root, relative, false, error);
@@ -78,10 +80,24 @@ QJsonObject AgentFiles::search(const QString &root, const QJsonObject &args, boo
     const QRegularExpression matcher(QRegularExpression::wildcardToRegularExpression(glob), QRegularExpression::CaseInsensitiveOption);
     const int offset = args.value(QStringLiteral("offset")).toInt(0), limit = args.value(QStringLiteral("limit")).toInt(100);
     if (offset < 0 || offset > 100000 || limit < 1 || limit > 200) { fail(error, QStringLiteral("[INVALID_ARGUMENT] 无效的分页参数")); return {}; }
+    constexpr int maxScannedFiles = 50000;
+    constexpr qint64 maxScanMs = 5000;
+    QElapsedTimer timer;
+    timer.start();
+    int scanned = 0;
     QStringList paths;
     QDirIterator it(path, QDir::Files | QDir::NoSymLinks | QDir::Hidden, QDirIterator::Subdirectories);
     while (it.hasNext()) {
+        if (cancel && cancel->load(std::memory_order_relaxed)) {
+            fail(error, QStringLiteral("搜索已取消"));
+            return {};
+        }
         const auto file = it.next();
+        if (++scanned > maxScannedFiles || (scanned % 256 == 0 && timer.elapsed() > maxScanMs)) {
+            fail(error, QStringLiteral("搜索范围过大（已扫描超过 %1 个文件或超过 %2 秒），请缩小目录 path 或使用更具体的匹配条件")
+                            .arg(maxScannedFiles).arg(maxScanMs / 1000));
+            return {};
+        }
         const auto rel = root.isEmpty() ? file : QDir(root).relativeFilePath(file);
         if (rel.split(QLatin1Char('/')).contains(QStringLiteral(".git"))) continue;
         if (matcher.match(QFileInfo(file).fileName()).hasMatch() || matcher.match(rel).hasMatch()) paths.append(rel);
@@ -92,6 +108,14 @@ QJsonObject AgentFiles::search(const QString &root, const QJsonObject &args, boo
     int found = 0;
     bool more = false;
     for (const auto &file : paths) {
+        if (cancel && cancel->load(std::memory_order_relaxed)) {
+            fail(error, QStringLiteral("搜索已取消"));
+            return {};
+        }
+        if (contents && timer.elapsed() > 8000) {
+            more = true;
+            break;
+        }
         QString failure;
         if (AgentPlatform::safePath(root, file, false, &failure).isEmpty()) continue;
         if (!contents) {

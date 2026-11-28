@@ -13,6 +13,7 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QTemporaryDir>
+#include <QThread>
 #include <QUuid>
 #include <algorithm>
 #include <utility>
@@ -91,6 +92,35 @@ QString preview(const QString &text, qsizetype limit)
     auto head = text.left(limit);
     if (head.at(head.size() - 1).isHighSurrogate()) head.chop(1);
     return head + u"…"_s;
+}
+QString clampText(const QString &text, qsizetype limit)
+{
+    if (text.size() <= limit) return text;
+    auto head = text.left(limit);
+    if (!head.isEmpty() && head.at(head.size() - 1).isHighSurrogate()) head.chop(1);
+    return head;
+}
+QString sanitizeSessionTitle(const QString &raw)
+{
+    auto title = raw.simplified();
+    const QList<QPair<QChar, QChar>> wrappers{
+        {u'"', u'"'}, {u'\'', u'\''}, {u'`', u'`'},
+        {u'“', u'”'}, {u'‘', u'’'}, {u'「', u'」'},
+        {u'『', u'』'}, {u'《', u'》'}
+    };
+    bool stripped = true;
+    while (stripped && title.size() >= 2) {
+        stripped = false;
+        for (const auto &pair : wrappers) {
+            if (title.startsWith(pair.first) && title.endsWith(pair.second)) {
+                title = title.mid(1, title.size() - 2).simplified();
+                stripped = true;
+                break;
+            }
+        }
+    }
+    while (title.endsWith(u'。')) title.chop(1);
+    return clampText(title.simplified(), 48);
 }
 bool atomicWrite(const QString &path, const QByteArray &bytes, QString *error)
 {
@@ -224,6 +254,7 @@ AgentService::AgentService(const QString &dataDirectory, PluginManager *plugins,
             if (!sessions_.last().plugin.isEmpty() && !Plugins::validId(sessions_.last().plugin)) sessions_.last().plugin.clear();
             sessions_.last().plan = row.value(u"plan"_s).toArray();
             sessions_.last().resumable = row.value(u"resumable"_s).toBool() || row.value(u"running"_s).toBool();
+            sessions_.last().titleCustomized = row.value(u"titleCustomized"_s).toBool();
         }
     }
     if (backfilled) persistSessions();
@@ -290,9 +321,15 @@ AgentService::AgentService(const QString &dataDirectory, PluginManager *plugins,
                           !reply.value(u"tool_calls"_s).toArray().isEmpty()
                               ? u"模型没有返回文本"_s : QString());
     });
+    connect(&titleModel_, &AgentModel::completed, this, &AgentService::titleCompleted);
 }
 
-AgentService::~AgentService() { stop(); }
+AgentService::~AgentService()
+{
+    cancelTitleRequest();
+    cancelSearch();
+    stop();
+}
 
 const AgentService::Session *AgentService::session(const QString &id) const
 {
@@ -326,21 +363,62 @@ void AgentService::renameSession(const QString &id, const QString &title)
 {
     auto *item = findSession(id);
     if (!item || title.trimmed().isEmpty()) return;
-    item->title = title.trimmed().left(80);
+    item->title = clampText(title.trimmed(), 80);
+    item->titleCustomized = true;
+    cancelTitleRequest(id);
     persistSessions();
     emit sessionsChanged();
 }
 
 void AgentService::deleteSession(const QString &id)
 {
-    if (active_ == id) return;
-    sessions_.removeIf([&](const Session &item) { return item.id == id; });
-    contexts_.remove(id);
-    reasoning_.remove(id);
-    const auto continuation = QDir(directory_).filePath(u"continuations/"_s + id + u".json"_s);
-    if (QFileInfo::exists(continuation) && !QFile::remove(continuation)) emit storageError(u"无法删除任务恢复记录"_s);
+    deleteSessions({id});
+}
+
+void AgentService::deleteSessions(const QStringList &ids)
+{
+    QSet<QString> target;
+    for (const auto &id : ids)
+        if (!id.isEmpty() && id != active_) target.insert(id);
+    if (target.isEmpty()) return;
+    const bool removed = sessions_.removeIf([&](const Session &item) { return target.contains(item.id); }) > 0;
+    if (!removed) return;
+    if (titleTask_ && target.contains(titleTask_->sessionId)) cancelTitleRequest();
+    bool continuationError = false;
+    for (const auto &id : std::as_const(target)) {
+        contexts_.remove(id);
+        reasoning_.remove(id);
+        const auto continuation = QDir(directory_).filePath(u"continuations/"_s + id + u".json"_s);
+        if (QFileInfo::exists(continuation) && !QFile::remove(continuation)) continuationError = true;
+    }
+    if (continuationError) emit storageError(u"无法删除任务恢复记录"_s);
     persistSessions();
     emit sessionsChanged();
+}
+
+bool AgentService::regenerateTitle(const QString &id, QString *error)
+{
+    auto *item = findSession(id);
+    if (!item) return fail(error, u"会话不存在"_s);
+    if (busy()) return fail(error, u"请先结束当前任务"_s);
+    QString firstPrompt;
+    for (const auto &entry : std::as_const(item->events)) {
+        const auto obj = entry.toObject();
+        if (obj.value(kindKey).toString() == u"user"_s) {
+            firstPrompt = obj.value(textKey).toString();
+            if (!firstPrompt.trimmed().isEmpty()) break;
+        }
+    }
+    if (firstPrompt.trimmed().isEmpty()) return fail(error, u"该会话尚无消息，无法生成标题"_s);
+    const auto selected = resolveModel(item->connection, item->model);
+    if (selected.id.isEmpty()) return fail(error, u"请先为该会话选择有效模型"_s);
+    const auto key = storedKey(selected);
+    if (!validateConnection(selected, key, error)) return false;
+    item->titleCustomized = false;
+    const auto fallback = item->title.isEmpty() || item->title == u"新对话"_s
+        ? clampText(firstPrompt.simplified(), 48) : item->title;
+    requestTitle(id, firstPrompt, fallback, selected, key, true);
+    return true;
 }
 
 void AgentService::setModel(const QString &id, const QString &provider, const QString &model)
@@ -415,6 +493,7 @@ void AgentService::clearHistory()
     sessions_.clear();
     contexts_.clear();
     reasoning_.clear();
+    cancelTitleRequest();
     emit sessionsChanged();
 }
 
@@ -433,6 +512,7 @@ void AgentService::persistSessions()
                                 {u"reasoningEffort"_s, item.reasoningEffort},
                                 {u"workspaceChosen"_s, item.workspaceChosen},
                                 {u"plugin"_s, item.plugin}, {u"plan"_s, item.plan}, {u"resumable"_s, item.resumable},
+                                {u"titleCustomized"_s, item.titleCustomized},
                                 {u"running"_s, item.id == active_}, {u"events"_s, item.events}});
     const auto bytes = QJsonDocument(data).toJson(QJsonDocument::Compact);
     QString error;
@@ -694,12 +774,56 @@ bool AgentService::start(const QString &id, const QString &prompt, QString *erro
     for (const auto &completed : std::as_const(context.turns))
         for (const auto &entry : completed) history_.append(entry);
     turn_ = QJsonArray{message(u"user"_s, prompt)};
-    if (item->events.isEmpty()) item->title = prompt.simplified().left(48);
+    const bool shouldInferTitle = item->events.isEmpty() && !item->titleCustomized;
     emit busyChanged(true);
     appendEvent(u"user"_s, prompt);
     emit sessionsChanged();
+    if (shouldInferTitle)
+        requestTitle(id, prompt, clampText(prompt.simplified(), 48), connection_, key_);
     requestStep();
     return true;
+}
+
+void AgentService::requestTitle(const QString &id, const QString &firstPrompt, const QString &fallback,
+                                const AgentConnection &connection, const QString &key, bool manual)
+{
+    cancelTitleRequest();
+    titleTask_ = std::make_unique<TitleTask>(TitleTask{id, fallback, manual});
+    auto titleConnection = connection;
+    if (!titleConnection.reasoningEfforts().isEmpty())
+        titleConnection.reasoningEffort = u"none"_s;
+    const QJsonArray messages{
+        message(u"system"_s,
+                u"请根据用户的第一条消息生成一个简短、准确的对话标题（不超过 15 个字）。"
+                u"使用与用户相同的语言，只输出标题文本本身，不要包含引号、书名号、序号或任何解释。"_s),
+        message(u"user"_s, clampText(firstPrompt.trimmed(), 2000))
+    };
+    titleModel_.request(titleConnection, key, u"ses_title_"_s + uuid(), messages, {});
+}
+
+void AgentService::cancelTitleRequest(const QString &id)
+{
+    if (!titleTask_) return;
+    if (!id.isEmpty() && titleTask_->sessionId != id) return;
+    titleModel_.cancel();
+    titleTask_.reset();
+}
+
+void AgentService::titleCompleted(const QJsonObject &reply, const QString &error)
+{
+    if (!titleTask_) return;
+    const auto task = std::move(titleTask_);
+    auto *item = findSession(task->sessionId);
+    if (!item || item->titleCustomized) return;
+    QString candidate;
+    if (error.isEmpty()) candidate = sanitizeSessionTitle(reply.value(u"content"_s).toString());
+    if (candidate.isEmpty()) candidate = task->fallback;
+    if (!candidate.isEmpty() && item->title != candidate) {
+        item->title = candidate;
+        persistSessions();
+        emit sessionsChanged();
+    }
+    if (task->manual) emit titleGenerated(task->sessionId, error);
 }
 
 void AgentService::requestStep()
@@ -864,6 +988,46 @@ void AgentService::modelCompleted(const QJsonObject &reply, const QString &error
     }
     callIndex_ = 0;
     nextTool();
+}
+
+void AgentService::cancelSearch()
+{
+    if (searchCancel_) searchCancel_->store(true, std::memory_order_relaxed);
+    if (searchThread_) {
+        searchThread_->wait();
+        delete searchThread_;
+        searchThread_ = nullptr;
+    }
+    searchCancel_.reset();
+}
+
+void AgentService::startSearch(const QJsonObject &args, bool contents)
+{
+    cancelSearch();
+    auto cancel = std::make_shared<std::atomic_bool>(false);
+    searchCancel_ = cancel;
+    const auto generation = generation_;
+    const QPointer<AgentService> self(this);
+    searchThread_ = QThread::create([self, generation, args, contents, cancel] {
+        QString failure;
+        const auto result = AgentFiles::search({}, args, contents, &failure, cancel.get());
+        if (cancel->load(std::memory_order_relaxed)) return;
+        const auto output = failure.isEmpty()
+            ? QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact))
+            : QString();
+        if (self) {
+            QMetaObject::invokeMethod(self, [self, generation, output, failure] {
+                if (!self) return;
+                if (self->searchThread_ && self->searchThread_->isFinished()) {
+                    delete self->searchThread_;
+                    self->searchThread_ = nullptr;
+                }
+                if (!self->busy() || self->generation_ != generation) return;
+                self->sendResult(output, failure);
+            }, Qt::QueuedConnection);
+        }
+    });
+    searchThread_->start();
 }
 
 void AgentService::nextTool()
@@ -1051,6 +1215,7 @@ void AgentService::complete(const QString &status, bool success)
 void AgentService::stop()
 {
     ++generation_;
+    cancelSearch();
     plugins_->actions()->cancel(activeAction_);activeAction_.clear();
     preview_.stop();
     model_.cancel();

@@ -5,6 +5,7 @@
 #include "../Core/Plugins/PluginWorkspace.h"
 #include "../Ui/Plugins/PluginHistoryDialog.h"
 #include <QJsonDocument>
+#include <ElaCheckBox.h>
 #include <ElaLineEdit.h>
 #include <ElaMenu.h>
 #include <ElaPlainTextEdit.h>
@@ -19,10 +20,12 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
+#include <QCursor>
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QFrame>
 #include <QLabel>
+#include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QDir>
 #include <QInputMethodEvent>
@@ -30,10 +33,12 @@
 #include <QPainter>
 #include <QScopedValueRollback>
 #include <QScrollBar>
+#include <QSignalBlocker>
 #include <QStyleOptionToolButton>
 #include <QTextCursor>
 #include <QTextBlock>
 #include <QTextDocument>
+#include <QTreeView>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 #include <algorithm>
@@ -646,6 +651,14 @@ ElaToolButton *composerButton(QWidget *parent, bool access = false)
     return button;
 }
 
+template <typename Handler>
+QAction *addMenuAction(ElaMenu *menu, ElaIconType::IconName icon, const QString &text, QObject *context, Handler &&handler)
+{
+    auto *action = menu->addElaIconAction(icon, text);
+    QObject::connect(action, &QAction::triggered, context, std::forward<Handler>(handler));
+    return action;
+}
+
 ElaText *messageLabel(QWidget *parent, int size = 14)
 {
     auto *label = AppUi::text({}, parent, size);
@@ -959,7 +972,8 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
     setNavigationBarMaximumWidthRatio(0.28);
     setNavigationBarDisplayMode(ElaNavigationType::Maximal);
     setIsAllowPageOpenInNewWindow(false);
-    setStackSwitchMode(ElaWindowType::None);
+    setIsCentralStackedWidgetTransparent(true);
+    setStackSwitchMode(ElaWindowType::Popup);
     for (const auto flag : {ElaAppBarType::StayTopButtonHint, ElaAppBarType::RouteBackButtonHint,
                             ElaAppBarType::RouteForwardButtonHint, ElaAppBarType::ThemeChangeButtonHint})
         setWindowButtonFlag(flag, false);
@@ -968,27 +982,35 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
     connect(this, &ElaWindow::closeButtonClicked, this, [this] { close(); });
 
     newPage_ = new QWidget(this);
+    newPage_->installEventFilter(this);
     auto *pageLayout = new QVBoxLayout(newPage_);
     pageLayout->setContentsMargins(0, 0, 0, 0);
     addPageNode(u"新对话"_s, newPage_, ElaIconType::Message);
     addFooterNode(u"设置"_s, settingsKey_, 0, ElaIconType::Gear);
+    setupSidebarManagement();
 
     chat_ = new QWidget(newPage_);
     chat_->setObjectName(u"agentChat"_s);
-    const auto applyChatTheme = [this] {
-        chat_->setStyleSheet(u"#agentChat { background: %1; border-radius: 12px; }"_s.arg(
-            chatBackground(eTheme->getThemeMode()).name()));
-    };
-    connect(eTheme, &ElaTheme::themeModeChanged, this, applyChatTheme);
-    applyChatTheme();
+    chat_->setStyleSheet(u"#agentChat { background: transparent; }"_s);
+    navCentral_ = findChild<QWidget *>(u"ElaWindowNavigationCentralWidget"_s);
+    if (navCentral_) {
+        navStack_ = navCentral_->findChild<QWidget *>(u"ElaCentralStackedWidget"_s, Qt::FindDirectChildrenOnly);
+        navCentral_->installEventFilter(this);
+        connect(eTheme, &ElaTheme::themeModeChanged, this, [this] { navCentral_->update(); });
+    }
     auto *layout = new QVBoxLayout(chat_);
     layout->setContentsMargins(16, 6, 16, 14);
     layout->setSpacing(8);
     auto *header = new QHBoxLayout;
     title_ = AppUi::text({}, chat_, 17);
-    title_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    title_->setMinimumHeight(controlHeight);
+    title_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    title_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     header->addWidget(title_, 1);
     more_ = iconButton(ElaIconType::Ellipsis, u"会话管理"_s, chat_);
+    auto morePolicy = more_->sizePolicy();
+    morePolicy.setRetainSizeWhenHidden(true);
+    more_->setSizePolicy(morePolicy);
     header->addWidget(more_);
     layout->addLayout(header);
 
@@ -1089,12 +1111,6 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
             emit settingsRequested({});
             return;
         }
-        if (key == pageKey(newPage_)) {
-            select({});
-            return;
-        }
-        for (auto it = nodes_.cbegin(); it != nodes_.cend(); ++it)
-            if (key == pageKey(it->page)) { select(it.key()); return; }
     });
     connect(model_, &ElaToolButton::clicked, this, &AgentWindow::modelMenu);
     connect(permission_, &ElaToolButton::clicked, this, &AgentWindow::permissionMenu);
@@ -1129,6 +1145,9 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
         refreshControls();
     });
     connect(service_, &AgentService::sessionsChanged, this, &AgentWindow::syncNavigation);
+    connect(service_, &AgentService::titleGenerated, this, [this](const QString &id, const QString &error) {
+        if (!error.isEmpty() && id == session_) notify(error);
+    });
     connect(service_, &AgentService::storageError, this, &AgentWindow::notify);
     connect(service_, &AgentService::eventAdded, this, [this](const QString &id, const QJsonObject &event) {
         if (id == session_) addEvent(event);
@@ -1159,6 +1178,7 @@ AgentWindow::AgentWindow(AgentService *service, QWidget *parent)
         refreshApproval();
         refreshResume();
         refreshControls();
+        updateNavMultiSelectState();
     });
     syncNavigation();
     render();
@@ -1176,10 +1196,14 @@ void AgentWindow::syncNavigation()
     }
     if (remove.contains(current)) {
         newPage_->layout()->addWidget(chat_);
+        chat_->show();
+        setStackSwitchMode(ElaWindowType::None);
         navigation(pageKey(newPage_));
+        setStackSwitchMode(ElaWindowType::Popup);
     }
     for (const auto &id : remove) {
         const auto node = nodes_.take(id);
+        sessionOrder_[node.workspace].removeAll(id);
         removeNavigationNode(pageKey(node.page));
         node.page->deleteLater();
     }
@@ -1193,30 +1217,41 @@ void AgentWindow::syncNavigation()
             QString key;
             addExpanderNode(workspaceName(item.workspace), key, ElaIconType::Folder);
             groups_.insert(item.workspace, key);
+            expanderOrder_.append(item.workspace);
         }
         auto *page = new QWidget(this);
+        page->installEventFilter(this);
         auto *layout = new QVBoxLayout(page);
         layout->setContentsMargins(0, 0, 0, 0);
         addPageNode(item.title, page, groups_.value(item.workspace), ElaIconType::Message);
 
         nodes_.insert(item.id, {page, item.workspace});
+        sessionOrder_[item.workspace].append(item.id);
         if (!getNavigationNodeIsExpanded(groups_.value(item.workspace)))
             expandNavigationNode(groups_.value(item.workspace));
     }
     for (const auto &workspace : groups_.keys()) {
         bool used = false;
         for (const auto &node : std::as_const(nodes_)) used |= node.workspace == workspace;
-        if (!used) removeNavigationNode(groups_.take(workspace));
+        if (!used) {
+            expanderOrder_.removeAll(workspace);
+            sessionOrder_.remove(workspace);
+            removeNavigationNode(groups_.take(workspace));
+        }
     }
     if (remove.contains(current)) {
         if (nodes_.contains(current)) {
             nodes_.value(current).page->layout()->addWidget(chat_);
+            chat_->show();
+            setStackSwitchMode(ElaWindowType::None);
             navigation(pageKey(nodes_.value(current).page));
+            setStackSwitchMode(ElaWindowType::Popup);
         } else {
             select({});
             unsent_.remove(current);
         }
     }
+    updateNavMultiSelectState();
     refreshControls();
 }
 
@@ -1227,12 +1262,19 @@ void AgentWindow::select(const QString &id)
     session_ = id;
     auto *page = nodes_.contains(id) ? nodes_.value(id).page : newPage_;
     page->layout()->addWidget(chat_);
+    chat_->show();
     input_->setPlainText(unsent_.value(id));
     imeComposing_ = false;
     render();
     refreshControls();
-    if (approvalTool_.isEmpty()) input_->setFocus();
-    else approvalCard_->focusDetails();
+    if (page->isVisible()) {
+        if (auto *content = scroll_->widget(); content && content->layout())
+            content->layout()->activate();
+        if (chat_->layout()) chat_->layout()->activate();
+        page->layout()->activate();
+        if (approvalTool_.isEmpty()) input_->setFocus();
+        else approvalCard_->focusDetails();
+    }
 }
 
 void AgentWindow::refreshControls()
@@ -1810,32 +1852,357 @@ void AgentWindow::permissionMenu()
 
 void AgentWindow::sessionMenu()
 {
-    const auto id = session_;
-    auto *menu = new ElaMenu(more_);
+    showSessionContextMenu(session_, more_->mapToGlobal(QPoint(0, more_->height())));
+}
+
+void AgentWindow::openSession(const QString &id)
+{
+    if (!nodes_.contains(id)) return;
+    navigation(pageKey(nodes_.value(id).page));
+    if (!isVisible()) select(id);
+}
+
+void AgentWindow::promptRenameSession(const QString &id)
+{
+    const auto *item = service_->session(id);
+    if (!item || (service_->busy() && service_->activeSession() == id)) return;
+    auto *dialog = new AppUi::FormDialog(this, u"重命名会话"_s);
+    auto *name = dialog->line(u"会话名称"_s, item->title);
+    dialog->submit = [this, id, name] {
+        if (name->text().trimmed().isEmpty()) return u"请输入名称"_s;
+        service_->renameSession(id, name->text());
+        return QString();
+    };
+    AppUi::run(dialog);
+}
+
+void AgentWindow::promptDeleteSessions(const QStringList &ids)
+{
+    QStringList deletable;
+    const auto activeId = service_->busy() ? service_->activeSession() : QString();
+    for (const auto &id : ids)
+        if (!id.isEmpty() && id != activeId && service_->session(id)) deletable.append(id);
+    if (deletable.isEmpty()) {
+        notify(u"正在运行的会话无法删除"_s);
+        return;
+    }
+    const auto message = deletable.size() == 1
+        ? u"删除所选会话的本地历史？"_s
+        : u"删除所选 %1 个会话的本地历史？"_s.arg(deletable.size());
+    if (AppUi::confirm(this, u"删除会话"_s, message)) {
+        for (const auto &id : deletable) checkedSessions_.remove(id);
+        service_->deleteSessions(deletable);
+        if (sidebarMultiSelect_ && checkedSessions_.isEmpty()) setSidebarMultiSelect(false);
+    }
+}
+
+void AgentWindow::showSessionContextMenu(const QString &id, const QPoint &globalPos)
+{
+    const auto *item = service_->session(id);
+    if (!item) return;
+    const bool busy = service_->busy();
+    const bool isActive = busy && service_->activeSession() == id;
+    bool hasUserMessage = false;
+    for (const auto &entry : std::as_const(item->events)) {
+        const auto obj = entry.toObject();
+        if (obj.value(u"kind"_s).toString() == u"user"_s && !obj.value(u"text"_s).toString().trimmed().isEmpty()) {
+            hasUserMessage = true;
+            break;
+        }
+    }
+    auto *menu = new ElaMenu(this);
     menu->setAttribute(Qt::WA_DeleteOnClose);
-    auto *resume = menu->addAction(u"继续执行"_s, this, [this, id] {
+    if (id != session_)
+        addMenuAction(menu, ElaIconType::Message, u"打开会话"_s, this, [this, id] { openSession(id); });
+    auto *resume = addMenuAction(menu, ElaIconType::Play, u"继续执行"_s, this, [this, id] {
         QString error;
         if (!service_->continueSession(id, &error)) notify(error);
     });
-    const auto *item = service_->session(id);
-    resume->setEnabled(!service_->busy() && item && item->resumable);
-    menu->addAction(u"重命名"_s, this, [this, id] {
-        const auto *item = service_->session(id);
-        if (!item) return;
-        auto *dialog = new AppUi::FormDialog(this, u"重命名会话"_s);
-        auto *name = dialog->line(u"会话名称"_s, item->title);
-        dialog->submit = [this, id, name] {
-            if (name->text().trimmed().isEmpty()) return u"请输入名称"_s;
-            service_->renameSession(id, name->text());
-            return QString();
+    resume->setEnabled(!busy && item->resumable);
+    auto *rename = addMenuAction(menu, ElaIconType::Pen, u"重命名"_s, this, [this, id] { promptRenameSession(id); });
+    rename->setEnabled(!isActive);
+    auto *autoTitle = addMenuAction(menu, ElaIconType::Sparkles, u"AI 生成标题"_s, this, [this, id] {
+        QString error;
+        if (!service_->regenerateTitle(id, &error)) notify(error);
+    });
+    autoTitle->setEnabled(!busy && hasUserMessage);
+    addMenuAction(menu, ElaIconType::ListCheck, sidebarMultiSelect_ ? u"退出多选"_s : u"多选管理"_s, this,
+                  [this, id, isActive] {
+        if (sidebarMultiSelect_) {
+            setSidebarMultiSelect(false);
+            return;
+        }
+        if (!isActive) checkedSessions_.insert(id);
+        setSidebarMultiSelect(true);
+    });
+    menu->addSeparator();
+    auto *del = addMenuAction(menu, ElaIconType::Trash, u"删除会话"_s, this, [this, id] { promptDeleteSessions({id}); });
+    del->setEnabled(!isActive);
+    menu->popup(globalPos);
+}
+
+void AgentWindow::showWorkspaceContextMenu(const QString &workspace, const QPoint &globalPos)
+{
+    auto *menu = new ElaMenu(this);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    addMenuAction(menu, ElaIconType::Plus, u"在此工作区新建对话"_s, this, [this, workspace] {
+        pendingWorkspace_ = workspace;
+        navigation(pageKey(newPage_));
+        select({});
+        refreshControls();
+    });
+    const auto groupKey = groups_.value(workspace);
+    if (!groupKey.isEmpty()) {
+        const bool expanded = getNavigationNodeIsExpanded(groupKey);
+        addMenuAction(menu, expanded ? ElaIconType::AngleUp : ElaIconType::AngleDown,
+                      expanded ? u"收起分组"_s : u"展开分组"_s, this, [this, groupKey, expanded] {
+            if (expanded) collapseNavigationNode(groupKey);
+            else expandNavigationNode(groupKey);
+        });
+    }
+    QStringList idleIds;
+    const auto activeId = service_->busy() ? service_->activeSession() : QString();
+    for (const auto &item : service_->sessions())
+        if (item.workspace == workspace && item.id != activeId) idleIds.append(item.id);
+    auto *selectGroup = addMenuAction(menu, ElaIconType::ListCheck, u"多选此工作区会话"_s, this, [this, idleIds] {
+        for (const auto &id : idleIds) checkedSessions_.insert(id);
+        setSidebarMultiSelect(true);
+    });
+    selectGroup->setEnabled(!idleIds.isEmpty());
+    menu->addSeparator();
+    auto *clearGroup = addMenuAction(menu, ElaIconType::Trash, u"清空此工作区闲置会话"_s, this,
+                                     [this, idleIds] { promptDeleteSessions(idleIds); });
+    clearGroup->setEnabled(!idleIds.isEmpty());
+    menu->popup(globalPos);
+}
+
+AgentWindow::NavTarget AgentWindow::navTargetForIndex(const QModelIndex &index) const
+{
+    if (!index.isValid()) return {};
+    const auto parent = index.parent();
+    if (!parent.isValid()) {
+        if (index.row() == 0) return {NavTarget::Kind::NewChat, {}};
+        const int expIdx = index.row() - 1;
+        if (expIdx >= 0 && expIdx < expanderOrder_.size())
+            return {NavTarget::Kind::Workspace, expanderOrder_.at(expIdx)};
+        return {};
+    }
+    if (!parent.parent().isValid()) {
+        const int expIdx = parent.row() - 1;
+        if (expIdx >= 0 && expIdx < expanderOrder_.size()) {
+            const auto &list = sessionOrder_.value(expanderOrder_.at(expIdx));
+            if (index.row() >= 0 && index.row() < list.size()) {
+                const auto &id = list.at(index.row());
+                if (nodes_.contains(id)) return {NavTarget::Kind::Session, id};
+            }
+        }
+    }
+    return {};
+}
+
+void AgentWindow::updateNavHoverAction(const QPoint &viewportPos)
+{
+    if (!navView_ || !navActionButton_) return;
+    if (sidebarMultiSelect_ || navView_->viewport()->width() < 100) {
+        hoveredSession_.clear();
+        navActionButton_->hide();
+        return;
+    }
+    const auto index = navView_->indexAt(viewportPos);
+    const auto target = navTargetForIndex(index);
+    if (target.kind != NavTarget::Kind::Session || !service_->session(target.value)) {
+        hoveredSession_.clear();
+        navActionButton_->hide();
+        return;
+    }
+    const auto rect = navView_->visualRect(index);
+    if (!rect.isValid()) {
+        hoveredSession_.clear();
+        navActionButton_->hide();
+        return;
+    }
+    hoveredSession_ = target.value;
+    navActionButton_->setFixedSize(24, 24);
+    navActionButton_->move(qMax(4, rect.right() - 28), rect.center().y() - 12);
+    navActionButton_->show();
+    navActionButton_->raise();
+}
+
+void AgentWindow::setupSidebarManagement()
+{
+    navView_ = findChild<QTreeView *>(u"ElaNavigationView"_s);
+    if (!navView_) return;
+    navView_->installEventFilter(this);
+    navView_->viewport()->installEventFilter(this);
+    navActionButton_ = iconButton(ElaIconType::Ellipsis, u"会话操作"_s, navView_->viewport());
+    navActionButton_->setObjectName(u"agentNavSessionAction"_s);
+    navActionButton_->setFixedSize(24, 24);
+    navActionButton_->setBorderRadius(6);
+    navActionButton_->setIsTransparent(true);
+    navActionButton_->hide();
+    navActionButton_->installEventFilter(this);
+
+    if (auto *navBar = navView_->parentWidget(); navBar && navBar->layout()) {
+        navMultiBar_ = new QWidget(navBar);
+        navMultiBar_->setObjectName(u"agentNavMultiBar"_s);
+        auto *barLayout = new QVBoxLayout(navMultiBar_);
+        barLayout->setContentsMargins(10, 4, 10, 4);
+        barLayout->setSpacing(4);
+        navMultiCount_ = AppUi::text(u"已选 0 项"_s, navMultiBar_, 12);
+        barLayout->addWidget(navMultiCount_);
+        auto *buttons = new QHBoxLayout;
+        buttons->setContentsMargins(0, 0, 0, 0);
+        buttons->setSpacing(4);
+        const auto makeBarButton = [this](const QString &label) {
+            auto *btn = composerButton(navMultiBar_);
+            btn->setText(label);
+            btn->setFixedHeight(28);
+            btn->setBorderRadius(8);
+            return btn;
         };
-        AppUi::run(dialog);
+        navMultiSelectAll_ = makeBarButton(u"全选"_s);
+        navMultiDelete_ = makeBarButton(u"删除"_s);
+        navMultiDone_ = makeBarButton(u"完成"_s);
+        buttons->addWidget(navMultiSelectAll_);
+        buttons->addWidget(navMultiDelete_);
+        buttons->addStretch();
+        buttons->addWidget(navMultiDone_);
+        barLayout->addLayout(buttons);
+        navMultiBar_->hide();
+        if (auto *box = qobject_cast<QVBoxLayout *>(navBar->layout()))
+            box->insertWidget(qMax(0, box->count() - 1), navMultiBar_);
+        else
+            navBar->layout()->addWidget(navMultiBar_);
+
+        connect(navMultiSelectAll_, &ElaToolButton::clicked, this, [this] {
+            const auto activeId = service_->busy() ? service_->activeSession() : QString();
+            QStringList idleIds;
+            for (const auto &item : service_->sessions())
+                if (item.id != activeId) idleIds.append(item.id);
+            const bool allChecked = !idleIds.isEmpty() && std::all_of(idleIds.cbegin(), idleIds.cend(),
+                [this](const QString &id) { return checkedSessions_.contains(id); });
+            if (allChecked) checkedSessions_.clear();
+            else for (const auto &id : idleIds) checkedSessions_.insert(id);
+            updateNavMultiSelectState();
+        });
+        connect(navMultiDelete_, &ElaToolButton::clicked, this, [this] {
+            promptDeleteSessions(checkedSessions_.values());
+        });
+        connect(navMultiDone_, &ElaToolButton::clicked, this, [this] {
+            setSidebarMultiSelect(false);
+        });
+    }
+
+    connect(navActionButton_, &ElaToolButton::clicked, this, [this] {
+        if (hoveredSession_.isEmpty()) return;
+        showSessionContextMenu(hoveredSession_, navActionButton_->mapToGlobal(QPoint(0, navActionButton_->height())));
     });
-    menu->addAction(u"删除会话"_s, this, [this, id] {
-        if (AppUi::confirm(this, u"删除会话"_s, u"删除所选会话的本地历史？"_s))
-            service_->deleteSession(id);
+    connect(navView_, &QTreeView::customContextMenuRequested, this, [this](const QPoint &pos) {
+        const auto target = navTargetForIndex(navView_->indexAt(pos));
+        if (target.kind == NavTarget::Kind::Session)
+            showSessionContextMenu(target.value, navView_->mapToGlobal(pos));
+        else if (target.kind == NavTarget::Kind::Workspace)
+            showWorkspaceContextMenu(target.value, navView_->mapToGlobal(pos));
     });
-    menu->popup(more_->mapToGlobal(QPoint(0, more_->height())));
+    const auto syncOverlays = [this] {
+        if (sidebarMultiSelect_) {
+            updateNavOverlays();
+            QTimer::singleShot(220, this, [this] { if (sidebarMultiSelect_) updateNavOverlays(); });
+        } else {
+            hoveredSession_.clear();
+            if (navActionButton_) navActionButton_->hide();
+        }
+    };
+    connect(navView_->verticalScrollBar(), &QScrollBar::valueChanged, this, [this] {
+        if (sidebarMultiSelect_) updateNavOverlays();
+        else { hoveredSession_.clear(); if (navActionButton_) navActionButton_->hide(); }
+    });
+    connect(navView_, &QTreeView::expanded, this, syncOverlays);
+    connect(navView_, &QTreeView::collapsed, this, syncOverlays);
+}
+
+void AgentWindow::setSidebarMultiSelect(bool enabled)
+{
+    sidebarMultiSelect_ = enabled;
+    if (!enabled) checkedSessions_.clear();
+    updateNavMultiSelectState();
+}
+
+void AgentWindow::updateNavMultiSelectState()
+{
+    const auto activeId = service_->busy() ? service_->activeSession() : QString();
+    QSet<QString> validIdle;
+    for (const auto &item : service_->sessions())
+        if (item.id != activeId) validIdle.insert(item.id);
+    checkedSessions_.intersect(validIdle);
+
+    const bool wide = navView_ && navView_->viewport()->width() >= 100;
+    if (navMultiBar_) {
+        navMultiBar_->setVisible(sidebarMultiSelect_ && wide);
+        navMultiCount_->setText(u"已选 %1 项"_s.arg(checkedSessions_.size()));
+        const bool allChecked = !validIdle.isEmpty() && checkedSessions_.size() == validIdle.size();
+        navMultiSelectAll_->setText(allChecked ? u"全不选"_s : u"全选"_s);
+        navMultiSelectAll_->setEnabled(!validIdle.isEmpty());
+        navMultiDelete_->setEnabled(!checkedSessions_.isEmpty());
+    }
+    updateNavOverlays();
+}
+
+void AgentWindow::updateNavOverlays()
+{
+    if (!navView_) return;
+    if (!sidebarMultiSelect_ || navView_->viewport()->width() < 100) {
+        for (auto *box : std::as_const(navCheckBoxes_)) box->hide();
+        updateNavHoverAction(navView_->viewport()->mapFromGlobal(QCursor::pos()));
+        return;
+    }
+    hoveredSession_.clear();
+    if (navActionButton_) navActionButton_->hide();
+
+    auto *model = navView_->model();
+    if (!model) return;
+    const auto activeId = service_->busy() ? service_->activeSession() : QString();
+    const QRect viewportRect = navView_->viewport()->rect();
+    int poolIndex = 0;
+
+    for (int expRow = 0; expRow < expanderOrder_.size(); ++expRow) {
+        const auto parentIdx = model->index(expRow + 1, 0);
+        if (!parentIdx.isValid() || !navView_->isExpanded(parentIdx)) continue;
+        const auto &sessions = sessionOrder_.value(expanderOrder_.at(expRow));
+        for (int childRow = 0; childRow < sessions.size(); ++childRow) {
+            const auto idx = model->index(childRow, 0, parentIdx);
+            const auto rect = navView_->visualRect(idx);
+            if (!rect.isValid() || !rect.intersects(viewportRect)) continue;
+            const auto &id = sessions.at(childRow);
+            if (!nodes_.contains(id)) continue;
+
+            if (poolIndex >= navCheckBoxes_.size()) {
+                auto *box = new ElaCheckBox(navView_->viewport());
+                box->setFixedSize(22, 22);
+                connect(box, &ElaCheckBox::toggled, this, [this, box](bool checked) {
+                    const auto sessionId = box->property("sessionId").toString();
+                    if (sessionId.isEmpty()) return;
+                    if (checked) checkedSessions_.insert(sessionId);
+                    else checkedSessions_.remove(sessionId);
+                    updateNavMultiSelectState();
+                });
+                navCheckBoxes_.append(box);
+            }
+            auto *box = navCheckBoxes_.at(poolIndex++);
+            box->setProperty("sessionId", id);
+            {
+                const QSignalBlocker block(box);
+                box->setChecked(checkedSessions_.contains(id));
+            }
+            box->setEnabled(id != activeId);
+            box->setToolTip(id == activeId ? u"运行中的会话不可多选删除"_s : QString());
+            box->move(qMax(4, rect.right() - 28), rect.center().y() - 11);
+            box->show();
+            box->raise();
+        }
+    }
+    for (int i = poolIndex; i < navCheckBoxes_.size(); ++i)
+        navCheckBoxes_.at(i)->hide();
 }
 
 void AgentWindow::contextMenu()
@@ -1860,6 +2227,82 @@ void AgentWindow::contextMenu()
 
 bool AgentWindow::eventFilter(QObject *object, QEvent *event)
 {
+    if (navCentral_ && object == navCentral_ && event->type() == QEvent::Paint && navStack_) {
+        QPainter painter(navCentral_);
+        painter.setRenderHint(QPainter::Antialiasing);
+        const auto mode = eTheme->getThemeMode();
+        const QRect targetRect = navStack_->geometry().adjusted(1, 1, 10, 10);
+        painter.setPen(QPen(ElaThemeColor(mode, BasicBaseLine), 1.5));
+        painter.setBrush(chatBackground(mode));
+        painter.drawRoundedRect(targetRect, 10, 10);
+        return true;
+    }
+    if (event->type() == QEvent::Show && !object->property("ElaPageTransitionRestore").toBool()) {
+        if (object == newPage_) {
+            select({});
+        } else {
+            for (auto it = nodes_.cbegin(); it != nodes_.cend(); ++it) {
+                if (it->page == object) {
+                    select(it.key());
+                    break;
+                }
+            }
+        }
+    }
+    if (navView_) {
+        if (object == navView_->viewport()) {
+            if (sidebarMultiSelect_ &&
+                (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonDblClick ||
+                 event->type() == QEvent::MouseButtonRelease)) {
+                const auto *mouse = static_cast<QMouseEvent *>(event);
+                if (mouse->button() == Qt::LeftButton) {
+                    const auto target = navTargetForIndex(navView_->indexAt(mouse->pos()));
+                    if (target.kind == NavTarget::Kind::Session) {
+                        if (event->type() == QEvent::MouseButtonRelease) {
+                            const auto activeId = service_->busy() ? service_->activeSession() : QString();
+                            if (target.value != activeId) {
+                                if (checkedSessions_.contains(target.value)) checkedSessions_.remove(target.value);
+                                else checkedSessions_.insert(target.value);
+                                updateNavMultiSelectState();
+                            }
+                        }
+                        return true;
+                    }
+                }
+            }
+            if (event->type() == QEvent::MouseMove || event->type() == QEvent::HoverMove)
+                updateNavHoverAction(navView_->viewport()->mapFromGlobal(QCursor::pos()));
+            else if (event->type() == QEvent::Resize)
+                updateNavMultiSelectState();
+            else if (event->type() == QEvent::Leave && navActionButton_ &&
+                     !navActionButton_->rect().contains(navActionButton_->mapFromGlobal(QCursor::pos()))) {
+                hoveredSession_.clear();
+                navActionButton_->hide();
+            }
+        } else if (object == navActionButton_ && event->type() == QEvent::Leave) {
+            const auto pos = navView_->viewport()->mapFromGlobal(QCursor::pos());
+            if (!navView_->viewport()->rect().contains(pos)) {
+                hoveredSession_.clear();
+                navActionButton_->hide();
+            } else {
+                updateNavHoverAction(pos);
+            }
+        } else if (object == navView_ && event->type() == QEvent::KeyPress) {
+            const auto *key = static_cast<QKeyEvent *>(event);
+            if (sidebarMultiSelect_ && key->key() == Qt::Key_Escape) {
+                setSidebarMultiSelect(false);
+                return true;
+            }
+            const auto target = navTargetForIndex(navView_->currentIndex());
+            if (target.kind == NavTarget::Kind::Session) {
+                if (!sidebarMultiSelect_ && key->key() == Qt::Key_F2) { promptRenameSession(target.value); return true; }
+                if (key->key() == Qt::Key_Delete) {
+                    promptDeleteSessions(sidebarMultiSelect_ ? checkedSessions_.values() : QStringList{target.value});
+                    return true;
+                }
+            }
+        }
+    }
     if (scroll_ && latest_ && object == scroll_->viewport() && event->type() == QEvent::Resize) positionLatest();
     if (object == input_ && event->type() == QEvent::InputMethod)
         imeComposing_ = !static_cast<QInputMethodEvent *>(event)->preeditString().isEmpty();
@@ -1886,7 +2329,9 @@ void AgentWindow::send()
     if (session_.isEmpty()) {
         const auto id = service_->createSession(pendingModel_.id, pendingModel_.model, pendingWorkspace_, pendingPermission_);
         service_->setReasoningEffort(id, pendingEffort_);
+        setStackSwitchMode(ElaWindowType::None);
         navigation(pageKey(nodes_.value(id).page));
+        setStackSwitchMode(ElaWindowType::Popup);
         select(id);
         input_->setPlainText(prompt);
         unsent_.remove(QString());

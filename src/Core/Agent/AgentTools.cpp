@@ -371,10 +371,15 @@ void AgentService::runTool(const QString &name, const QJsonObject &args)
             if (!allow) { sendResult({}, u"[DENIED] 用户拒绝读取；不得改用 shell 绕过"_s); return; }
             QString failure, output;
             updateTool(u"正在执行"_s, target);
-            if (name == u"list_directory"_s) output = AgentPlatform::listDirectory({}, target, &failure);
-            else if (name == u"read_file"_s) output = json(files_.read({}, resolved, &failure));
-            else output = json(files_.search({}, resolved, name == u"search_files"_s, &failure));
-            sendResult(output, failure);
+            if (name == u"list_directory"_s) {
+                output = AgentPlatform::listDirectory({}, target, &failure);
+                sendResult(output, failure);
+            } else if (name == u"read_file"_s) {
+                output = json(files_.read({}, resolved, &failure));
+                sendResult(output, failure);
+            } else {
+                startSearch(resolved, name == u"search_files"_s);
+            }
         }); return;
     }
     if (name == u"write_file"_s || name == u"edit_file"_s || name == u"delete_file"_s || name == u"rename_file"_s || name == u"apply_patch"_s) {

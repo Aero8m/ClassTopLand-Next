@@ -4,12 +4,14 @@
 #include "../../Core/Agent/AgentService.h"
 #include <ElaScrollPage.h>
 
+class ElaCheckBox;
 class ElaComboBox;
 class ElaLineEdit;
 class ElaListView;
 class ElaPivot;
 class ElaPlainTextEdit;
 class ElaPushButton;
+class ElaTableView;
 class ElaText;
 class QStackedWidget;
 class QStandardItemModel;
@@ -31,6 +33,7 @@ protected:
 private:
     QWidget *makeProviders();
     QWidget *makeWorkspaces();
+    QWidget *makeSessions();
     QWidget *makeDrafts();
     void reloadProviders(const QString &selected = {});
     void selectProvider(const AgentProvider &provider);
@@ -40,6 +43,10 @@ private:
     void editModel(bool existing);
     void showCandidates(const QList<AgentModelEntry> &models, bool catalogOnly, const QString &message);
     void reloadWorkspaces();
+    void reloadSessions();
+    void updateSessionActions();
+    QStringList targetSessionIds() const;
+    void switchPage(int index);
     void reloadDrafts(const QString &selected = {});
     void showDraft();
     void showStatus(ElaText *label, const QString &message);
@@ -57,6 +64,16 @@ private:
     ElaText *providerStatus_, *workspaceStatus_, *draftStatus_;
     ElaPushButton *save_, *removeProvider_, *fetch_, *test_, *testTool_, *publish_;
     ElaPlainTextEdit *manifestDiff_, *scriptDiff_, *permissionDiff_;
+    ElaLineEdit *sessionsSearch_ = nullptr;
+    ElaComboBox *sessionsWorkspace_ = nullptr;
+    ElaCheckBox *sessionsClickToggle_ = nullptr;
+    QStackedWidget *sessionsBody_ = nullptr;
+    ElaTableView *sessionsTable_ = nullptr;
+    QStandardItemModel *sessionsModel_ = nullptr;
+    ElaText *sessionsSummary_ = nullptr, *sessionsEmpty_ = nullptr, *sessionsStatus_ = nullptr;
+    ElaPushButton *sessionsSelectAll_ = nullptr, *sessionsRename_ = nullptr, *sessionsAutoTitle_ = nullptr,
+                  *sessionsDelete_ = nullptr, *sessionsClearIdle_ = nullptr;
+    QSet<QString> checkedSessions_;
     AgentProvider selectedProvider_;
     QList<AgentModelEntry> editableModels_;
     AgentService::Review review_;

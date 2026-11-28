@@ -1,6 +1,7 @@
 #include "AgentSettingsTab.h"
 
 #include "../../Ui/UiWidgets.h"
+#include <ElaCheckBox.h>
 #include <ElaComboBox.h>
 #include <ElaLineEdit.h>
 #include <ElaListView.h>
@@ -10,14 +11,18 @@
 #include <ElaScrollPageArea.h>
 #include <ElaSpinBox.h>
 #include <ElaTabWidget.h>
+#include <ElaTableView.h>
 #include <ElaText.h>
 #include <ElaToggleSwitch.h>
+#include <QAbstractScrollArea>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QHeaderView>
 #include <QJsonDocument>
 #include <QPointer>
 #include <QScopedValueRollback>
+#include <QScrollBar>
 #include <QSignalBlocker>
 #include <QStackedWidget>
 #include <QStandardItemModel>
@@ -28,6 +33,16 @@
 namespace
 {
 using namespace Qt::StringLiterals;
+constexpr int providersPageIndex = 0;
+constexpr int workspacesPageIndex = 1;
+constexpr int sessionsPageIndex = 2;
+constexpr int draftsPageIndex = 3;
+
+QString workspaceDisplayName(const QString &path)
+{
+    const auto name = QFileInfo(path).fileName();
+    return path.isEmpty() ? u"无工作区"_s : name.isEmpty() ? path : name;
+}
 
 ElaListView *list(QWidget *parent, QStandardItemModel *&model, const QString &description)
 {
@@ -100,36 +115,49 @@ AgentSettingsTab::AgentSettingsTab(AgentService *service, QWidget *parent)
     pivot_ = new ElaPivot(this);
     pivot_->appendPivot(u"模型供应商"_s);
     pivot_->appendPivot(u"工作区与历史"_s);
+    pivot_->appendPivot(u"会话管理"_s);
     if (!service_->draftSessions().isEmpty()) pivot_->appendPivot(u"旧草稿恢复"_s);
     pivot_->setPivotSpacing(20);
     layout->addWidget(pivot_);
     pages_ = new QStackedWidget(this);
     pages_->addWidget(makeProviders());
     pages_->addWidget(makeWorkspaces());
+    pages_->addWidget(makeSessions());
     pages_->addWidget(makeDrafts());
     layout->addWidget(pages_, 1);
     openProviders();
     connect(pivot_, &ElaPivot::pivotClicked, this, [this](int index) {
-        if (index != 0) cancelProviderRequests();
-        pages_->setCurrentIndex(index);
-        if (index == 2) reloadDrafts();
+        if (index != providersPageIndex) cancelProviderRequests();
+        switchPage(index);
+        if (index == sessionsPageIndex) reloadSessions();
+        else if (index == draftsPageIndex) reloadDrafts();
     });
     connect(service_, &AgentService::busyChanged, this, [this](bool busy) {
         updateControls();
-        if (!busy && pages_->currentIndex() == 2) reloadDrafts();
+        reloadSessions();
+        if (!busy && pages_->currentIndex() == draftsPageIndex) reloadDrafts();
     });
     connect(service_, &AgentService::sessionsChanged, this, [this] {
-        if (pages_->currentIndex() == 2 && !service_->busy()) reloadDrafts();
+        reloadSessions();
+        if (pages_->currentIndex() == draftsPageIndex && !service_->busy()) reloadDrafts();
+    });
+    connect(service_, &AgentService::titleGenerated, this, [this](const QString &, const QString &error) {
+        showStatus(sessionsStatus_, error.isEmpty() ? u"会话标题已更新"_s : error);
     });
     connect(service_, &AgentService::draftChanged, this, [this] {
-        if (pages_->currentIndex() == 2) reloadDrafts();
+        if (pages_->currentIndex() == draftsPageIndex) reloadDrafts();
     });
     connect(service_, &AgentService::storageError, this, [this](const QString &message) {
-        showStatus(pages_->currentIndex() == 2 ? draftStatus_ :
-                   pages_->currentIndex() == 1 ? workspaceStatus_ : providerStatus_, message);
+        const int current = pages_->currentIndex();
+        showStatus(current == draftsPageIndex ? draftStatus_
+                   : current == sessionsPageIndex ? sessionsStatus_
+                   : current == workspacesPageIndex ? workspaceStatus_
+                                                    : providerStatus_,
+                   message);
     });
     reloadProviders();
     reloadWorkspaces();
+    reloadSessions();
     reloadDrafts();
     if (!service_->migrationError().isEmpty())
         showStatus(providerStatus_, u"旧连接可继续使用，迁移暂未写入：%1"_s.arg(service_->migrationError()));
@@ -523,6 +551,335 @@ void AgentSettingsTab::reloadWorkspaces()
     selectId(workspaces_, workspacesModel_, selected);
 }
 
+QWidget *AgentSettingsTab::makeSessions()
+{
+    auto *page = new QWidget;
+    auto *layout = section(page, u"会话管理"_s);
+    layout->setSpacing(8);
+
+    auto *header = new QHBoxLayout;
+    header->setSpacing(8);
+    header->addWidget(AppUi::text(u"筛选、重命名、AI 生成标题，或勾选多个会话批量删除。"_s, page, 12), 1);
+    sessionsSummary_ = AppUi::text({}, page, 12);
+    header->addWidget(sessionsSummary_);
+    layout->addLayout(header);
+
+    auto *filters = new QHBoxLayout;
+    filters->setSpacing(8);
+    sessionsSearch_ = new ElaLineEdit(page);
+    sessionsSearch_->setPlaceholderText(u"搜索会话名称或工作区…"_s);
+    sessionsSearch_->setClearButtonEnabled(true);
+    sessionsWorkspace_ = new ElaComboBox(page);
+    sessionsWorkspace_->setMinimumWidth(140);
+    sessionsClickToggle_ = new ElaCheckBox(u"点击行勾选"_s, page);
+    sessionsClickToggle_->setToolTip(u"开启后点击任意列即可勾选或取消勾选会话"_s);
+    filters->addWidget(sessionsSearch_, 1);
+    filters->addWidget(sessionsWorkspace_);
+    filters->addWidget(sessionsClickToggle_);
+    layout->addLayout(filters);
+
+    sessionsBody_ = new QStackedWidget(page);
+    sessionsBody_->setMinimumHeight(160);
+    sessionsBody_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    auto *tableHost = new QWidget(sessionsBody_);
+    auto *tableLayout = new QVBoxLayout(tableHost);
+    tableLayout->setContentsMargins(0, 0, 0, 0);
+    sessionsTable_ = AppUi::table(tableLayout, {u"选择"_s, u"会话名称"_s, u"工作区"_s, u"消息"_s, u"状态"_s}, sessionsModel_);
+    sessionsTable_->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    sessionsTable_->setMinimumHeight(160);
+    sessionsTable_->setMaximumHeight(QWIDGETSIZE_MAX);
+    sessionsTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    sessionsTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Fixed);
+    sessionsTable_->setColumnWidth(0, 48);
+    sessionsTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    sessionsTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    sessionsTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    sessionsTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+
+    sessionsEmpty_ = AppUi::text(u"暂无匹配的会话"_s, sessionsBody_, 13);
+    sessionsEmpty_->setAlignment(Qt::AlignCenter);
+
+    sessionsBody_->addWidget(sessionsEmpty_);
+    sessionsBody_->addWidget(tableHost);
+    layout->addWidget(sessionsBody_, 1);
+
+    auto *actions = new QHBoxLayout;
+    actions->setSpacing(8);
+    sessionsSelectAll_ = AppUi::button(u"全选"_s, page);
+    sessionsRename_ = AppUi::button(u"重命名"_s, page);
+    sessionsAutoTitle_ = AppUi::button(u"AI 生成标题"_s, page);
+    sessionsDelete_ = AppUi::button(u"删除所选"_s, page);
+    sessionsClearIdle_ = AppUi::button(u"清理闲置"_s, page);
+    for (auto *btn : {sessionsSelectAll_, sessionsRename_, sessionsAutoTitle_, sessionsDelete_, sessionsClearIdle_}) {
+        btn->setMinimumWidth(68);
+        actions->addWidget(btn);
+    }
+    actions->addStretch();
+    layout->addLayout(actions);
+
+    sessionsStatus_ = AppUi::text({}, page, 12);
+    sessionsStatus_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    sessionsStatus_->hide();
+    layout->addWidget(sessionsStatus_);
+
+    connect(sessionsSearch_, &ElaLineEdit::textChanged, this, &AgentSettingsTab::reloadSessions);
+    connect(sessionsWorkspace_, &ElaComboBox::currentIndexChanged, this, &AgentSettingsTab::reloadSessions);
+    connect(sessionsTable_->selectionModel(), &QItemSelectionModel::selectionChanged,
+            this, &AgentSettingsTab::updateSessionActions);
+    connect(sessionsTable_, &ElaTableView::clicked, this, [this](const QModelIndex &index) {
+        if (index.column() != 0 && !sessionsClickToggle_->isChecked()) return;
+        const auto id = index.siblingAtColumn(1).data(Qt::UserRole).toString();
+        const auto activeId = service_->busy() ? service_->activeSession() : QString();
+        if (id.isEmpty() || id == activeId) return;
+        if (checkedSessions_.contains(id)) checkedSessions_.remove(id);
+        else checkedSessions_.insert(id);
+        if (auto *cell = sessionsTable_->indexWidget(index.siblingAtColumn(0))) {
+            if (auto *box = cell->findChild<ElaCheckBox *>()) {
+                const QSignalBlocker block(box);
+                box->setChecked(checkedSessions_.contains(id));
+            }
+        }
+        updateSessionActions();
+    });
+    connect(sessionsTable_, &ElaTableView::doubleClicked, this, [this](const QModelIndex &index) {
+        if (index.column() == 0 || sessionsClickToggle_->isChecked()) return;
+        const auto id = index.siblingAtColumn(1).data(Qt::UserRole).toString();
+        const auto *item = service_->session(id);
+        if (!item || (service_->busy() && service_->activeSession() == id)) return;
+        auto *dialog = new AppUi::FormDialog(this, u"重命名会话"_s);
+        auto *name = dialog->line(u"会话名称"_s, item->title);
+        dialog->submit = [this, id, name] {
+            if (name->text().trimmed().isEmpty()) return u"请输入名称"_s;
+            service_->renameSession(id, name->text());
+            return QString();
+        };
+        AppUi::run(dialog);
+    });
+    connect(sessionsSelectAll_, &ElaPushButton::clicked, this, [this] {
+        const auto activeId = service_->busy() ? service_->activeSession() : QString();
+        QStringList idleVisible;
+        for (int row = 0; row < sessionsModel_->rowCount(); ++row) {
+            const auto id = sessionsModel_->index(row, 1).data(Qt::UserRole).toString();
+            if (!id.isEmpty() && id != activeId) idleVisible.append(id);
+        }
+        const bool allChecked = !idleVisible.isEmpty() && std::all_of(idleVisible.cbegin(), idleVisible.cend(),
+            [this](const QString &id) { return checkedSessions_.contains(id); });
+        for (const auto &id : idleVisible) {
+            if (allChecked) checkedSessions_.remove(id);
+            else checkedSessions_.insert(id);
+        }
+        for (int row = 0; row < sessionsModel_->rowCount(); ++row) {
+            const auto id = sessionsModel_->index(row, 1).data(Qt::UserRole).toString();
+            if (auto *cell = sessionsTable_->indexWidget(sessionsModel_->index(row, 0))) {
+                if (auto *box = cell->findChild<ElaCheckBox *>()) {
+                    const QSignalBlocker block(box);
+                    box->setChecked(checkedSessions_.contains(id));
+                }
+            }
+        }
+        updateSessionActions();
+    });
+    connect(sessionsRename_, &ElaPushButton::clicked, this, [this] {
+        const auto targets = targetSessionIds();
+        if (targets.size() != 1) return;
+        const auto id = targets.first();
+        const auto *item = service_->session(id);
+        if (!item || (service_->busy() && service_->activeSession() == id)) return;
+        auto *dialog = new AppUi::FormDialog(this, u"重命名会话"_s);
+        auto *name = dialog->line(u"会话名称"_s, item->title);
+        dialog->submit = [this, id, name] {
+            if (name->text().trimmed().isEmpty()) return u"请输入名称"_s;
+            service_->renameSession(id, name->text());
+            return QString();
+        };
+        AppUi::run(dialog);
+    });
+    connect(sessionsAutoTitle_, &ElaPushButton::clicked, this, [this] {
+        const auto targets = targetSessionIds();
+        if (targets.size() != 1) return;
+        QString error;
+        if (!service_->regenerateTitle(targets.first(), &error)) showStatus(sessionsStatus_, error);
+        else showStatus(sessionsStatus_, u"正在生成会话标题…"_s);
+    });
+    connect(sessionsDelete_, &ElaPushButton::clicked, this, [this] {
+        const auto activeId = service_->busy() ? service_->activeSession() : QString();
+        QStringList deletable;
+        for (const auto &id : targetSessionIds())
+            if (id != activeId && service_->session(id)) deletable.append(id);
+        if (deletable.isEmpty()) return;
+        const auto message = deletable.size() == 1
+            ? u"删除所选会话的本地历史？"_s
+            : u"删除所选 %1 个会话的本地历史？"_s.arg(deletable.size());
+        if (AppUi::confirm(this, u"删除会话"_s, message)) {
+            for (const auto &id : deletable) checkedSessions_.remove(id);
+            service_->deleteSessions(deletable);
+            showStatus(sessionsStatus_, u"已删除 %1 个会话"_s.arg(deletable.size()));
+        }
+    });
+    connect(sessionsClearIdle_, &ElaPushButton::clicked, this, [this] {
+        const auto activeId = service_->busy() ? service_->activeSession() : QString();
+        QStringList idle;
+        for (int row = 0; row < sessionsModel_->rowCount(); ++row) {
+            const auto id = sessionsModel_->index(row, 1).data(Qt::UserRole).toString();
+            if (!id.isEmpty() && id != activeId) idle.append(id);
+        }
+        if (idle.isEmpty()) return;
+        if (AppUi::confirm(this, u"清理闲置会话"_s, u"删除当前列表中全部 %1 个闲置会话的本地历史？"_s.arg(idle.size()))) {
+            for (const auto &id : idle) checkedSessions_.remove(id);
+            service_->deleteSessions(idle);
+            showStatus(sessionsStatus_, u"已清理 %1 个闲置会话"_s.arg(idle.size()));
+        }
+    });
+    return page;
+}
+
+void AgentSettingsTab::reloadSessions()
+{
+    if (!sessionsModel_ || !sessionsWorkspace_) return;
+    const auto activeId = service_->busy() ? service_->activeSession() : QString();
+    QSet<QString> validIdle;
+    for (const auto &item : service_->sessions())
+        if (item.id != activeId) validIdle.insert(item.id);
+    checkedSessions_.intersect(validIdle);
+
+    QStringList selectedRows;
+    if (sessionsTable_->selectionModel()) {
+        for (const auto &idx : sessionsTable_->selectionModel()->selectedRows())
+            selectedRows.append(idx.siblingAtColumn(1).data(Qt::UserRole).toString());
+    }
+
+    const auto currentFilter = sessionsWorkspace_->currentData().toString();
+    {
+        const QSignalBlocker block(sessionsWorkspace_);
+        sessionsWorkspace_->clear();
+        sessionsWorkspace_->addItem(u"全部工作区"_s, u"__all__"_s);
+        QStringList seen;
+        for (const auto &item : service_->sessions())
+            if (!seen.contains(item.workspace)) seen.append(item.workspace);
+        for (const auto &ws : seen)
+            sessionsWorkspace_->addItem(workspaceDisplayName(ws), ws);
+        const int idx = sessionsWorkspace_->findData(currentFilter.isEmpty() ? u"__all__"_s : currentFilter);
+        sessionsWorkspace_->setCurrentIndex(qMax(0, idx));
+    }
+
+    const auto filterWs = sessionsWorkspace_->currentData().toString();
+    const auto query = sessionsSearch_->text().trimmed();
+    sessionsModel_->removeRows(0, sessionsModel_->rowCount());
+
+    const auto &all = service_->sessions();
+    for (const auto &item : all) {
+        if (filterWs != u"__all__"_s && item.workspace != filterWs) continue;
+        const auto wsLabel = workspaceDisplayName(item.workspace);
+        if (!query.isEmpty() && !item.title.contains(query, Qt::CaseInsensitive) &&
+            !wsLabel.contains(query, Qt::CaseInsensitive))
+            continue;
+        int userCount = 0;
+        for (const auto &ev : item.events)
+            if (ev.toObject().value(u"kind"_s).toString() == u"user"_s) ++userCount;
+        const auto status = item.id == activeId ? u"运行中"_s
+                          : item.resumable ? u"可继续"_s
+                          : u"空闲"_s;
+        QList<QStandardItem *> row;
+        auto *checkCell = new QStandardItem;
+        checkCell->setData(item.id, Qt::UserRole);
+        row.append(checkCell);
+        for (const auto &val : {item.title, wsLabel, u"%1 轮"_s.arg(userCount), status}) {
+            auto *cell = new QStandardItem(val);
+            cell->setData(item.id, Qt::UserRole);
+            cell->setToolTip(val);
+            row.append(cell);
+        }
+        sessionsModel_->appendRow(row);
+
+        const int rowIndex = sessionsModel_->rowCount() - 1;
+        auto *holder = new QWidget(sessionsTable_);
+        auto *holderLayout = new QHBoxLayout(holder);
+        holderLayout->setContentsMargins(0, 0, 0, 0);
+        holderLayout->setAlignment(Qt::AlignCenter);
+        auto *box = new ElaCheckBox(holder);
+        box->setChecked(checkedSessions_.contains(item.id));
+        box->setEnabled(item.id != activeId);
+        if (item.id == activeId) box->setToolTip(u"运行中的会话不可多选删除"_s);
+        connect(box, &ElaCheckBox::toggled, this, [this, id = item.id](bool checked) {
+            if (checked) checkedSessions_.insert(id);
+            else checkedSessions_.remove(id);
+            updateSessionActions();
+        });
+        holderLayout->addWidget(box);
+        sessionsTable_->setIndexWidget(sessionsModel_->index(rowIndex, 0), holder);
+    }
+
+    for (int row = 0; row < sessionsModel_->rowCount(); ++row) {
+        if (selectedRows.contains(sessionsModel_->index(row, 1).data(Qt::UserRole).toString()))
+            sessionsTable_->selectionModel()->select(sessionsModel_->index(row, 0),
+                                                     QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    }
+    const int shown = sessionsModel_->rowCount();
+    sessionsSummary_->setText(shown == all.size() ? u"共 %1 个会话"_s.arg(all.size())
+                                                  : u"显示 %1 / %2 个会话"_s.arg(shown).arg(all.size()));
+    if (sessionsBody_) sessionsBody_->setCurrentIndex(shown > 0 ? 1 : 0);
+    updateSessionActions();
+}
+
+QStringList AgentSettingsTab::targetSessionIds() const
+{
+    if (!checkedSessions_.isEmpty()) {
+        QStringList ids;
+        for (int row = 0; row < sessionsModel_->rowCount(); ++row) {
+            const auto id = sessionsModel_->index(row, 1).data(Qt::UserRole).toString();
+            if (checkedSessions_.contains(id)) ids.append(id);
+        }
+        for (const auto &id : std::as_const(checkedSessions_))
+            if (!ids.contains(id)) ids.append(id);
+        return ids;
+    }
+    QStringList selected;
+    if (sessionsTable_ && sessionsTable_->selectionModel()) {
+        for (const auto &idx : sessionsTable_->selectionModel()->selectedRows()) {
+            const auto id = idx.siblingAtColumn(1).data(Qt::UserRole).toString();
+            if (!id.isEmpty()) selected.append(id);
+        }
+    }
+    return selected;
+}
+
+void AgentSettingsTab::updateSessionActions()
+{
+    if (!sessionsTable_) return;
+    const bool busy = service_->busy();
+    const auto activeId = busy ? service_->activeSession() : QString();
+    int idleVisible = 0, checkedVisible = 0;
+    for (int row = 0; row < sessionsModel_->rowCount(); ++row) {
+        const auto id = sessionsModel_->index(row, 1).data(Qt::UserRole).toString();
+        if (!id.isEmpty() && id != activeId) {
+            ++idleVisible;
+            if (checkedSessions_.contains(id)) ++checkedVisible;
+        }
+    }
+    const bool allChecked = idleVisible > 0 && checkedVisible == idleVisible;
+    sessionsSelectAll_->setText(allChecked ? u"取消全选"_s : u"全选"_s);
+    sessionsSelectAll_->setEnabled(idleVisible > 0);
+
+    const auto targets = targetSessionIds();
+    const bool single = targets.size() == 1;
+    const auto *singleItem = single ? service_->session(targets.first()) : nullptr;
+    bool hasUserMessage = false;
+    if (singleItem) {
+        for (const auto &ev : singleItem->events)
+            if (ev.toObject().value(u"kind"_s).toString() == u"user"_s) { hasUserMessage = true; break; }
+    }
+    int deletableCount = 0;
+    for (const auto &id : targets)
+        if (id != activeId && service_->session(id)) ++deletableCount;
+
+    sessionsRename_->setEnabled(single && targets.first() != activeId);
+    sessionsAutoTitle_->setEnabled(single && !busy && hasUserMessage);
+    sessionsDelete_->setText(checkedSessions_.isEmpty() ? u"删除所选"_s : u"删除所选 (%1)"_s.arg(deletableCount));
+    sessionsDelete_->setEnabled(deletableCount > 0);
+    sessionsClearIdle_->setEnabled(idleVisible > 0);
+}
+
 QWidget *AgentSettingsTab::makeDrafts()
 {
     auto *page = new QWidget;
@@ -561,18 +918,35 @@ QWidget *AgentSettingsTab::makeDrafts()
     return page;
 }
 
+void AgentSettingsTab::switchPage(int index)
+{
+    if (!pages_) return;
+    for (int i = 0; i < pages_->count(); ++i) {
+        if (auto *page = pages_->widget(i))
+            page->setSizePolicy(QSizePolicy::Expanding, i == index ? QSizePolicy::Preferred : QSizePolicy::Ignored);
+    }
+    pages_->setCurrentIndex(index);
+    pages_->updateGeometry();
+    for (auto *parent = pages_->parentWidget(); parent && parent != this; parent = parent->parentWidget()) {
+        if (auto *scroll = qobject_cast<QAbstractScrollArea *>(parent)) {
+            scroll->verticalScrollBar()->setValue(0);
+            break;
+        }
+    }
+}
+
 void AgentSettingsTab::openDraft(const QString &session)
 {
     cancelProviderRequests();
-    pivot_->setCurrentIndex(2);
-    pages_->setCurrentIndex(2);
+    pivot_->setCurrentIndex(draftsPageIndex);
+    switchPage(draftsPageIndex);
     reloadDrafts(session);
 }
 
 void AgentSettingsTab::openProviders()
 {
-    pivot_->setCurrentIndex(0);
-    pages_->setCurrentIndex(0);
+    pivot_->setCurrentIndex(providersPageIndex);
+    switchPage(providersPageIndex);
 }
 
 void AgentSettingsTab::hideEvent(QHideEvent *event)
@@ -644,8 +1018,9 @@ void AgentSettingsTab::updateControls()
     testTool_->setEnabled(canTest);
     for (auto *field : std::initializer_list<QWidget *>{preset_, name_, address_, key_, models_, providers_})
         field->setEnabled(!fetching_ && !testing_);
-    if (pages_ && pages_->count() == 3) {
+    if (publish_) {
         publish_->setEnabled(!busy && !publishing_ && !currentId(drafts_).isEmpty() && service_->canPublish(currentId(drafts_)));
     }
+    updateSessionActions();
 }
 
